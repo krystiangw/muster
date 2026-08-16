@@ -40,9 +40,10 @@ we send you the link.</p>
   </label>
   <div><button type="submit">Send me the link</button></div>
 </form>
-<p style="color:var(--muted);font-size:14.5px;margin-top:20px">The link does not
-expire, and anyone holding it can answer your agents on your behalf. Treat it
-like a password.</p>
+<p style="color:var(--muted);font-size:14.5px;margin-top:20px">Anyone holding the
+link can answer your agents on your behalf, so treat it like a password. Asking
+for a new one turns the old one off, which is also how you deal with a link you
+have lost.</p>
 `;
     return reply
       .type('text/html; charset=utf-8')
@@ -72,6 +73,10 @@ like a password.</p>
     const projects = await store.projects.countDocuments({ claimedBy: email });
     if (projects > 0) {
       const token = newToken();
+      // Asking for a link invalidates the previous one. That is the whole
+      // recovery story for a link that leaked or was lost: ask again, and the
+      // old one stops working.
+      await store.operatorTokens.deleteMany({ email });
       await store.operatorTokens.insertOne({
         _id: newId('o'),
         email,

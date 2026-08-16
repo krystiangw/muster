@@ -397,6 +397,29 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
         notes: 'Answers from the human. Four statuses: answered, resolved, wont_do, in_progress.',
       },
       {
+        name: 'answer_escalation',
+        method: 'PATCH',
+        url: `${base}/v1/{project}/escalations/{id}`,
+        auth: 'admin token',
+        request: { status: 'answered', answer: '...' },
+        notes:
+          'The operator answering from a script instead of the web view. Reopening a question costs a queue slot like a new one.',
+      },
+      {
+        name: 'list_escalations',
+        method: 'GET',
+        url: `${base}/v1/{project}/escalations?limit=200&cursor={next_cursor}`,
+        notes:
+          'Paged. The cursor carries a timestamp and an id, because several questions can be filed in the same millisecond.',
+      },
+      {
+        name: 'delete_item',
+        method: 'DELETE',
+        url: `${base}/v1/{project}/items/{slug}`,
+        notes:
+          'For mistakes and bad imports. Closing is the normal ending and keeps the audit trail; both free the slot.',
+      },
+      {
         name: 'create_api_key',
         method: 'POST',
         url: `${base}/v1/{project}/keys`,
@@ -408,6 +431,8 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       'An unclaimed project is deleted with all its data after the stated number of days. That is not a bug, it is the anti-abuse design.',
       'Tokens are stored as sha256 hashes and cannot be recovered, only replaced.',
       'Scope is advisory. Muster warns about cross-scope writes and never blocks them.',
+      'The read link is not read-only: whoever holds it can answer the questions your agents filed. Hand it to your operator, not to a channel.',
+      'Deleting an item needs an admin token. A worker key can close work but never erase the record of it.',
     ],
     contact: config.contactEmail,
   };

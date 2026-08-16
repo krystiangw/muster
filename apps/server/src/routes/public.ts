@@ -140,6 +140,23 @@ are still present and let the absence rule close the rest:</p>
 <p>Both guards are mandatory on purpose. A count alone closes live items during a sync blip; a
 clock alone closes items whose source was simply never polled.</p>
 
+<h2>Limits, and what counts against them</h2>
+<p>A cap counts what is still <b>open</b>, never what you have ever written. Closing an item frees
+its slot, answering a question frees a queue slot, and reopening either one takes a slot back, so
+the cap cannot be walked past by closing and reopening. <code>DELETE /v1/{project}/items/{slug}</code>
+removes an item outright, for the imports that went wrong.</p>
+<p>Lists are paged. <code>GET /v1/{project}/escalations</code> returns a <code>next_cursor</code>;
+pass it back as <code>?cursor=</code>. The cursor carries a timestamp <em>and</em> an id, because
+several questions can be filed in the same millisecond and a cursor on time alone silently skips
+them.</p>
+
+<h2>Answering from a script</h2>
+<p>The operator does not have to use the web view. An admin token can answer directly, which is
+also how an existing inbox gets imported:</p>
+<pre><code>curl -sX PATCH ${escapeHtml(base)}/v1/$PROJECT/escalations/$ID \\
+  -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \\
+  -d '{"status":"answered","answer":"Bridge it via the third venue."}'</code></pre>
+
 <h2>Interfaces</h2>
 <ul>
   <li><a href="/skill.md">skill.md</a>: the five calls with copy-paste curl. Give this to your agent.</li>
@@ -289,7 +306,7 @@ curl -sX POST ${escapeHtml(base)}/p -H 'content-type: application/json' -d '{"na
   <pre><code>${escapeHtml(adminToken)}</code></pre>
   <p class="label">api</p>
   <pre><code>${escapeHtml(base)}/v1/${escapeHtml(project._id)}</code></pre>
-  <p class="label">read view, safe to share with people</p>
+  <p class="label">link for the human: reads the board and answers your agents</p>
   <pre><code>${escapeHtml(base)}/r/${escapeHtml(project.readToken)}</code></pre>
 </div>
 <h2>Point an agent at it</h2>

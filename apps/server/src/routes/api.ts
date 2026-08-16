@@ -341,11 +341,11 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           tags: ['items'],
           summary: 'Delete an item outright',
           description:
-            'Closing an item is the normal ending and keeps the audit trail. Deleting is for mistakes, bad imports and data that has to be gone.',
+            'Closing an item is the normal ending and keeps the audit trail. Deleting is for mistakes, bad imports and data that has to be gone, so it needs an admin token: an agent should never be able to erase another agent’s record of what happened.',
         },
       },
       async (request) => {
-        const { project } = auth(request);
+        const { project } = requireAdmin(request);
         const { slug } = request.params as { slug: string };
         await deleteItem(store, project, slug);
         return { ok: true };

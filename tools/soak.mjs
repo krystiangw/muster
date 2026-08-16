@@ -95,8 +95,10 @@ const items = (await (await fetch(`${api}/items?limit=200`, { headers })).json()
 
 const open = items.filter((item) => item.status !== 'done' && item.status !== 'dropped');
 const slugs = new Set(items.map((item) => item.slug));
-const doubleClaims = items.filter(
-  (item) => item.claim && new Date(item.claim.expires_at) < new Date(0),
+// A claim still attached to an item after its own expiry means the sweep never
+// released it, which is the failure that blocks work behind a dead session.
+const expiredClaims = items.filter(
+  (item) => item.claim && new Date(item.claim.expires_at) < new Date(),
 );
 
 console.log(`${ROUNDS * 8} operations in ${(elapsed / 1000).toFixed(1)}s`, counters);
@@ -109,7 +111,9 @@ const problems = [];
 if (items.length !== slugs.size) problems.push('a slug became more than one item');
 if (summary.counts.items !== open.length) problems.push('counter disagrees with the collection');
 if (summary.counts.items < 0) problems.push('counter went negative');
-if (doubleClaims.length > 0) problems.push('a claim outlived its own expiry');
+if (expiredClaims.length > 0) {
+  problems.push(`${expiredClaims.length} claim(s) outlived their expiry and were never released`);
+}
 if (errors.length > 0) problems.push('unexpected errors');
 
 console.log(problems.length === 0 ? '\nOK: every invariant held.' : `\nPROBLEMS: ${problems.join('; ')}`);
