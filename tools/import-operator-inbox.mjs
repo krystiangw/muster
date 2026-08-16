@@ -94,6 +94,17 @@ async function api(pathname, options = {}, token = null, attempt = 0) {
   // handed. A bulk import is exactly the traffic that hits it.
   if (response.status === 429 && attempt < 20) {
     const wait = Number(response.headers.get('retry-after') ?? body.retry_after ?? 5);
+    // Waiting out a write limit is a few seconds and worth doing quietly.
+    // Waiting out the project creation limit is most of an hour, because
+    // creating nine projects from one address in one go is exactly the traffic
+    // that limit exists to slow down. Say so and stop; the run resumes.
+    if (wait > 120) {
+      console.error(`\n  Rate limited for ${Math.round(wait / 60)} more minutes on ${pathname}.`);
+      console.error('  Creating this many projects at once is what the per-address limit is for.');
+      console.error('  On your own instance, raise LIMIT_CREATE_PROJECTS_PER_HOUR and restart it;');
+      console.error('  on the hosted one, run this again later. Nothing already imported is lost.');
+      process.exit(1);
+    }
     console.log(`  rate limited, waiting ${wait}s before continuing`);
     await sleep((wait + 1) * 1000);
     return api(pathname, options, token, attempt + 1);
