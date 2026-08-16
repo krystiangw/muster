@@ -75,7 +75,9 @@ function parseFile(raw) {
   };
 }
 
-async function api(pathname, options = {}, token = null) {
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function api(pathname, options = {}, token = null, attempt = 0) {
   const response = await fetch(`${base}${pathname}`, {
     ...options,
     headers: {
@@ -86,6 +88,17 @@ async function api(pathname, options = {}, token = null) {
   });
   const text = await response.text();
   const body = text ? JSON.parse(text) : {};
+
+  // Muster publishes a write limit and answers 429 with retry-after, so an
+  // importer that crashes on one is an importer ignoring the contract it was
+  // handed. A bulk import is exactly the traffic that hits it.
+  if (response.status === 429 && attempt < 20) {
+    const wait = Number(response.headers.get('retry-after') ?? body.retry_after ?? 5);
+    console.log(`  rate limited, waiting ${wait}s before continuing`);
+    await sleep((wait + 1) * 1000);
+    return api(pathname, options, token, attempt + 1);
+  }
+
   if (!response.ok) {
     throw new Error(`${options.method ?? 'GET'} ${pathname} -> ${response.status} ${text.slice(0, 200)}`);
   }

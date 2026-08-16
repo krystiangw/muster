@@ -25,25 +25,33 @@ export interface OAuthDeps {
 export function registerOAuth(app: FastifyInstance, deps: OAuthDeps): void {
   const { store, config, limiter } = deps;
 
-  app.get('/.well-known/oauth-authorization-server', async () => ({
-    issuer: config.baseUrl,
-    registration_endpoint: `${config.baseUrl}/oauth/register`,
-    token_endpoint: `${config.baseUrl}/oauth/token`,
-    token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
-    grant_types_supported: ['client_credentials'],
-    response_types_supported: [],
-    scopes_supported: ['project'],
-    service_documentation: `${config.baseUrl}/agent-signup.md`,
-    registration_endpoint_auth_methods_supported: ['none'],
-  }));
+  app.get(
+    '/.well-known/oauth-authorization-server',
+    { schema: { tags: ['oauth'], summary: 'Authorization server metadata' } },
+    async () => ({
+      issuer: config.baseUrl,
+      registration_endpoint: `${config.baseUrl}/oauth/register`,
+      token_endpoint: `${config.baseUrl}/oauth/token`,
+      token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
+      grant_types_supported: ['client_credentials'],
+      response_types_supported: [],
+      scopes_supported: ['project'],
+      service_documentation: `${config.baseUrl}/agent-signup.md`,
+      registration_endpoint_auth_methods_supported: ['none'],
+    }),
+  );
 
-  app.get('/.well-known/oauth-protected-resource', async () => ({
-    resource: config.baseUrl,
-    authorization_servers: [config.baseUrl],
-    bearer_methods_supported: ['header'],
-    resource_documentation: `${config.baseUrl}/skill.md`,
-    scopes_supported: ['project'],
-  }));
+  app.get(
+    '/.well-known/oauth-protected-resource',
+    { schema: { tags: ['oauth'], summary: 'Protected resource metadata' } },
+    async () => ({
+      resource: config.baseUrl,
+      authorization_servers: [config.baseUrl],
+      bearer_methods_supported: ['header'],
+      resource_documentation: `${config.baseUrl}/skill.md`,
+      scopes_supported: ['project'],
+    }),
+  );
 
   app.post(
     '/oauth/register',
