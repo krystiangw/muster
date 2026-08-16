@@ -465,6 +465,38 @@ describe('the open item cap', () => {
     assert.equal((await harness.store.projects.findOne({ _id: project.id }))!.counts.items, 0);
   });
 
+  it('skips the overcount repair when a write lands while it is counting', async () => {
+    const { correctOvercount } = await import('../src/hygiene.js');
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'one', title: 'one', actor: 'a' });
+
+    // Simulate the race directly: the repair reads the counter, and a create
+    // increments it before the write-back. The guard has to make the repair
+    // stand down, because lowering it here would undercount forever.
+    const original = harness.store.items.countDocuments.bind(harness.store.items);
+    let raced = false;
+    harness.store.items.countDocuments = (async (...callArgs: unknown[]) => {
+      const result = await (original as (...a: unknown[]) => Promise<number>)(...callArgs);
+      if (!raced) {
+        raced = true;
+        await harness.store.projects.updateOne(
+          { _id: project.id },
+          { $inc: { 'counts.items': 5 } },
+        );
+      }
+      return result;
+    }) as typeof harness.store.items.countDocuments;
+
+    try {
+      const repaired = await correctOvercount(harness.store, project.id);
+      assert.equal(repaired, false, 'a repair that raced a write must not apply');
+      const counts = await harness.store.projects.findOne({ _id: project.id });
+      assert.equal(counts!.counts.items, 6, 'the concurrent increment survives');
+    } finally {
+      harness.store.items.countDocuments = original;
+    }
+  });
+
   it('orders the operator queue by urgency, not by alphabet', async () => {
     const project = await createProject(harness);
     for (const [priority, question] of [

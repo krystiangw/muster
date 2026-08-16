@@ -364,14 +364,17 @@ export async function upsertItem(
    *    `open` away from meaningless;
    *  - **the counter moves after the write succeeds, never before it.** An
    *    earlier version reserved the slot first, which is exact under
-   *    concurrency but fails in the wrong direction: a process that dies
-   *    between the reservation and the insert leaves a slot charged to nobody,
-   *    and enough of those brick a project against its own quota with no safe
-   *    way to recount while it is being written to. Counting afterwards can
-   *    only ever undercount, and an undercount hands out slightly more room
-   *    than it should, which is the harmless mistake. The cost is that a burst
-   *    of simultaneous creates can overshoot the cap by roughly the size of the
+   *    concurrency and wrong under failure: a process dying between the
+   *    reservation and the insert leaves a slot charged to nobody. Charging
+   *    afterwards means a crash on the create path hands out an extra slot
+   *    instead, which is the harmless direction. The cost is that a burst of
+   *    simultaneous creates can overshoot the cap by roughly the size of the
    *    burst before the next one is refused.
+   *
+   * That still leaves one way to drift the wrong way: closing or deleting
+   * changes the document first and gives the slot back second, so a crash in
+   * between overcounts. `correctOvercount` in the sweep lowers a counter to a
+   * number it has actually seen, and never raises one.
    */
   const addSlots = async (delta: number): Promise<void> => {
     if (delta === 0) return;

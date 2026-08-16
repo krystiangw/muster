@@ -240,22 +240,34 @@ export async function resolveAbsent(
  * overcount is repaired within a minute instead of lasting forever.
  */
 export async function correctOvercount(store: Store, projectId: string): Promise<boolean> {
+  // The counter is read before the count and used as the guard afterwards. A
+  // create landing while we count changes it, the guard stops matching and the
+  // repair skips itself. Without that, the repair would overwrite the new
+  // increment with a number taken before it existed, and since it never raises
+  // a counter, that undercount would be permanent.
+  const before = await store.projects.findOne({ _id: projectId }, { projection: { counts: 1 } });
+  if (!before) return false;
+
   const [openItems, openEscalations] = await Promise.all([
     store.items.countDocuments({ projectId, status: { $nin: [...TERMINAL_STATUSES] } }),
     store.escalations.countDocuments({ projectId, status: 'open' }),
   ]);
 
-  const [items, escalations] = await Promise.all([
-    store.projects.updateOne(
-      { _id: projectId, 'counts.items': { $gt: openItems } },
-      { $set: { 'counts.items': openItems } },
-    ),
-    store.projects.updateOne(
-      { _id: projectId, 'counts.escalations': { $gt: openEscalations } },
-      { $set: { 'counts.escalations': openEscalations } },
-    ),
+  const repairs = await Promise.all([
+    before.counts.items > openItems
+      ? store.projects.updateOne(
+          { _id: projectId, 'counts.items': before.counts.items },
+          { $set: { 'counts.items': openItems } },
+        )
+      : Promise.resolve({ modifiedCount: 0 }),
+    before.counts.escalations > openEscalations
+      ? store.projects.updateOne(
+          { _id: projectId, 'counts.escalations': before.counts.escalations },
+          { $set: { 'counts.escalations': openEscalations } },
+        )
+      : Promise.resolve({ modifiedCount: 0 }),
   ]);
-  return items.modifiedCount + escalations.modifiedCount > 0;
+  return repairs.some((repair) => repair.modifiedCount > 0);
 }
 
 export async function sweepProject(

@@ -179,6 +179,18 @@ asserts the whole [Let Agents In](https://letagentsin.com) scorecard against the
 running app, so an agent-hostile regression fails the build instead of the next
 scan.
 
+## Why it works the way it does
+
+[`docs/design-notes.md`](./docs/design-notes.md) records the decisions that cost
+something to reach and the failure each one prevents: why there are four
+statuses and no "in progress", why the absence rule needs two guards rather than
+either one, why the capacity counter moves after a write instead of before it,
+and why scope warns rather than blocks. Read it before changing any of them.
+
+The survey of the category that led here is not published: it covers the three
+boards we built and watched rot, and it names systems that are not ours to
+describe in public.
+
 ## Licence
 
 The server is [FSL-1.1-ALv2](./LICENSE.md): use it, run it, modify it, host it
