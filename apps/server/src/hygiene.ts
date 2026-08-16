@@ -224,7 +224,21 @@ export async function resolveAbsent(
  * writing only when the counter still reads what we read makes the repair skip
  * itself instead of corrupting a live project.
  */
+/** A project with no write in this window is quiet enough to recount safely. */
+const QUIET_MS = 10_000;
+
 export async function reconcileCounts(store: Store, projectId: string): Promise<boolean> {
+  // Only repair a project that nothing is writing to. Counting takes time, and
+  // a write that lands between the count and the set makes the "repair" the
+  // corruption: the count is stale by exactly the change it missed. Waiting for
+  // quiet costs nothing, because a busy project is keeping its own counter
+  // correct through exact increments anyway.
+  const recent = await store.items.findOne(
+    { projectId, updatedAt: { $gt: new Date(Date.now() - QUIET_MS) } },
+    { projection: { _id: 1 } },
+  );
+  if (recent) return false;
+
   const before = await store.projects.findOne(
     { _id: projectId },
     { projection: { counts: 1 } },

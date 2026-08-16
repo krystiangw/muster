@@ -12,8 +12,10 @@
  *   node tools/import-operator-inbox.mjs --base http://localhost:4600
  *   node tools/import-operator-inbox.mjs --base https://muster.dev --apply
  *
- * Tokens for projects it creates are printed once and appended to
- * .muster-tokens.json next to the inbox store, because they cannot be recovered.
+ * Tokens for the projects it creates cannot be recovered, so they are written to
+ * ~/.muster-tokens.json. That is a home directory rather than anywhere near a
+ * checkout on purpose: a token file that lands inside a repository eventually
+ * gets committed.
  */
 
 import { readFile, readdir, writeFile } from 'node:fs/promises';
@@ -30,7 +32,7 @@ const apply = args.includes('--apply');
 const base = (flag('base') ?? 'http://localhost:4600').replace(/\/+$/, '');
 const dataDir =
   flag('data') ?? path.join(homedir(), 'projects', 'operator-inbox-app', 'data');
-const tokenFile = flag('tokens') ?? path.join(path.dirname(dataDir), '.muster-tokens.json');
+const tokenFile = flag('tokens') ?? path.join(homedir(), '.muster-tokens.json');
 
 const STATUS_MAP = {
   OPEN: 'open',
@@ -123,19 +125,28 @@ for (const [project, list] of byProject) {
       body: JSON.stringify({ name: project }),
     });
     tokens[project] = { project: created.project, token: created.token, read_url: created.read_url };
-    await writeFile(tokenFile, JSON.stringify(tokens, null, 2));
+    await writeFile(tokenFile, JSON.stringify(tokens, null, 2), { mode: 0o600 });
     console.log(`\ncreated ${project} -> ${created.project}  (${created.read_url})`);
   }
 
   const { project: id, token } = tokens[project];
 
   // Re-runs are expected: a first pass can stop on a cap, get the project
-  // claimed and continue. Questions already there are left alone.
-  const existing = new Set(
-    (await api(`/v1/${id}/escalations?limit=200`, {}, token)).escalations.map(
-      (doc) => doc.question,
-    ),
-  );
+  // claimed and continue. Questions already there are left alone, and the whole
+  // history is paged through rather than the newest page only, or a project
+  // past the page size would be imported twice.
+  const existing = new Set();
+  let cursor = null;
+  for (;;) {
+    const page = await api(
+      `/v1/${id}/escalations?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+      {},
+      token,
+    );
+    for (const doc of page.escalations) existing.add(doc.question);
+    if (page.escalations.length < 200 || !page.next_cursor) break;
+    cursor = page.next_cursor;
+  }
 
   let imported = 0;
   let skipped = 0;

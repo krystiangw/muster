@@ -78,7 +78,35 @@ export async function createStore(uri: string, dbName: string): Promise<Store> {
   };
 
   await ensureIndexes(store);
+  await runMigrations(store);
   return store;
+}
+
+/**
+ * Small, idempotent repairs run at boot.
+ *
+ * Adding a field to a document type leaves every older document without it, and
+ * a MongoDB sort puts missing values behind every present one. An urgent
+ * question filed before the field existed would sit below a new low-priority
+ * one, which is precisely the bug the field was added to fix.
+ */
+export async function runMigrations(store: Store): Promise<void> {
+  await store.escalations.updateMany({ priorityRank: { $exists: false } }, [
+    {
+      $set: {
+        priorityRank: {
+          $switch: {
+            branches: [
+              { case: { $eq: ['$priority', 'urgent'] }, then: 3 },
+              { case: { $eq: ['$priority', 'high'] }, then: 2 },
+              { case: { $eq: ['$priority', 'low'] }, then: 0 },
+            ],
+            default: 1,
+          },
+        },
+      },
+    },
+  ]);
 }
 
 export async function ensureIndexes(store: Store): Promise<void> {

@@ -278,6 +278,112 @@ describe('the open item cap', () => {
     assert.equal(next.statusCode, 201);
   });
 
+  it('does not let a slow writer undo a newer status', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'contested', title: 'contested', actor: 'a' });
+
+    // A closes it, B reopens it. Whatever the interleaving, the item and the
+    // counter have to agree at the end: the old code let A's second write close
+    // the item again while the counter still reflected B's reopening.
+    await Promise.all([
+      post(project, '/items', { slug: 'contested', status: 'done', body: 'closed by a', actor: 'a' }),
+      post(project, '/items', { slug: 'contested', status: 'open', body: 'reopened by b', actor: 'b' }),
+    ]);
+
+    const item = await harness.store.items.findOne({ projectId: project.id, slug: 'contested' });
+    const doc = await harness.store.projects.findOne({ _id: project.id });
+    const openInReality = item!.status === 'open' || item!.status === 'blocked' ? 1 : 0;
+    assert.equal(doc!.counts.items, openInReality, `item is ${item!.status}, counter says ${doc!.counts.items}`);
+  });
+
+  it('counts one answer when two operators answer the same question at once', async () => {
+    const project = await createProject(harness);
+    const created = await post(project, '/escalations', { agent: 'a', question: 'ship it?' });
+    const id = created.json().escalation.id;
+
+    const answer = () =>
+      harness.server.inject({
+        method: 'PATCH',
+        url: `${project.api}/escalations/${id}`,
+        headers: authed(project),
+        payload: { status: 'answered', answer: 'yes' },
+      });
+    await Promise.all([answer(), answer(), answer()]);
+
+    const doc = await harness.store.projects.findOne({ _id: project.id });
+    assert.equal(doc!.counts.escalations, 0, 'one question answered, one slot freed');
+  });
+
+  it('charges a slot for reopening an answered question', async () => {
+    const project = await createProject(harness);
+    await harness.store.projects.updateOne(
+      { _id: project.id },
+      { $set: { 'limits.escalations': 1 } },
+    );
+    const first = await post(project, '/escalations', { agent: 'a', question: 'one?' });
+    const id = first.json().escalation.id;
+
+    await harness.server.inject({
+      method: 'PATCH',
+      url: `${project.api}/escalations/${id}`,
+      headers: authed(project),
+      payload: { status: 'answered', answer: 'yes' },
+    });
+    await post(project, '/escalations', { agent: 'a', question: 'two?' });
+
+    const reopened = await harness.server.inject({
+      method: 'PATCH',
+      url: `${project.api}/escalations/${id}`,
+      headers: authed(project),
+      payload: { status: 'open', answer: '' },
+    });
+    assert.equal(reopened.statusCode, 409, 'the queue is full, so it cannot take one back');
+  });
+
+  it('gives older questions a priority rank at boot', async () => {
+    const project = await createProject(harness);
+    const created = await post(project, '/escalations', {
+      agent: 'a',
+      question: 'urgent one',
+      priority: 'urgent',
+    });
+    // A document written before the field existed looks like this.
+    await harness.store.escalations.updateOne(
+      { _id: created.json().escalation.id },
+      { $unset: { priorityRank: '' } },
+    );
+
+    const { runMigrations } = await import('../src/db.js');
+    await runMigrations(harness.store);
+
+    const migrated = await harness.store.escalations.findOne({
+      _id: created.json().escalation.id,
+    });
+    assert.equal(migrated!.priorityRank, 3);
+  });
+
+  it('pages through escalations so an importer can see all of them', async () => {
+    const project = await createProject(harness);
+    for (let i = 0; i < 5; i += 1) {
+      await post(project, '/escalations', { agent: 'a', question: `question ${i}` });
+    }
+
+    const seen = new Set<string>();
+    let cursor: string | null = null;
+    for (let page = 0; page < 10; page += 1) {
+      const response = await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/escalations?limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+        headers: authed(project),
+      });
+      const body = response.json();
+      for (const doc of body.escalations) seen.add(doc.question);
+      if (body.escalations.length < 2 || !body.next_cursor) break;
+      cursor = body.next_cursor;
+    }
+    assert.equal(seen.size, 5, 'paging must reach every question, not just the newest page');
+  });
+
   it('orders the operator queue by urgency, not by alphabet', async () => {
     const project = await createProject(harness);
     for (const [priority, question] of [
@@ -299,11 +405,22 @@ describe('the open item cap', () => {
     );
   });
 
-  it('repairs a drifted count on the next sweep', async () => {
+  it('repairs a drifted count once the project is quiet, and not while it is busy', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'real', title: 'real', actor: 'a' });
     await harness.store.projects.updateOne({ _id: project.id }, { $set: { 'counts.items': 999 } });
 
+    // Busy: a write landed a moment ago, so recounting would race it and the
+    // "repair" could write a number that is already wrong.
+    await post(project, '/sweep', {});
+    const duringWork = await harness.store.projects.findOne({ _id: project.id });
+    assert.equal(duringWork!.counts.items, 999, 'a busy project is left alone');
+
+    // Quiet: nothing has been written for a while, so the count is safe to take.
+    await harness.store.items.updateMany(
+      { projectId: project.id },
+      { $set: { updatedAt: new Date(Date.now() - 60_000) } },
+    );
     await post(project, '/sweep', {});
 
     const repaired = await harness.store.projects.findOne({ _id: project.id });

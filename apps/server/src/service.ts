@@ -438,16 +438,19 @@ export async function upsertItem(
   set.staleSince = null;
 
   const status = applyStatus ? input.status : undefined;
-  if (status !== undefined) {
-    set.status = status;
-    set.closedAt = TERMINAL_STATUSES.includes(status) ? now : null;
-  } else if (existing) {
-    // No status of our own to write: either the caller sent none, or another
-    // request won the transition and its status is the one that stands.
-  } else {
-    setOnInsert.status = 'open';
-    setOnInsert.closedAt = null;
+  if (!existing) {
+    if (status !== undefined) {
+      set.status = status;
+      set.closedAt = TERMINAL_STATUSES.includes(status) ? now : null;
+    } else {
+      setOnInsert.status = 'open';
+      setOnInsert.closedAt = null;
+    }
   }
+  // For an item that already exists, the status is never written here. The
+  // guarded transition above already applied it, and repeating it unguarded
+  // would let a slow request overwrite a newer one: A closes, B reopens, then
+  // A's second write closes it again while the counter still reflects B.
 
   const entries: TimelineEntry[] = [];
   if (!existing) {
@@ -935,16 +938,44 @@ export async function createEscalation(
 export async function listEscalations(
   store: Store,
   projectId: string,
-  filter: { status?: EscalationStatus; agent?: string; limit?: number } = {},
+  filter: {
+    status?: EscalationStatus;
+    agent?: string;
+    limit?: number;
+    /**
+     * Cursor from a previous page: `<iso timestamp>|<id>`. The id is part of it
+     * because several questions can be filed in the same millisecond, and a
+     * cursor on the timestamp alone silently skips every one of them but the
+     * first.
+     */
+    cursor?: string;
+  } = {},
 ): Promise<EscalationDoc[]> {
   const query: Record<string, unknown> = { projectId };
   if (filter.status) query.status = filter.status;
   if (filter.agent) query.agent = filter.agent;
+
+  if (filter.cursor) {
+    const separator = filter.cursor.lastIndexOf('|');
+    const at = new Date(separator === -1 ? filter.cursor : filter.cursor.slice(0, separator));
+    const id = separator === -1 ? null : filter.cursor.slice(separator + 1);
+    if (Number.isNaN(at.getTime())) {
+      throw new ServiceError(400, 'bad_cursor', 'A cursor is "<iso timestamp>|<id>".');
+    }
+    query.$or = id
+      ? [{ createdAt: { $lt: at } }, { createdAt: at, _id: { $lt: id } }]
+      : [{ createdAt: { $lt: at } }];
+  }
+
   return store.escalations
     .find(query)
-    .sort({ createdAt: -1 })
+    .sort({ createdAt: -1, _id: -1 })
     .limit(Math.min(Math.max(filter.limit ?? 50, 1), 200))
     .toArray() as Promise<EscalationDoc[]>;
+}
+
+export function escalationCursor(doc: EscalationDoc): string {
+  return `${doc.createdAt.toISOString()}|${doc._id}`;
 }
 
 export async function answerEscalation(
@@ -958,19 +989,51 @@ export async function answerEscalation(
   const before = await store.escalations.findOne({ projectId, _id: id });
   if (!before) throw new ServiceError(404, 'not_found', `No escalation ${id} in this project.`);
 
+  const wasOpen = before.status === 'open';
+  const isOpen = status === 'open';
+
+  // Reopening puts a question back in the queue, so it costs a slot like a new
+  // one. Without this, answering and reopening in a loop walks past the cap.
+  let reserved = false;
+  if (!wasOpen && isOpen) {
+    const project = await store.projects.findOne(
+      { _id: projectId },
+      { projection: { limits: 1 } },
+    );
+    const limit = project?.limits.escalations ?? 0;
+    const slot = await store.projects.findOneAndUpdate(
+      { _id: projectId, 'counts.escalations': { $lt: limit } },
+      { $inc: { 'counts.escalations': 1 } },
+      { projection: { _id: 1 } },
+    );
+    if (!slot) throw limitReached('unanswered escalations', limit);
+    reserved = true;
+  }
+
+  // The previous status is the guard, so two operators answering the same
+  // question at once produce one transition and one accounting entry.
   const doc = await store.escalations.findOneAndUpdate(
-    { projectId, _id: id },
+    { projectId, _id: id, status: before.status },
     { $set: { status, answer, answeredAt: now, updatedAt: now } },
     { returnDocument: 'after' },
   );
-  if (!doc) throw new ServiceError(404, 'not_found', `No escalation ${id} in this project.`);
 
-  const wasOpen = before.status === 'open';
-  const isOpen = status === 'open';
-  if (wasOpen !== isOpen) {
+  if (!doc) {
+    if (reserved) {
+      await store.projects.updateOne(
+        { _id: projectId },
+        { $inc: { 'counts.escalations': -1 } },
+      );
+    }
+    const current = await store.escalations.findOne({ projectId, _id: id });
+    if (!current) throw new ServiceError(404, 'not_found', `No escalation ${id} in this project.`);
+    return current as EscalationDoc;
+  }
+
+  if (wasOpen && !isOpen) {
     await store.projects.updateOne(
       { _id: projectId },
-      { $inc: { 'counts.escalations': isOpen ? 1 : -1 } },
+      { $inc: { 'counts.escalations': -1 } },
     );
   }
   return doc as EscalationDoc;

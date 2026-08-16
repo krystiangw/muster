@@ -19,6 +19,7 @@ import {
   heartbeatClaim,
   itemInScope,
   listApiKeys,
+  escalationCursor,
   listEscalations,
   listItems,
   nextItem,
@@ -583,6 +584,10 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
               status: { type: 'string', enum: [...ESCALATION_STATUSES] },
               agent: { type: 'string' },
               limit: { type: 'integer', minimum: 1, maximum: 200 },
+              cursor: {
+                type: 'string',
+                description: 'Paging cursor: pass the next_cursor from the previous page.',
+              },
             },
             additionalProperties: false,
           },
@@ -594,9 +599,13 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           status?: EscalationStatus;
           agent?: string;
           limit?: number;
+          cursor?: string;
         };
         const docs = await listEscalations(store, project._id, query);
-        return { escalations: docs.map(escalationJson) };
+        return {
+          escalations: docs.map(escalationJson),
+          next_cursor: docs.length > 0 ? escalationCursor(docs[docs.length - 1]!) : null,
+        };
       },
     );
 
