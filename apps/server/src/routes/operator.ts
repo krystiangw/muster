@@ -79,7 +79,13 @@ like a password.</p>
         createdAt: new Date(),
         lastUsedAt: null,
       });
-      await mailer.sendOperatorLink(email, `${config.baseUrl}/operator/${token}`, projects);
+      try {
+        await mailer.sendOperatorLink(email, `${config.baseUrl}/operator/${token}`, projects);
+      } catch (error) {
+        // A bounced or failed send must not answer differently from an address
+        // that owns nothing, or the failure itself becomes the account probe.
+        request.log.error({ err: error }, 'operator link delivery failed');
+      }
     }
 
     // The same answer either way: whether an address owns projects here is not
@@ -117,7 +123,9 @@ like a password.</p>
     const [waiting, recent, staleItems] = await Promise.all([
       store.escalations
         .find({ projectId: { $in: ids }, status: 'open' })
-        .sort({ priority: -1, createdAt: 1 })
+        // By urgency, then by age. Sorting on the word itself would put "high"
+        // below "low", which is alphabetical and useless.
+        .sort({ priorityRank: -1, createdAt: 1 })
         .limit(100)
         .toArray(),
       store.escalations

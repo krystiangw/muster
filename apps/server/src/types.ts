@@ -37,6 +37,18 @@ export const ESCALATION_PRIORITIES: readonly EscalationPriority[] = [
   'urgent',
 ];
 
+/**
+ * Sorting by the word puts "high" below "low" and "normal", because that is
+ * alphabetical order and a database has no idea what these words mean. The rank
+ * is stored alongside the word so the operator's queue is ordered by urgency.
+ */
+export const PRIORITY_RANK: Record<EscalationPriority, number> = {
+  low: 0,
+  normal: 1,
+  high: 2,
+  urgent: 3,
+};
+
 export type TimelineKind =
   | 'created'
   | 'updated'
@@ -114,6 +126,8 @@ export interface EscalationDoc {
   question: string;
   context: string;
   priority: EscalationPriority;
+  /** Numeric form of `priority`, so the queue can be sorted by urgency. */
+  priorityRank: number;
   status: EscalationStatus;
   answer: string | null;
   answeredAt: Date | null;

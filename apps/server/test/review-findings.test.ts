@@ -181,6 +181,34 @@ describe('the open item cap', () => {
     assert.equal(counts!.counts.items, 2);
   });
 
+  it('caps the question queue, not the answered history', async () => {
+    const project = await createProject(harness);
+    await harness.store.projects.updateOne(
+      { _id: project.id },
+      { $set: { 'limits.escalations': 2 } },
+    );
+
+    const first = await post(project, '/escalations', { agent: 'a', question: 'one?' });
+    await post(project, '/escalations', { agent: 'a', question: 'two?' });
+    const third = await post(project, '/escalations', { agent: 'a', question: 'three?' });
+    assert.equal(third.statusCode, 409);
+
+    const answered = await harness.server.inject({
+      method: 'PATCH',
+      url: `${project.api}/escalations/${first.json().escalation.id}`,
+      headers: authed(project),
+      payload: { status: 'answered', answer: 'yes' },
+    });
+    assert.equal(answered.statusCode, 200);
+
+    const afterAnswering = await post(project, '/escalations', { agent: 'a', question: 'three?' });
+    assert.equal(
+      afterAnswering.statusCode,
+      201,
+      'answering a question has to make room for the next one',
+    );
+  });
+
   it('frees a slot when an item is deleted outright', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'mistake', title: 'bad import', actor: 'a' });
@@ -195,6 +223,80 @@ describe('the open item cap', () => {
     const project_ = await harness.store.projects.findOne({ _id: project.id });
     assert.equal(project_!.counts.items, 0);
     assert.equal(await harness.store.items.countDocuments({ projectId: project.id }), 0);
+  });
+
+  it('charges a slot for reopening a closed item', async () => {
+    const project = await createProject(harness);
+    await harness.store.projects.updateOne({ _id: project.id }, { $set: { 'limits.items': 1 } });
+
+    await post(project, '/items', { slug: 'closed', title: 'closed', actor: 'a' });
+    await post(project, '/items', { slug: 'closed', status: 'done', actor: 'a' });
+    await post(project, '/items', { slug: 'live', title: 'live', actor: 'a' });
+
+    // The one slot is taken by "live", so reviving "closed" has to be refused
+    // rather than quietly putting two open items in a one item project.
+    const reopened = await post(project, '/items', { slug: 'closed', status: 'open', actor: 'a' });
+    assert.equal(reopened.statusCode, 409);
+
+    const stillClosed = await harness.store.items.findOne({ projectId: project.id, slug: 'closed' });
+    assert.equal(stillClosed!.status, 'done');
+  });
+
+  it('counts one closure when two agents close the same item at once', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'one', title: 'one', actor: 'a' });
+    await post(project, '/items', { slug: 'two', title: 'two', actor: 'a' });
+
+    await Promise.all([
+      post(project, '/items', { slug: 'one', status: 'done', actor: 'a' }),
+      post(project, '/items', { slug: 'one', status: 'done', actor: 'b' }),
+      post(project, '/items', { slug: 'one', status: 'done', actor: 'c' }),
+    ]);
+
+    const doc = await harness.store.projects.findOne({ _id: project.id });
+    assert.equal(doc!.counts.items, 1, 'three writers, one closure, one slot freed');
+  });
+
+  it('frees slots as soon as an observation closes mirrored items', async () => {
+    const project = await createProject(harness);
+    await harness.store.projects.updateOne({ _id: project.id }, { $set: { 'limits.items': 2 } });
+    for (const slug of ['signal-a', 'signal-b']) {
+      await post(project, '/items', { slug, title: slug, body: 'mirrored', source: 'scan', actor: 'a' });
+    }
+
+    await post(project, '/observe', { source: 'scan', present: [] });
+    await harness.store.items.updateMany(
+      { projectId: project.id },
+      { $set: { 'absence.since': new Date(Date.now() - 48 * 3_600_000) } },
+    );
+    const observed = await post(project, '/observe', { source: 'scan', present: [] });
+    assert.equal(observed.json().resolved, 2);
+
+    // No sweep in between: the capacity has to be back immediately, or an agent
+    // that just cleared its own backlog is told the project is full.
+    const next = await post(project, '/items', { slug: 'fresh', title: 'fresh', actor: 'a' });
+    assert.equal(next.statusCode, 201);
+  });
+
+  it('orders the operator queue by urgency, not by alphabet', async () => {
+    const project = await createProject(harness);
+    for (const [priority, question] of [
+      ['low', 'a low one'],
+      ['high', 'a high one'],
+      ['normal', 'a normal one'],
+      ['urgent', 'an urgent one'],
+    ] as Array<[string, string]>) {
+      await post(project, '/escalations', { agent: 'a', question, priority });
+    }
+
+    const queue = await harness.store.escalations
+      .find({ projectId: project.id, status: 'open' })
+      .sort({ priorityRank: -1, createdAt: 1 })
+      .toArray();
+    assert.deepEqual(
+      queue.map((doc) => doc.priority),
+      ['urgent', 'high', 'normal', 'low'],
+    );
   });
 
   it('repairs a drifted count on the next sweep', async () => {

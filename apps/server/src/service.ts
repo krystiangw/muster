@@ -6,6 +6,7 @@ import {
   DEFAULT_RULES,
   ESCALATION_PRIORITIES,
   ITEM_STATUSES,
+  PRIORITY_RANK,
   TERMINAL_STATUSES,
   type AgentDoc,
   type ApiKeyDoc,
@@ -36,7 +37,7 @@ function limitReached(what: string, limit: number): ServiceError {
   return new ServiceError(
     409,
     'limit_reached',
-    `This project is capped at ${limit} ${what}. Close or delete some, or claim the project to raise the cap.`,
+    `This project is capped at ${limit} ${what}. The cap counts what is still open, not what you have ever written, so finishing work frees room. A human claiming the project by email raises it.`,
     { limit, resource: what },
   );
 }
@@ -317,21 +318,45 @@ export async function upsertItem(
     { projection: { _id: 1, status: 1, title: 1 } },
   );
 
-  // The cap counts open items, not slugs ever written, so a project that has
-  // closed a thousand tickets is not bricked. The slot is taken atomically:
-  // reading the count and then inserting lets a burst of agents walk straight
-  // past the limit together.
+  /**
+   * Capacity accounting.
+   *
+   * The cap counts open items, not slugs ever written, so a project that has
+   * closed a thousand tickets is not bricked. Three rules keep that honest:
+   *
+   *  - a slot is taken atomically, because reading the count and then inserting
+   *    lets a burst of agents walk past the limit together;
+   *  - reopening a closed item takes a slot too, or the cap is one `done` and
+   *    one `open` away from meaningless;
+   *  - only the request that actually performs a status transition accounts for
+   *    it. Two agents closing the same item both believe they closed it, and
+   *    two decrements for one closure drive the counter below zero.
+   */
+  const takeSlot = async (): Promise<boolean> => {
+    const slot = await store.projects.findOneAndUpdate(
+      { _id: project._id, 'counts.items': { $lt: project.limits.items } },
+      { $inc: { 'counts.items': 1 } },
+      { projection: { _id: 1 } },
+    );
+    return slot !== null;
+  };
+  const freeSlot = async (): Promise<void> => {
+    await store.projects.updateOne({ _id: project._id }, { $inc: { 'counts.items': -1 } });
+  };
+
+  const wasTerminal = existing ? TERMINAL_STATUSES.includes(existing.status) : false;
   const willBeTerminal = input.status !== undefined && TERMINAL_STATUSES.includes(input.status);
-  let reserved = false;
+  const changesStatus =
+    existing !== null && input.status !== undefined && input.status !== existing.status;
+
+  let reservedForCreate = false;
+  let ownsTransition = false;
+  let applyStatus = input.status !== undefined;
+
   if (!existing) {
     if (!willBeTerminal) {
-      const slot = await store.projects.findOneAndUpdate(
-        { _id: project._id, 'counts.items': { $lt: project.limits.items } },
-        { $inc: { 'counts.items': 1 } },
-        { projection: { _id: 1 } },
-      );
-      if (!slot) throw limitReached('open items', project.limits.items);
-      reserved = true;
+      if (!(await takeSlot())) throw limitReached('open items', project.limits.items);
+      reservedForCreate = true;
     }
     if (input.title) {
       const key = titleKey(input.title);
@@ -346,6 +371,36 @@ export async function upsertItem(
           );
         }
       }
+    }
+  } else if (changesStatus) {
+    // Reopening costs a slot, and the transition is taken with the previous
+    // status as a guard so exactly one concurrent request owns it.
+    let reservedForReopen = false;
+    if (wasTerminal && !willBeTerminal) {
+      if (!(await takeSlot())) throw limitReached('open items', project.limits.items);
+      reservedForReopen = true;
+    }
+
+    const moved = await store.items.findOneAndUpdate(
+      { projectId: project._id, slug, status: existing.status },
+      {
+        $set: {
+          status: input.status!,
+          closedAt: willBeTerminal ? now : null,
+          updatedAt: now,
+        },
+      },
+      { projection: { _id: 1 } },
+    );
+    ownsTransition = moved !== null;
+
+    if (!ownsTransition) {
+      // Somebody else moved it first. Their status stands, and the slot we took
+      // for a reopening that already happened goes back.
+      if (reservedForReopen) await freeSlot();
+      applyStatus = false;
+    } else if (!wasTerminal && willBeTerminal) {
+      await freeSlot();
     }
   }
 
@@ -382,10 +437,13 @@ export async function upsertItem(
   set.stale = false;
   set.staleSince = null;
 
-  const status = input.status;
+  const status = applyStatus ? input.status : undefined;
   if (status !== undefined) {
     set.status = status;
     set.closedAt = TERMINAL_STATUSES.includes(status) ? now : null;
+  } else if (existing) {
+    // No status of our own to write: either the caller sent none, or another
+    // request won the transition and its status is the one that stands.
   } else {
     setOnInsert.status = 'open';
     setOnInsert.closedAt = null;
@@ -395,7 +453,7 @@ export async function upsertItem(
   if (!existing) {
     entries.push({ at: now, by: input.actor, kind: 'created', message: input.note ?? 'created' });
   } else {
-    if (status !== undefined && status !== existing.status) {
+    if (ownsTransition && status !== undefined) {
       entries.push({
         at: now,
         by: input.actor,
@@ -439,25 +497,11 @@ export async function upsertItem(
   const item = result.value as ItemDoc;
   const isTerminal = TERMINAL_STATUSES.includes(item.status);
 
-  // Keep the open-item count honest across every path a write can take. The
-  // periodic sweep recomputes it from the collection anyway, so a lost race
-  // costs a minute of drift rather than a wrong limit forever.
-  let delta = 0;
-  if (created) {
-    if (reserved && isTerminal) delta -= 1;
-    if (!reserved && !isTerminal) delta += 1;
-  } else {
-    if (reserved) {
-      // Another writer inserted the same slug between our check and our write.
-      delta -= 1;
-    } else if (existing) {
-      const wasTerminal = TERMINAL_STATUSES.includes(existing.status);
-      if (wasTerminal && !isTerminal) delta += 1;
-      if (!wasTerminal && isTerminal) delta -= 1;
-    }
-  }
-  if (delta !== 0) {
-    await store.projects.updateOne({ _id: project._id }, { $inc: { 'counts.items': delta } });
+  // Transitions already accounted for themselves above, under the guard that
+  // decides who owns them. All that is left is the creation slot: give it back
+  // if the insert turned into an update, or if the item ended up closed anyway.
+  if (reservedForCreate && (!created || isTerminal)) {
+    await freeSlot();
   }
 
   void touchAgent(store, project._id, input.actor);
@@ -830,15 +874,21 @@ export async function createEscalation(
     itemSlug?: string | null;
   },
 ): Promise<EscalationDoc> {
-  if (project.counts.escalations >= project.limits.escalations) {
-    throw limitReached('escalations', project.limits.escalations);
-  }
   if (typeof input.question !== 'string' || input.question.trim().length === 0) {
     throw badRequest('bad_question', 'An escalation needs a question the operator can answer.');
   }
   if (input.priority !== undefined && !ESCALATION_PRIORITIES.includes(input.priority)) {
     throw badRequest('bad_priority', `Priority is one of ${ESCALATION_PRIORITIES.join(', ')}.`);
   }
+  // Like the item cap, this limits the queue rather than the history: a project
+  // that has answered five hundred questions is not full, it is well run.
+  const slot = await store.projects.findOneAndUpdate(
+    { _id: project._id, 'counts.escalations': { $lt: project.limits.escalations } },
+    { $inc: { 'counts.escalations': 1 } },
+    { projection: { _id: 1 } },
+  );
+  if (!slot) throw limitReached('unanswered escalations', project.limits.escalations);
+
   const now = new Date();
   const doc: EscalationDoc = {
     _id: newId('e'),
@@ -847,6 +897,7 @@ export async function createEscalation(
     question: input.question.slice(0, 2000),
     context: (input.context ?? '').slice(0, 8000),
     priority: input.priority ?? 'normal',
+    priorityRank: PRIORITY_RANK[input.priority ?? 'normal'],
     status: 'open',
     answer: null,
     answeredAt: null,
@@ -855,7 +906,6 @@ export async function createEscalation(
     updatedAt: now,
   };
   await store.escalations.insertOne({ ...doc, expiresAt: project.expiresAt });
-  await store.projects.updateOne({ _id: project._id }, { $inc: { 'counts.escalations': 1 } });
 
   if (doc.itemSlug) {
     await store.items.updateOne(
@@ -905,12 +955,24 @@ export async function answerEscalation(
   answer: string,
 ): Promise<EscalationDoc> {
   const now = new Date();
+  const before = await store.escalations.findOne({ projectId, _id: id });
+  if (!before) throw new ServiceError(404, 'not_found', `No escalation ${id} in this project.`);
+
   const doc = await store.escalations.findOneAndUpdate(
     { projectId, _id: id },
     { $set: { status, answer, answeredAt: now, updatedAt: now } },
     { returnDocument: 'after' },
   );
   if (!doc) throw new ServiceError(404, 'not_found', `No escalation ${id} in this project.`);
+
+  const wasOpen = before.status === 'open';
+  const isOpen = status === 'open';
+  if (wasOpen !== isOpen) {
+    await store.projects.updateOne(
+      { _id: projectId },
+      { $inc: { 'counts.escalations': isOpen ? 1 : -1 } },
+    );
+  }
   return doc as EscalationDoc;
 }
 

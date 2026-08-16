@@ -107,6 +107,7 @@ export async function ensureIndexes(store: Store): Promise<void> {
     ]),
     store.escalations.createIndexes([
       { key: { projectId: 1, status: 1, createdAt: -1 }, name: 'inbox' },
+      { key: { projectId: 1, status: 1, priorityRank: -1, createdAt: 1 }, name: 'queue' },
       { key: { projectId: 1, agent: 1, createdAt: -1 }, name: 'byAgent' },
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
     ]),

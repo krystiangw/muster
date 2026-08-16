@@ -600,6 +600,34 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       },
     );
 
+    scoped.patch(
+      '/v1/:project/escalations/:id',
+      {
+        schema: {
+          tags: ['escalations'],
+          summary: 'Answer an escalation programmatically',
+          description:
+            'The same four answers the operator gives in the web view, for an operator who prefers a script, and for importing an existing inbox. Needs an admin token: answering on the human’s behalf is not something a worker key should be able to do.',
+          body: {
+            type: 'object',
+            required: ['status'],
+            properties: {
+              status: { type: 'string', enum: [...ESCALATION_STATUSES] },
+              answer: { type: 'string', maxLength: 8000 },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request) => {
+        const { project } = requireAdmin(request);
+        const { id } = request.params as { id: string };
+        const body = request.body as { status: EscalationStatus; answer?: string };
+        const doc = await answerEscalation(store, project._id, id, body.status, body.answer ?? '');
+        return { escalation: escalationJson(doc) };
+      },
+    );
+
     scoped.get(
       '/v1/:project/inbox',
       {

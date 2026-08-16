@@ -50,6 +50,17 @@ function hoursAgo(now: Date, hours: number): Date {
 }
 
 /**
+ * Closing work frees its slot, and the rule that closed it says so immediately.
+ * Leaving that to the end of a sweep breaks `observe`, which runs the absence
+ * rule on its own: an agent could close ten mirrored items and still be told
+ * the project was full on its very next write.
+ */
+async function releaseSlots(store: Store, projectId: string, count: number): Promise<void> {
+  if (count <= 0) return;
+  await store.projects.updateOne({ _id: projectId }, { $inc: { 'counts.items': -count } });
+}
+
+/**
  * Releases claims whose heartbeat stopped. Without this, one crashed session
  * holds a ticket forever and every other agent politely skips it.
  */
@@ -149,6 +160,7 @@ export async function dropContentless(
       },
     ],
   );
+  await releaseSlots(store, projectId, result.modifiedCount);
   return { rule: 'require_body', affected: result.modifiedCount };
 }
 
@@ -197,6 +209,7 @@ export async function resolveAbsent(
       },
     ],
   );
+  await releaseSlots(store, projectId, result.modifiedCount);
   return { rule: 'absence_resolve', affected: result.modifiedCount };
 }
 
@@ -218,19 +231,27 @@ export async function reconcileCounts(store: Store, projectId: string): Promise<
   );
   if (!before) return false;
 
-  const [items, agents] = await Promise.all([
+  const [items, agents, escalations] = await Promise.all([
     store.items.countDocuments({ projectId, status: { $nin: [...TERMINAL_STATUSES] } }),
     store.agents.countDocuments({ projectId }),
+    store.escalations.countDocuments({ projectId, status: 'open' }),
   ]);
-  if (before.counts.items === items && before.counts.agents === agents) return false;
+  if (
+    before.counts.items === items &&
+    before.counts.agents === agents &&
+    before.counts.escalations === escalations
+  ) {
+    return false;
+  }
 
   const result = await store.projects.updateOne(
     {
       _id: projectId,
       'counts.items': before.counts.items,
       'counts.agents': before.counts.agents,
+      'counts.escalations': before.counts.escalations,
     },
-    { $set: { 'counts.items': items, 'counts.agents': agents } },
+    { $set: { 'counts.items': items, 'counts.agents': agents, 'counts.escalations': escalations } },
   );
   return result.modifiedCount === 1;
 }
@@ -246,19 +267,6 @@ export async function sweepProject(
   outcomes.push(await resolveAbsent(store, project._id, rules, now));
   outcomes.push(await dropContentless(store, project._id, rules, now));
   outcomes.push(await markStale(store, project._id, rules, now));
-
-  // Closing work frees its slot. These two rules are the only ones here that
-  // move an item into a terminal status, and both report exactly how many, so
-  // the counter follows without a recount.
-  const closed = outcomes
-    .filter((outcome) => outcome.rule === 'absence_resolve' || outcome.rule === 'require_body')
-    .reduce((sum, outcome) => sum + outcome.affected, 0);
-  if (closed > 0) {
-    await store.projects.updateOne(
-      { _id: project._id },
-      { $inc: { 'counts.items': -closed } },
-    );
-  }
 
   await reconcileCounts(store, project._id);
   return outcomes;
