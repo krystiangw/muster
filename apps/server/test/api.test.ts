@@ -154,6 +154,50 @@ describe('items', () => {
     assert.equal(item.json().item.timeline.length, 10, 'every writer is in the timeline');
   });
 
+  it('carries history over from another system with its own timestamps, for admins only', async () => {
+    const project = await createProject(harness);
+    const response = await post(project, '/items', {
+      slug: 'migrated',
+      title: 'came from the old board',
+      actor: 'migration',
+      history: [
+        { at: '2026-04-16T20:16:55.485Z', by: 'audit-sync', message: 'first sighting' },
+        { at: '2026-05-02T09:00:00.000Z', by: 'errors-loop', message: 'root cause found' },
+      ],
+      note: 'imported',
+    });
+    assert.equal(response.statusCode, 201);
+
+    const item = (await get(project, '/items/migrated')).json().item;
+    assert.equal(item.timeline.length, 3, 'two carried entries plus the import note');
+    assert.equal(item.timeline[0].by, 'audit-sync');
+    assert.equal(item.timeline[0].at.slice(0, 10), '2026-04-16');
+    assert.equal(item.timeline[1].by, 'errors-loop');
+
+    // A worker key must not be able to backdate somebody else's words.
+    const minted = await post(project, '/keys', { name: 'worker', role: 'write' });
+    const asWorker = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: { authorization: `Bearer ${minted.json().token}` },
+      payload: {
+        slug: 'forged',
+        title: 'x',
+        actor: 'worker',
+        history: [{ at: '2020-01-01T00:00:00.000Z', by: 'somebody-else', message: 'I said this' }],
+      },
+    });
+    assert.equal(asWorker.statusCode, 403);
+
+    const rejected = await post(project, '/items', {
+      slug: 'bad-history',
+      title: 'x',
+      actor: 'migration',
+      history: [{ at: 'not a date', message: 'nope' }],
+    });
+    assert.equal(rejected.statusCode, 400);
+  });
+
   it('enforces the project item cap', async () => {
     const project = await createProject(harness);
     await harness.store.projects.updateOne(

@@ -292,6 +292,13 @@ export interface UpsertItemInput {
   source?: string | null;
   note?: string;
   actor: string;
+  /**
+   * Timeline entries carried over from another system, with their original
+   * timestamps and authors. Migrating a board without its history throws away
+   * the only thing that made the board worth having, so this exists; it is
+   * admin-only, because backdating somebody else's words is not a worker's job.
+   */
+  history?: Array<{ at: string | Date; by?: string; message: string }>;
 }
 
 export interface UpsertItemResult {
@@ -452,6 +459,20 @@ export async function upsertItem(
   // A's second write closes it again while the counter still reflects B.
 
   const entries: TimelineEntry[] = [];
+  if (input.history) {
+    for (const entry of input.history.slice(-TIMELINE_KEEP)) {
+      const at = entry.at instanceof Date ? entry.at : new Date(entry.at);
+      if (Number.isNaN(at.getTime())) {
+        throw badRequest('bad_history', 'Every history entry needs a valid "at" timestamp.');
+      }
+      entries.push({
+        at,
+        by: (entry.by ?? 'imported').slice(0, 48),
+        kind: 'note',
+        message: String(entry.message ?? '').slice(0, 4000),
+      });
+    }
+  }
   if (!existing) {
     entries.push({ at: now, by: input.actor, kind: 'created', message: input.note ?? 'created' });
   } else {

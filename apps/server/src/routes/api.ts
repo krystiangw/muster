@@ -30,7 +30,7 @@ import {
   appendNote,
   upsertItem,
 } from '../service.js';
-import type { AuthContext } from '../service.js';
+import type { AuthContext, UpsertItemInput } from '../service.js';
 import type { Mailer } from '../email.js';
 import {
   ESCALATION_PRIORITIES,
@@ -246,14 +246,30 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
               source: { type: ['string', 'null'], maxLength: 64 },
               note: { type: 'string', maxLength: 2000 },
               actor: { type: 'string', maxLength: 48 },
+              history: {
+                type: 'array',
+                maxItems: 200,
+                description:
+                  'Timeline entries carried over from another system, with their original timestamps. Admin token only.',
+                items: {
+                  type: 'object',
+                  required: ['at', 'message'],
+                  properties: {
+                    at: { type: 'string' },
+                    by: { type: 'string', maxLength: 48 },
+                    message: { type: 'string', maxLength: 4000 },
+                  },
+                  additionalProperties: false,
+                },
+              },
             },
             additionalProperties: false,
           },
         },
       },
       async (request, reply) => {
-        const { project } = auth(request);
         const body = request.body as Record<string, unknown> & { slug: string; actor?: string };
+        const { project } = body.history ? requireAdmin(request) : auth(request);
         const actor = (body.actor as string | undefined) ?? 'unknown-agent';
         const result = await upsertItem(store, project, {
           slug: body.slug,
@@ -266,6 +282,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           fields: body.fields as Record<string, unknown> | undefined,
           source: body.source as string | null | undefined,
           note: body.note as string | undefined,
+          history: body.history as UpsertItemInput['history'],
           actor,
         });
 

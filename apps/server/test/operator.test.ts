@@ -12,7 +12,11 @@ import { authed, createProject, startHarness, type Harness, type Project } from 
 let harness: Harness;
 
 before(async () => {
-  harness = await startHarness();
+  // Every test here asks for a link, and they all share one source address, so
+  // the production limit of five an hour would throttle the suite. That limit
+  // is also what bounds the nuisance of a stranger requesting links for an
+  // address they do not own.
+  harness = await startHarness({ LIMIT_CLAIM_EMAILS_PER_HOUR: '100' });
 });
 
 after(async () => {
@@ -151,6 +155,37 @@ describe('the operator view', () => {
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
     });
     assert.equal(attempt.statusCode, 403);
+  });
+
+  it('does not let a stranger knock out a working link, and revokes on request from inside', async () => {
+    const project = await createProject(harness, 'links');
+    await claimFor(project, 'owner@example.com');
+    const link = await operatorLink('owner@example.com');
+    assert.equal((await harness.server.inject({ method: 'GET', url: link })).statusCode, 200);
+
+    // Anyone can ask for a link by typing an address, so asking must not be
+    // able to turn somebody else's link off.
+    await harness.server.inject({
+      method: 'POST',
+      url: '/operator',
+      payload: 'email=owner@example.com',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    assert.equal(
+      (await harness.server.inject({ method: 'GET', url: link })).statusCode,
+      200,
+      'a working link must survive somebody else requesting one',
+    );
+
+    // Holding a working link is the proof that lets you end the others.
+    const revoked = await harness.server.inject({ method: 'POST', url: `${link}/revoke-others` });
+    assert.equal(revoked.statusCode, 200);
+    assert.equal((await harness.server.inject({ method: 'GET', url: link })).statusCode, 200);
+    assert.equal(
+      await harness.store.operatorTokens.countDocuments({ email: 'owner@example.com' }),
+      1,
+      'every other link is gone',
+    );
   });
 
   it('does not reveal whether an address owns anything', async () => {

@@ -224,55 +224,22 @@ export async function resolveAbsent(
  * writing only when the counter still reads what we read makes the repair skip
  * itself instead of corrupting a live project.
  */
-/** A project with no write in this window is quiet enough to recount safely. */
-const QUIET_MS = 10_000;
-
-export async function reconcileCounts(store: Store, projectId: string): Promise<boolean> {
-  // Cosmetic, not load bearing. Every write moves the counter after it
-  // succeeds, so the only drift a crash can produce is an undercount, which
-  // hands out a little more room rather than withholding it. This tidies that
-  // up when the project happens to be idle; a project too busy to ever be idle
-  // is also one whose counter is being corrected by its own traffic.
-  //
-  // It waits for quiet because counting takes time: a write landing between the
-  // count and the write-back would make the "repair" the corruption, storing a
-  // number that is stale by exactly the change it missed.
-  const recent = await store.items.findOne(
-    { projectId, updatedAt: { $gt: new Date(Date.now() - QUIET_MS) } },
-    { projection: { _id: 1 } },
-  );
-  if (recent) return false;
-
-  const before = await store.projects.findOne(
-    { _id: projectId },
-    { projection: { counts: 1 } },
-  );
-  if (!before) return false;
-
-  const [items, agents, escalations] = await Promise.all([
-    store.items.countDocuments({ projectId, status: { $nin: [...TERMINAL_STATUSES] } }),
-    store.agents.countDocuments({ projectId }),
-    store.escalations.countDocuments({ projectId, status: 'open' }),
-  ]);
-  if (
-    before.counts.items === items &&
-    before.counts.agents === agents &&
-    before.counts.escalations === escalations
-  ) {
-    return false;
-  }
-
-  const result = await store.projects.updateOne(
-    {
-      _id: projectId,
-      'counts.items': before.counts.items,
-      'counts.agents': before.counts.agents,
-      'counts.escalations': before.counts.escalations,
-    },
-    { $set: { 'counts.items': items, 'counts.agents': agents, 'counts.escalations': escalations } },
-  );
-  return result.modifiedCount === 1;
-}
+/**
+ * There is deliberately no recount.
+ *
+ * An earlier version repaired the capacity counters by counting the collection
+ * and writing the result back. Every version of that idea lost: a write landing
+ * between the count and the write-back makes the repair store a number that is
+ * stale by exactly the change it missed, and a write landing just after makes
+ * the same item count twice. Guarding it on a quiet window only moved the
+ * failure to projects that are never quiet, which are the busy ones.
+ *
+ * The counters do not need repairing. Every path that changes them applies an
+ * exact delta after its write has succeeded, so the only drift a crash can
+ * produce is an undercount, and an undercount hands out slightly more room than
+ * it should. That is the mistake worth making: a recount that overcounts turns
+ * a working project into one that rejects its own valid work.
+ */
 
 export async function sweepProject(
   store: Store,
@@ -286,7 +253,6 @@ export async function sweepProject(
   outcomes.push(await dropContentless(store, project._id, rules, now));
   outcomes.push(await markStale(store, project._id, rules, now));
 
-  await reconcileCounts(store, project._id);
   return outcomes;
 }
 

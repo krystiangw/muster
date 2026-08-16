@@ -424,25 +424,22 @@ describe('the open item cap', () => {
     );
   });
 
-  it('repairs a drifted count once the project is quiet, and not while it is busy', async () => {
+  it('never recounts, because a recount can only be wrong in the dangerous direction', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'real', title: 'real', actor: 'a' });
+
+    // Whatever the counter says, a sweep leaves it alone. Every earlier attempt
+    // at repairing it here raced the writes it was repairing, and an overcount
+    // makes a working project reject its own valid work.
     await harness.store.projects.updateOne({ _id: project.id }, { $set: { 'counts.items': 999 } });
-
-    // Busy: a write landed a moment ago, so recounting would race it and the
-    // "repair" could write a number that is already wrong.
     await post(project, '/sweep', {});
-    const duringWork = await harness.store.projects.findOne({ _id: project.id });
-    assert.equal(duringWork!.counts.items, 999, 'a busy project is left alone');
+    const afterSweep = await harness.store.projects.findOne({ _id: project.id });
+    assert.equal(afterSweep!.counts.items, 999);
 
-    // Quiet: nothing has been written for a while, so the count is safe to take.
-    await harness.store.items.updateMany(
-      { projectId: project.id },
-      { $set: { updatedAt: new Date(Date.now() - 60_000) } },
-    );
-    await post(project, '/sweep', {});
-
-    const repaired = await harness.store.projects.findOne({ _id: project.id });
-    assert.equal(repaired!.counts.items, 1);
+    // What does keep it honest: exact deltas on every path. Closing the item
+    // takes its slot back even from a nonsense starting point.
+    await post(project, '/items', { slug: 'real', status: 'done', actor: 'a' });
+    const afterClosing = await harness.store.projects.findOne({ _id: project.id });
+    assert.equal(afterClosing!.counts.items, 998);
   });
 });

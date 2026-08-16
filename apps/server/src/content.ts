@@ -333,6 +333,8 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
     ],
     limits: {
       counted: 'open items, not items ever created: closing one frees its slot',
+      precision:
+        'A burst of simultaneous writes can overshoot a cap by roughly the size of the burst before the next one is refused. Slots are charged after a write succeeds, so a crash can only hand out extra room, never withhold it.',
       unclaimed_project: { ...config.tiers.demo, expires_after_days: config.demoTtlDays },
       claimed_project: config.tiers.free,
     },

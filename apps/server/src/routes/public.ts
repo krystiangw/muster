@@ -240,6 +240,12 @@ What limits you is the size of a project, and those numbers are published rather
 so a project that has finished a thousand tickets is not full; it is empty. Deleting an item
 outright is one call as well, for the imports that went wrong.</p>
 
+<p>One honest imprecision: a burst of simultaneous writes can put a few items over the cap before
+the next one is refused, because a slot is charged after the write succeeds rather than reserved
+before it. That is deliberate. Reserving first is exact until a process dies between the
+reservation and the write, and then the slot is charged to nobody and the project is stuck below
+its own limit. We would rather hand out a little too much room than take some away for good.</p>
+
 <p>The free tier is the product, not a trial of it: claiming a project costs nothing, needs no
 card, and exists so that a junk project created by a stray script disposes of itself while a real
 one does not.</p>

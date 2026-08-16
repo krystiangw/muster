@@ -42,8 +42,8 @@ we send you the link.</p>
 </form>
 <p style="color:var(--muted);font-size:14.5px;margin-top:20px">Anyone holding the
 link can answer your agents on your behalf, so treat it like a password. Asking
-for a new one turns the old one off, which is also how you deal with a link you
-have lost.</p>
+for a new one leaves the old one working; if you have lost one or shared it by
+mistake, open a link you still have and turn off every other one from there.</p>
 `;
     return reply
       .type('text/html; charset=utf-8')
@@ -73,10 +73,11 @@ have lost.</p>
     const projects = await store.projects.countDocuments({ claimedBy: email });
     if (projects > 0) {
       const token = newToken();
-      // Asking for a link invalidates the previous one. That is the whole
-      // recovery story for a link that leaked or was lost: ask again, and the
-      // old one stops working.
-      await store.operatorTokens.deleteMany({ email });
+      // Asking for a link deliberately does not revoke the previous one. This
+      // endpoint takes an email address and nothing else, so revoking here
+      // would let anyone who knows the address knock the owner's link out from
+      // under them, over and over. Revocation lives inside the view instead,
+      // where holding a working link is the proof that you may end the others.
       await store.operatorTokens.insertOne({
         _id: newId('o'),
         email,
@@ -216,6 +217,13 @@ ${staleItems
         : ''
     }
 
+<h2>This link</h2>
+<p style="color:var(--ink-2);font-size:15px">Anyone holding it can answer your agents. If one has
+gone somewhere it should not have, end every link except this one.</p>
+<form method="post" action="/operator/${escapeHtml(token)}/revoke-others">
+  <div><button class="ghost" type="submit">Turn off every other link</button></div>
+</form>
+
 <h2>Recently answered</h2>
 ${
       recent.length === 0
@@ -235,6 +243,26 @@ ${
     return reply
       .type('text/html; charset=utf-8')
       .send(layout({ title: 'Muster operator view' }, body));
+  });
+
+  app.post('/operator/:token/revoke-others', { schema: { hide: true } }, async (request, reply) => {
+    const { token } = request.params as { token: string };
+    const record = await store.operatorTokens.findOne({ hash: hashToken(token) });
+    if (!record) throw new ServiceError(404, 'not_found', 'No such link.');
+
+    const removed = await store.operatorTokens.deleteMany({
+      email: record.email,
+      _id: { $ne: record._id },
+    });
+    return reply.type('text/html; charset=utf-8').send(
+      layout(
+        { title: 'Other links turned off' },
+        `<h1>Done</h1>
+         <p>${removed.deletedCount} other link${removed.deletedCount === 1 ? '' : 's'} stopped working.
+         This one still does.</p>
+         <p><a href="/operator/${escapeHtml(token)}">Back to your projects</a></p>`,
+      ),
+    );
   });
 
   app.post(
