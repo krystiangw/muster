@@ -1,0 +1,857 @@
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import type { Config } from '../config.js';
+import type { Store } from '../db.js';
+import { maybeSweep, sweepProject } from '../hygiene.js';
+import { hashToken, isValidHandle, newOtpCode, newId } from '../ids.js';
+import { RateLimiter } from '../rateLimit.js';
+import { agentJson, escalationJson, itemJson, projectJson } from '../serialize.js';
+import {
+  ServiceError,
+  answerEscalation,
+  authenticate,
+  claimItem,
+  claimProjectWithEmail,
+  createApiKey,
+  createEscalation,
+  createProject,
+  getItem,
+  heartbeatClaim,
+  itemInScope,
+  listApiKeys,
+  listEscalations,
+  listItems,
+  nextItem,
+  observe,
+  registerAgent,
+  releaseItem,
+  revokeApiKey,
+  appendNote,
+  upsertItem,
+} from '../service.js';
+import type { AuthContext } from '../service.js';
+import type { Mailer } from '../email.js';
+import {
+  ESCALATION_PRIORITIES,
+  ESCALATION_STATUSES,
+  ITEM_STATUSES,
+  type EscalationPriority,
+  type EscalationStatus,
+  type ItemStatus,
+} from '../types.js';
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    auth?: AuthContext;
+  }
+}
+
+export interface ApiDeps {
+  store: Store;
+  config: Config;
+  limiter: RateLimiter;
+  mailer: Mailer;
+}
+
+const CLAIM_CODE_TTL_MS = 15 * 60_000;
+const MAX_CLAIM_ATTEMPTS = 5;
+
+function auth(request: FastifyRequest): AuthContext {
+  if (!request.auth) {
+    throw new ServiceError(401, 'missing_token', 'This endpoint needs a project token.');
+  }
+  return request.auth;
+}
+
+function requireAdmin(request: FastifyRequest): AuthContext {
+  const ctx = auth(request);
+  if (ctx.key.role !== 'admin') {
+    throw new ServiceError(
+      403,
+      'admin_required',
+      'This endpoint needs an admin token. The bootstrap token returned by POST /p is one.',
+    );
+  }
+  return ctx;
+}
+
+function clientIp(request: FastifyRequest): string {
+  const forwarded = request.headers['x-forwarded-for'];
+  if (typeof forwarded === 'string' && forwarded.length > 0) {
+    return forwarded.split(',')[0]!.trim();
+  }
+  return request.ip;
+}
+
+export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
+  const { store, config, limiter, mailer } = deps;
+
+  // ---------------------------------------------------------------- signup
+
+  app.post(
+    '/p',
+    {
+      schema: {
+        summary: 'Create a project',
+        description:
+          'The entire signup. No account, no CAPTCHA, no human. Returns a token once; only its hash is stored.',
+        tags: ['projects'],
+        body: {
+          type: 'object',
+          properties: { name: { type: 'string', maxLength: 120 } },
+          additionalProperties: false,
+        },
+      },
+    },
+    async (request, reply) => {
+      const verdict = limiter.check(
+        `create:${clientIp(request)}`,
+        config.rateLimits.createProject,
+      );
+      if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds);
+
+      const body = (request.body ?? {}) as { name?: string };
+      const { project, adminToken } = await createProject(store, config, body);
+      return reply.code(201).send({
+        project: project._id,
+        token: adminToken,
+        api: `${config.baseUrl}/v1/${project._id}`,
+        read_url: `${config.baseUrl}/r/${project.readToken}`,
+        expires_at: project.expiresAt,
+        limits: project.limits,
+        next: {
+          instructions: `${config.baseUrl}/skill.md`,
+          claim_to_keep: `${config.baseUrl}/v1/${project._id}/claim`,
+        },
+      });
+    },
+  );
+
+  // ------------------------------------------------------- authenticated v1
+
+  app.register(async (scoped) => {
+    scoped.addHook('preHandler', async (request, reply) => {
+      const header = request.headers.authorization;
+      const token =
+        typeof header === 'string' && header.toLowerCase().startsWith('bearer ')
+          ? header.slice(7).trim()
+          : null;
+      if (!token) {
+        throw new ServiceError(
+          401,
+          'missing_token',
+          'Send your project token as "authorization: Bearer <token>". Get one with POST /p.',
+        );
+      }
+
+      const rule =
+        request.method === 'GET' ? config.rateLimits.read : config.rateLimits.write;
+      const verdict = limiter.check(`tok:${hashToken(token).slice(0, 16)}:${request.method === 'GET' ? 'r' : 'w'}`, rule);
+      if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds);
+
+      const ctx = await authenticate(store, token);
+      const params = request.params as { project?: string };
+      if (params.project && params.project !== ctx.project._id) {
+        throw new ServiceError(
+          403,
+          'wrong_project',
+          'That token does not belong to this project.',
+        );
+      }
+      request.auth = ctx;
+    });
+
+    scoped.get('/v1/:project', { schema: { tags: ['projects'], summary: 'Project summary' } }, async (request) => {
+      const { project } = auth(request);
+      void maybeSweep(store, project).catch(() => undefined);
+      return projectJson(project, config);
+    });
+
+    // ------------------------------------------------------------- agents
+
+    scoped.post(
+      '/v1/:project/agents',
+      {
+        schema: {
+          tags: ['agents'],
+          summary: 'Register or update an agent',
+          description:
+            'Idempotent on handle. Scope is advisory: it decides what /next offers and whether other agents get a cross-scope warning.',
+          body: {
+            type: 'object',
+            required: ['handle'],
+            properties: {
+              handle: { type: 'string', minLength: 1, maxLength: 48 },
+              scope: { type: 'array', items: { type: 'string' }, maxItems: 32 },
+              description: { type: 'string', maxLength: 500 },
+              meta: { type: 'object', additionalProperties: true },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request, reply) => {
+        const { project } = auth(request);
+        const body = request.body as {
+          handle: string;
+          scope?: string[];
+          description?: string;
+          meta?: Record<string, unknown>;
+        };
+        if (!isValidHandle(body.handle.toLowerCase())) {
+          throw new ServiceError(
+            400,
+            'bad_handle',
+            'A handle is lowercase letters, digits, dot, dash or underscore, starting with a letter or digit.',
+          );
+        }
+        const { agent, created } = await registerAgent(store, project, body);
+        return reply.code(created ? 201 : 200).send({ agent: agentJson(agent), created });
+      },
+    );
+
+    scoped.get('/v1/:project/agents', { schema: { tags: ['agents'], summary: 'List agents' } }, async (request) => {
+      const { project } = auth(request);
+      const agents = await store.agents
+        .find({ projectId: project._id })
+        .sort({ lastSeenAt: -1 })
+        .limit(200)
+        .toArray();
+      return { agents: agents.map((a) => agentJson(a)) };
+    });
+
+    // -------------------------------------------------------------- items
+
+    scoped.post(
+      '/v1/:project/items',
+      {
+        schema: {
+          tags: ['items'],
+          summary: 'Create or update an item (idempotent on slug)',
+          description:
+            'The slug is the identity and the idempotency key. Posting the same slug twice updates one item instead of creating two. Never put a date in a slug.',
+          body: {
+            type: 'object',
+            required: ['slug'],
+            properties: {
+              slug: { type: 'string', minLength: 1, maxLength: 96 },
+              title: { type: 'string', maxLength: 300 },
+              body: { type: 'string', maxLength: 20000 },
+              owner: { type: ['string', 'null'], maxLength: 48 },
+              status: { type: 'string', enum: [...ITEM_STATUSES] },
+              priority: { type: 'integer', minimum: -10, maximum: 10 },
+              labels: { type: 'array', items: { type: 'string', maxLength: 48 }, maxItems: 20 },
+              fields: { type: 'object', additionalProperties: true },
+              source: { type: ['string', 'null'], maxLength: 64 },
+              note: { type: 'string', maxLength: 2000 },
+              actor: { type: 'string', maxLength: 48 },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request, reply) => {
+        const { project } = auth(request);
+        const body = request.body as Record<string, unknown> & { slug: string; actor?: string };
+        const actor = (body.actor as string | undefined) ?? 'unknown-agent';
+        const result = await upsertItem(store, project, {
+          slug: body.slug,
+          title: body.title as string | undefined,
+          body: body.body as string | undefined,
+          owner: body.owner as string | null | undefined,
+          status: body.status as ItemStatus | undefined,
+          priority: body.priority as number | undefined,
+          labels: body.labels as string[] | undefined,
+          fields: body.fields as Record<string, unknown> | undefined,
+          source: body.source as string | null | undefined,
+          note: body.note as string | undefined,
+          actor,
+        });
+
+        const warnings = [...result.warnings];
+        if (project.rules.scopeWarnings && actor !== 'unknown-agent') {
+          const agent = await store.agents.findOne({ projectId: project._id, handle: actor });
+          if (agent && agent.scope.length > 0 && !itemInScope(agent.scope, result.item)) {
+            warnings.push(
+              `"${result.item.slug}" is outside your declared scope (${agent.scope.join(', ')}). The write went through; this is a boundary reminder, not a block.`,
+            );
+          }
+        }
+
+        void maybeSweep(store, project).catch(() => undefined);
+        return reply
+          .code(result.created ? 201 : 200)
+          .send({ item: itemJson(result.item), created: result.created, warnings });
+      },
+    );
+
+    scoped.get(
+      '/v1/:project/items',
+      {
+        schema: {
+          tags: ['items'],
+          summary: 'List items',
+          querystring: {
+            type: 'object',
+            properties: {
+              status: { type: 'string', enum: [...ITEM_STATUSES] },
+              owner: { type: 'string' },
+              label: { type: 'string' },
+              source: { type: 'string' },
+              stale: { type: 'boolean' },
+              claimed: { type: 'boolean' },
+              limit: { type: 'integer', minimum: 1, maximum: 200 },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request) => {
+        const { project } = auth(request);
+        const query = request.query as Record<string, unknown>;
+        const items = await listItems(store, project._id, {
+          status: query.status as ItemStatus | undefined,
+          owner: query.owner as string | undefined,
+          label: query.label as string | undefined,
+          source: query.source as string | undefined,
+          stale: query.stale as boolean | undefined,
+          claimed: query.claimed as boolean | undefined,
+          limit: query.limit as number | undefined,
+        });
+        return { items: items.map((item) => itemJson(item)) };
+      },
+    );
+
+    scoped.get(
+      '/v1/:project/items/:slug',
+      { schema: { tags: ['items'], summary: 'Read one item with its timeline' } },
+      async (request) => {
+        const { project } = auth(request);
+        const { slug } = request.params as { slug: string };
+        const item = await getItem(store, project._id, slug);
+        return { item: itemJson(item, true) };
+      },
+    );
+
+    scoped.post(
+      '/v1/:project/items/:slug/claim',
+      {
+        schema: {
+          tags: ['claims'],
+          summary: 'Claim an item for a bounded time',
+          description:
+            'A lease. ok:false means another agent holds it and the holder is named. Claims expire without a heartbeat, so a crashed session never blocks the board.',
+          body: {
+            type: 'object',
+            required: ['agent'],
+            properties: {
+              agent: { type: 'string', maxLength: 48 },
+              ttl_minutes: { type: 'integer', minimum: 1, maximum: 1440 },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request, reply) => {
+        const { project } = auth(request);
+        const { slug } = request.params as { slug: string };
+        const body = request.body as { agent: string; ttl_minutes?: number };
+        const result = await claimItem(store, project, slug, body.agent, body.ttl_minutes);
+        if (!result.ok) {
+          return reply.code(409).send({
+            ok: false,
+            held_by: result.heldBy,
+            item: result.item ? itemJson(result.item) : null,
+            hint: 'Somebody else is on this. Pick something else, or leave a timeline note if you have information they need.',
+          });
+        }
+        return { ok: true, item: itemJson(result.item!), expires_at: result.expiresAt };
+      },
+    );
+
+    scoped.post(
+      '/v1/:project/items/:slug/heartbeat',
+      {
+        schema: {
+          tags: ['claims'],
+          summary: 'Extend a claim you hold',
+          body: {
+            type: 'object',
+            required: ['agent'],
+            properties: {
+              agent: { type: 'string', maxLength: 48 },
+              ttl_minutes: { type: 'integer', minimum: 1, maximum: 1440 },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request) => {
+        const { project } = auth(request);
+        const { slug } = request.params as { slug: string };
+        const body = request.body as { agent: string; ttl_minutes?: number };
+        const item = await heartbeatClaim(store, project, slug, body.agent, body.ttl_minutes);
+        return { ok: true, item: itemJson(item) };
+      },
+    );
+
+    scoped.post(
+      '/v1/:project/items/:slug/release',
+      {
+        schema: {
+          tags: ['claims'],
+          summary: 'Release a claim you hold',
+          body: {
+            type: 'object',
+            required: ['agent'],
+            properties: {
+              agent: { type: 'string', maxLength: 48 },
+              note: { type: 'string', maxLength: 2000 },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request) => {
+        const { project } = auth(request);
+        const { slug } = request.params as { slug: string };
+        const body = request.body as { agent: string; note?: string };
+        const item = await releaseItem(store, project, slug, body.agent, body.note);
+        return { ok: true, item: itemJson(item) };
+      },
+    );
+
+    scoped.post(
+      '/v1/:project/items/:slug/timeline',
+      {
+        schema: {
+          tags: ['items'],
+          summary: 'Append a note to an item',
+          description:
+            'The next agent reads the timeline to decide whether to pick this up. One line beats nothing.',
+          body: {
+            type: 'object',
+            required: ['message'],
+            properties: {
+              message: { type: 'string', minLength: 1, maxLength: 4000 },
+              actor: { type: 'string', maxLength: 48 },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request) => {
+        const { project } = auth(request);
+        const { slug } = request.params as { slug: string };
+        const body = request.body as { message: string; actor?: string };
+        const item = await appendNote(
+          store,
+          project,
+          slug,
+          body.actor ?? 'unknown-agent',
+          body.message,
+        );
+        return { item: itemJson(item, true) };
+      },
+    );
+
+    scoped.get(
+      '/v1/:project/next',
+      {
+        schema: {
+          tags: ['items'],
+          summary: 'What this agent should pick up next',
+          querystring: {
+            type: 'object',
+            properties: { agent: { type: 'string', maxLength: 48 } },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request) => {
+        const { project } = auth(request);
+        const { agent } = request.query as { agent?: string };
+        void maybeSweep(store, project).catch(() => undefined);
+        const result = await nextItem(store, project, agent ?? '');
+        return {
+          item: result.item ? itemJson(result.item, true) : null,
+          reason: result.reason,
+        };
+      },
+    );
+
+    scoped.post(
+      '/v1/:project/observe',
+      {
+        schema: {
+          tags: ['items'],
+          summary: 'Report which mirrored items still exist',
+          description:
+            'Items of that source missing from the list start an absence streak. They close only after N consecutive absences AND M hours, so one failed poll cannot close live work.',
+          body: {
+            type: 'object',
+            required: ['source', 'present'],
+            properties: {
+              source: { type: 'string', minLength: 1, maxLength: 64 },
+              present: { type: 'array', items: { type: 'string', maxLength: 96 }, maxItems: 2000 },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request) => {
+        const { project } = auth(request);
+        const body = request.body as { source: string; present: string[] };
+        const result = await observe(store, project, body.source, body.present);
+        return result;
+      },
+    );
+
+    // -------------------------------------------------------- escalations
+
+    scoped.post(
+      '/v1/:project/escalations',
+      {
+        schema: {
+          tags: ['escalations'],
+          summary: 'Ask the human a question you cannot decide yourself',
+          body: {
+            type: 'object',
+            required: ['question'],
+            properties: {
+              agent: { type: 'string', maxLength: 48 },
+              question: { type: 'string', minLength: 1, maxLength: 2000 },
+              context: { type: 'string', maxLength: 8000 },
+              priority: { type: 'string', enum: [...ESCALATION_PRIORITIES] },
+              item_slug: { type: ['string', 'null'], maxLength: 96 },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request, reply) => {
+        const { project } = auth(request);
+        const body = request.body as {
+          agent?: string;
+          question: string;
+          context?: string;
+          priority?: EscalationPriority;
+          item_slug?: string | null;
+        };
+        const doc = await createEscalation(store, project, {
+          agent: body.agent ?? 'unknown-agent',
+          question: body.question,
+          context: body.context,
+          priority: body.priority,
+          itemSlug: body.item_slug ?? null,
+        });
+        return reply.code(201).send({
+          escalation: escalationJson(doc),
+          read_url: `${config.baseUrl}/r/${project.readToken}`,
+          hint: 'Keep working on something else and read /inbox on your next iteration.',
+        });
+      },
+    );
+
+    scoped.get(
+      '/v1/:project/escalations',
+      {
+        schema: {
+          tags: ['escalations'],
+          summary: 'List escalations',
+          querystring: {
+            type: 'object',
+            properties: {
+              status: { type: 'string', enum: [...ESCALATION_STATUSES] },
+              agent: { type: 'string' },
+              limit: { type: 'integer', minimum: 1, maximum: 200 },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request) => {
+        const { project } = auth(request);
+        const query = request.query as {
+          status?: EscalationStatus;
+          agent?: string;
+          limit?: number;
+        };
+        const docs = await listEscalations(store, project._id, query);
+        return { escalations: docs.map(escalationJson) };
+      },
+    );
+
+    scoped.get(
+      '/v1/:project/inbox',
+      {
+        schema: {
+          tags: ['escalations'],
+          summary: 'Answers waiting for this agent',
+          description:
+            'Four statuses, four meanings: answered (act on it), resolved (already handled, stop), wont_do (dropped, do not ask again), in_progress (the human is on it, wait).',
+          querystring: {
+            type: 'object',
+            properties: { agent: { type: 'string', maxLength: 48 } },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request) => {
+        const { project } = auth(request);
+        const { agent } = request.query as { agent?: string };
+        const filter: Record<string, unknown> = {
+          projectId: project._id,
+          status: { $ne: 'open' },
+        };
+        if (agent) filter.agent = agent;
+        const docs = await store.escalations
+          .find(filter)
+          .sort({ answeredAt: -1 })
+          .limit(50)
+          .toArray();
+        return { answers: docs.map((doc) => escalationJson(doc)) };
+      },
+    );
+
+    // ------------------------------------------------------------ hygiene
+
+    scoped.post(
+      '/v1/:project/sweep',
+      {
+        schema: {
+          tags: ['hygiene'],
+          summary: 'Run the hygiene rules now',
+          description: 'The same pass that runs on a schedule. Useful right after a bulk import.',
+        },
+      },
+      async (request) => {
+        const { project } = auth(request);
+        const outcomes = await sweepProject(store, project);
+        return { swept: Object.fromEntries(outcomes.map((o) => [o.rule, o.affected])) };
+      },
+    );
+
+    scoped.patch(
+      '/v1/:project/rules',
+      {
+        schema: {
+          tags: ['hygiene'],
+          summary: 'Tune the hygiene rules',
+          body: {
+            type: 'object',
+            properties: {
+              stale_after_hours: { type: ['integer', 'null'], minimum: 1 },
+              absence_resolve: {
+                type: ['object', 'null'],
+                properties: {
+                  observations: { type: 'integer', minimum: 1, maximum: 100 },
+                  min_hours: { type: 'integer', minimum: 1 },
+                },
+                required: ['observations', 'min_hours'],
+                additionalProperties: false,
+              },
+              require_body_after_hours: { type: ['integer', 'null'], minimum: 1 },
+              claim_ttl_minutes: { type: 'integer', minimum: 1, maximum: 1440 },
+              scope_warnings: { type: 'boolean' },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request) => {
+        const { project } = requireAdmin(request);
+        const body = request.body as Record<string, unknown>;
+        const set: Record<string, unknown> = {};
+        if ('stale_after_hours' in body) set['rules.staleAfterHours'] = body.stale_after_hours;
+        if ('absence_resolve' in body) {
+          const value = body.absence_resolve as
+            | { observations: number; min_hours: number }
+            | null;
+          set['rules.absenceResolve'] = value
+            ? { observations: value.observations, minHours: value.min_hours }
+            : null;
+        }
+        if ('require_body_after_hours' in body) {
+          set['rules.requireBodyAfterHours'] = body.require_body_after_hours;
+        }
+        if ('claim_ttl_minutes' in body) set['rules.claimTtlMinutes'] = body.claim_ttl_minutes;
+        if ('scope_warnings' in body) set['rules.scopeWarnings'] = body.scope_warnings;
+
+        const updated = await store.projects.findOneAndUpdate(
+          { _id: project._id },
+          { $set: set },
+          { returnDocument: 'after' },
+        );
+        return projectJson(updated!, config);
+      },
+    );
+
+    // --------------------------------------------------------------- keys
+
+    scoped.post(
+      '/v1/:project/keys',
+      {
+        schema: {
+          tags: ['keys'],
+          summary: 'Create an API key programmatically',
+          description:
+            'Part of the management API: an admin token can programmatically create further keys, so a second machine or a second agent never has to share one.',
+          body: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', maxLength: 80 },
+              role: { type: 'string', enum: ['write', 'admin'] },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request, reply) => {
+        const { project } = requireAdmin(request);
+        const body = (request.body ?? {}) as { name?: string; role?: 'write' | 'admin' };
+        const { key, token } = await createApiKey(store, project, body);
+        return reply.code(201).send({
+          key: { id: key._id, name: key.name, role: key.role, created_at: key.createdAt },
+          token,
+          notice: 'This token is shown once. Only its hash is stored.',
+        });
+      },
+    );
+
+    scoped.get('/v1/:project/keys', { schema: { tags: ['keys'], summary: 'List keys' } }, async (request) => {
+      const { project } = requireAdmin(request);
+      const keys = await listApiKeys(store, project._id);
+      return {
+        keys: keys.map((key) => ({
+          id: key._id,
+          name: key.name,
+          role: key.role,
+          created_at: key.createdAt,
+          last_used_at: key.lastUsedAt,
+          revoked_at: key.revokedAt,
+        })),
+      };
+    });
+
+    scoped.delete(
+      '/v1/:project/keys/:id',
+      { schema: { tags: ['keys'], summary: 'Revoke a key' } },
+      async (request) => {
+        const { project } = requireAdmin(request);
+        const { id } = request.params as { id: string };
+        await revokeApiKey(store, project._id, id);
+        return { ok: true };
+      },
+    );
+
+    // -------------------------------------------------------- human claim
+
+    scoped.post(
+      '/v1/:project/claim',
+      {
+        schema: {
+          tags: ['projects'],
+          summary: 'Start the human claim: email a six digit code',
+          description:
+            'Claiming removes the expiry and raises the limits. It is the only step that needs a person, and it happens after the agent is already working.',
+          body: {
+            type: 'object',
+            required: ['email'],
+            properties: { email: { type: 'string', maxLength: 200 } },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request, reply) => {
+        const { project } = auth(request);
+        const { email } = request.body as { email: string };
+        if (!/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(email)) {
+          throw new ServiceError(400, 'bad_email', 'That does not look like an email address.');
+        }
+        if (project.claimedBy) {
+          return reply.send({ ok: true, already_claimed_by: project.claimedBy });
+        }
+        const verdict = limiter.check(`claim:${project._id}`, config.rateLimits.claimEmail);
+        if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds);
+
+        const code = newOtpCode();
+        const now = new Date();
+        await store.claimCodes.deleteMany({ projectId: project._id });
+        await store.claimCodes.insertOne({
+          _id: newId('c'),
+          projectId: project._id,
+          email: email.toLowerCase(),
+          codeHash: hashToken(code),
+          attempts: 0,
+          createdAt: now,
+          expiresAt: new Date(now.getTime() + CLAIM_CODE_TTL_MS),
+        });
+        const delivery = await mailer.sendClaimCode(email, code, project.name);
+        return reply.send({
+          ok: true,
+          delivery,
+          expires_in_seconds: CLAIM_CODE_TTL_MS / 1000,
+          verify: `${config.baseUrl}/v1/${project._id}/claim/verify`,
+        });
+      },
+    );
+
+    scoped.post(
+      '/v1/:project/claim/verify',
+      {
+        schema: {
+          tags: ['projects'],
+          summary: 'Finish the human claim with the emailed code',
+          body: {
+            type: 'object',
+            required: ['email', 'code'],
+            properties: {
+              email: { type: 'string', maxLength: 200 },
+              code: { type: 'string', minLength: 6, maxLength: 6 },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request) => {
+        const { project } = auth(request);
+        const { email, code } = request.body as { email: string; code: string };
+        const pending = await store.claimCodes.findOne({
+          projectId: project._id,
+          email: email.toLowerCase(),
+        });
+        if (!pending) {
+          throw new ServiceError(404, 'no_pending_claim', 'No claim is pending for that address.');
+        }
+        if (pending.attempts >= MAX_CLAIM_ATTEMPTS) {
+          throw new ServiceError(
+            429,
+            'too_many_attempts',
+            'Too many wrong codes. Start the claim again.',
+          );
+        }
+        if (pending.codeHash !== hashToken(code)) {
+          await store.claimCodes.updateOne({ _id: pending._id }, { $inc: { attempts: 1 } });
+          throw new ServiceError(400, 'bad_code', 'That code does not match.');
+        }
+        await claimProjectWithEmail(store, project, email.toLowerCase(), config);
+        await store.claimCodes.deleteMany({ projectId: project._id });
+        const updated = await store.projects.findOne({ _id: project._id });
+        return { ok: true, project: projectJson(updated!, config) };
+      },
+    );
+  });
+}
+
+function tooMany(reply: FastifyReply, retryAfter: number): FastifyReply {
+  return reply
+    .code(429)
+    .header('retry-after', String(retryAfter))
+    .send({
+      error: 'rate_limited',
+      message: `Too many requests. Retry in ${retryAfter}s. Published limits live at /.well-known/agent-access.json.`,
+      retry_after: retryAfter,
+    });
+}
+
+export { answerEscalation };

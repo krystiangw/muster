@@ -1,0 +1,39 @@
+{
+  "name": "muster",
+  "description": "Shared operational memory for long-lived agents: who is on duty, who owns what, what rotted and what needs a human.",
+  "repository": "https://github.com/krystiangw/muster",
+  "keywords": ["agents", "mcp", "coordination", "mongodb", "fastify"],
+  "stack": "heroku-24",
+  "buildpacks": [{ "url": "heroku/nodejs" }],
+  "env": {
+    "MONGODB_URI": {
+      "description": "MongoDB Atlas connection string. Use a cluster in the same region as the dyno.",
+      "required": true
+    },
+    "MONGODB_DB": {
+      "description": "Database name.",
+      "value": "muster"
+    },
+    "BASE_URL": {
+      "description": "Public origin. Every generated URL and every agent-facing file is built from this, so it must match what agents resolve.",
+      "required": true
+    },
+    "RESEND_API_KEY": {
+      "description": "Sends the six digit code for the human claim step. Without it, codes go to the log.",
+      "required": false
+    },
+    "EMAIL_FROM": {
+      "description": "Sender for claim codes.",
+      "value": "Muster <hello@muster.dev>"
+    },
+    "LOG_LEVEL": {
+      "value": "info"
+    }
+  },
+  "formation": {
+    "web": {
+      "quantity": 1,
+      "size": "basic"
+    }
+  }
+}

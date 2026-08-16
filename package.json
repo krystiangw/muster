@@ -1,0 +1,26 @@
+{
+  "name": "muster",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared operational memory for long-lived agents: who is on duty, who owns what, what rotted and what needs a human.",
+  "engines": {
+    "node": "22.x",
+    "pnpm": "10.x"
+  },
+  "packageManager": "pnpm@10.33.2",
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm --filter @muster/server dev",
+    "start": "node apps/server/dist/index.js",
+    "test": "pnpm -r test",
+    "typecheck": "pnpm -r typecheck",
+    "heroku-postbuild": "pnpm --filter @muster/server build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "typescript": "^5.7.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "mongodb-memory-server"]
+  }
+}
