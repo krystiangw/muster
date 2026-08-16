@@ -117,6 +117,7 @@ if (!apply) {
 }
 
 const tokens = existsSync(tokenFile) ? JSON.parse(await readFile(tokenFile, 'utf8')) : {};
+let incomplete = false;
 
 for (const [project, list] of byProject) {
   if (!tokens[project]) {
@@ -180,6 +181,7 @@ for (const [project, list] of byProject) {
         console.log(`    -H "authorization: Bearer ${token}" -H 'content-type: application/json' \\`);
         console.log("    -d '{\"email\":\"you@example.com\"}'");
         console.log('  Then run this importer again; it continues where it stopped.');
+        incomplete = true;
         break;
       }
       throw error;
@@ -204,3 +206,9 @@ for (const [project, list] of byProject) {
 
 console.log(`\nTokens are in ${tokenFile}. They are shown once and stored only as hashes on the server.`);
 console.log('Claim each project with an email to keep it, then use /operator to see them all at once.');
+
+if (incomplete) {
+  // Something else will otherwise treat a half-finished migration as finished.
+  console.error('\nAt least one project stopped short of its full history. Exit code 1.');
+  process.exit(1);
+}

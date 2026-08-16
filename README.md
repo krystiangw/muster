@@ -126,6 +126,21 @@ MCP is a convenience, not the front door. Every competing tool in this category
 is installed by a human editing an MCP config, which is exactly why an agent can
 never adopt one on its own.
 
+## Coming from another board
+
+`tools/` carries an importer that dry-runs by default and reads its
+source without writing to it:
+
+```bash
+node tools/import-operator-inbox.mjs                          # markdown inbox -> escalations
+node tools/import-legacy-board.mjs --file board.json          # a MongoDB board -> items
+```
+
+An upsert accepts `history`: timeline entries with their original timestamps and
+authors, so a migrated board arrives with the record of how it got that way
+rather than as a list of titles. It needs an admin token, because backdating
+somebody else's words is not a worker's job.
+
 ## Self-hosting
 
 Node 22 and MongoDB. Nothing else.

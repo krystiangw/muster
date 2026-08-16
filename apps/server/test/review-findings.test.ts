@@ -403,6 +403,68 @@ describe('the open item cap', () => {
     assert.equal(seen.size, 5, 'paging must reach every question, not just the newest page');
   });
 
+  it('says how much carried history it kept instead of quietly dropping it', async () => {
+    const project = await createProject(harness);
+    const history = Array.from({ length: 120 }, (_, i) => ({
+      at: new Date(Date.UTC(2026, 0, 1) + i * 3_600_000).toISOString(),
+      by: 'old-system',
+      message: `entry ${i}`,
+    }));
+
+    const response = await post(project, '/items', {
+      slug: 'long-history',
+      title: 'a long history',
+      actor: 'migration',
+      history,
+    });
+    assert.equal(response.statusCode, 201);
+    const warnings = response.json().warnings as string[];
+    assert.ok(
+      warnings.some((warning) => /Kept the \d+ most recent of 120/.test(warning)),
+      `expected a truncation warning, got ${JSON.stringify(warnings)}`,
+    );
+
+    const item = await harness.store.items.findOne({ projectId: project.id, slug: 'long-history' });
+    assert.ok(item!.timeline.length <= 50);
+    // The most recent entries are the ones worth keeping.
+    assert.equal(item!.timeline.at(-2)!.message, 'entry 119');
+  });
+
+  it('validates carried history before it changes anything', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'guarded', title: 'x', actor: 'a' });
+
+    const rejected = await post(project, '/items', {
+      slug: 'guarded',
+      status: 'done',
+      actor: 'a',
+      history: [{ at: 'nonsense', message: 'x' }],
+    });
+    assert.equal(rejected.statusCode, 400);
+
+    const item = await harness.store.items.findOne({ projectId: project.id, slug: 'guarded' });
+    const doc = await harness.store.projects.findOne({ _id: project.id });
+    assert.equal(item!.status, 'open', 'a rejected request must not have changed the status');
+    assert.equal(doc!.counts.items, 1, 'nor the quota');
+  });
+
+  it('repairs an overcounted project, and never inflates one', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'one', title: 'one', actor: 'a' });
+
+    // A process that died between closing an item and giving back its slot
+    // leaves the counter too high, which would reject valid work forever.
+    await harness.store.projects.updateOne({ _id: project.id }, { $set: { 'counts.items': 40 } });
+    await post(project, '/sweep', {});
+    assert.equal((await harness.store.projects.findOne({ _id: project.id }))!.counts.items, 1);
+
+    // The other direction is left alone: correcting upwards is how a recount
+    // double-counts a write that lands while it is counting.
+    await harness.store.projects.updateOne({ _id: project.id }, { $set: { 'counts.items': 0 } });
+    await post(project, '/sweep', {});
+    assert.equal((await harness.store.projects.findOne({ _id: project.id }))!.counts.items, 0);
+  });
+
   it('orders the operator queue by urgency, not by alphabet', async () => {
     const project = await createProject(harness);
     for (const [priority, question] of [
@@ -424,22 +486,15 @@ describe('the open item cap', () => {
     );
   });
 
-  it('never recounts, because a recount can only be wrong in the dangerous direction', async () => {
+  it('keeps the counter honest through exact deltas on every path', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'real', title: 'real', actor: 'a' });
+    assert.equal((await harness.store.projects.findOne({ _id: project.id }))!.counts.items, 1);
 
-    // Whatever the counter says, a sweep leaves it alone. Every earlier attempt
-    // at repairing it here raced the writes it was repairing, and an overcount
-    // makes a working project reject its own valid work.
-    await harness.store.projects.updateOne({ _id: project.id }, { $set: { 'counts.items': 999 } });
-    await post(project, '/sweep', {});
-    const afterSweep = await harness.store.projects.findOne({ _id: project.id });
-    assert.equal(afterSweep!.counts.items, 999);
-
-    // What does keep it honest: exact deltas on every path. Closing the item
-    // takes its slot back even from a nonsense starting point.
     await post(project, '/items', { slug: 'real', status: 'done', actor: 'a' });
-    const afterClosing = await harness.store.projects.findOne({ _id: project.id });
-    assert.equal(afterClosing!.counts.items, 998);
+    assert.equal((await harness.store.projects.findOne({ _id: project.id }))!.counts.items, 0);
+
+    await post(project, '/items', { slug: 'real', status: 'open', actor: 'a' });
+    assert.equal((await harness.store.projects.findOne({ _id: project.id }))!.counts.items, 1);
   });
 });

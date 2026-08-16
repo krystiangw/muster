@@ -196,6 +196,35 @@ describe('items', () => {
       history: [{ at: 'not a date', message: 'nope' }],
     });
     assert.equal(rejected.statusCode, 400);
+
+    // Re-running a migration after a failure must not append the history twice.
+    await post(project, '/items', {
+      slug: 'migrated',
+      title: 'came from the old board',
+      actor: 'migration',
+      history: [
+        { at: '2026-04-16T20:16:55.485Z', by: 'audit-sync', message: 'first sighting' },
+        { at: '2026-05-02T09:00:00.000Z', by: 'errors-loop', message: 'root cause found' },
+      ],
+    });
+    const rerun = (await get(project, '/items/migrated')).json().item;
+    assert.equal(rerun.timeline.filter((e: { message: string }) => e.message === 'first sighting').length, 1);
+  });
+
+  it('puts carried history in chronological order whatever order it arrives in', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', {
+      slug: 'unsorted',
+      title: 'x',
+      actor: 'migration',
+      history: [
+        { at: '2026-05-02T09:00:00.000Z', by: 'b', message: 'second' },
+        { at: '2026-04-16T20:16:55.485Z', by: 'a', message: 'first' },
+      ],
+    });
+    const item = (await get(project, '/items/unsorted')).json().item;
+    assert.equal(item.timeline[0].message, 'first');
+    assert.equal(item.timeline[1].message, 'second');
   });
 
   it('enforces the project item cap', async () => {

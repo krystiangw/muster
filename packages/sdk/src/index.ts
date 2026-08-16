@@ -51,6 +51,12 @@ export interface Escalation {
   created_at: string;
 }
 
+export interface HistoryEntry {
+  at: string;
+  by?: string;
+  message: string;
+}
+
 export interface UpsertInput {
   slug: string;
   title?: string;
@@ -63,6 +69,12 @@ export interface UpsertInput {
   source?: string | null;
   note?: string;
   actor?: string;
+  /**
+   * Timeline entries carried over from another system, with their original
+   * timestamps. Applied only when the item is created, so re-running a
+   * migration cannot duplicate them. Needs an admin token.
+   */
+  history?: HistoryEntry[];
 }
 
 export interface UpsertResult {
@@ -256,6 +268,14 @@ export class Muster {
     return this.request('POST', `/items/${encodeURIComponent(slug)}/timeline`, { message, actor });
   }
 
+  /**
+   * Removes an item and its history. Closing is the normal ending and keeps the
+   * record; this is for mistakes and bad imports. Needs an admin token.
+   */
+  async deleteItem(slug: string): Promise<{ ok: boolean }> {
+    return this.request('DELETE', `/items/${encodeURIComponent(slug)}`);
+  }
+
   async next(agent = this.actor): Promise<NextResult> {
     return this.request('GET', '/next', undefined, { agent });
   }
@@ -339,9 +359,40 @@ export class Muster {
   }
 
   async escalations(
+    query: { status?: EscalationStatus; agent?: string; limit?: number; cursor?: string } = {},
+  ): Promise<{ escalations: Escalation[]; next_cursor: string | null }> {
+    return this.request('GET', '/escalations', undefined, {
+      status: query.status,
+      agent: query.agent,
+      limit: query.limit === undefined ? undefined : String(query.limit),
+      cursor: query.cursor,
+    });
+  }
+
+  /** Walks every page, for a caller that wants the whole history at once. */
+  async allEscalations(
     query: { status?: EscalationStatus; agent?: string } = {},
-  ): Promise<{ escalations: Escalation[] }> {
-    return this.request('GET', '/escalations', undefined, query);
+  ): Promise<Escalation[]> {
+    const all: Escalation[] = [];
+    let cursor: string | undefined;
+    for (;;) {
+      const page = await this.escalations({ ...query, limit: 200, cursor });
+      all.push(...page.escalations);
+      if (page.escalations.length < 200 || !page.next_cursor) return all;
+      cursor = page.next_cursor;
+    }
+  }
+
+  /**
+   * Answers a question on the operator's behalf: the same four meanings the web
+   * view offers. Needs an admin token.
+   */
+  async answer(
+    id: string,
+    status: Exclude<EscalationStatus, 'open'> | 'open',
+    answer = '',
+  ): Promise<{ escalation: Escalation }> {
+    return this.request('PATCH', `/escalations/${encodeURIComponent(id)}`, { status, answer });
   }
 
   // ------------------------------------------------------------ project

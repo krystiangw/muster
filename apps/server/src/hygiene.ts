@@ -225,21 +225,38 @@ export async function resolveAbsent(
  * itself instead of corrupting a live project.
  */
 /**
- * There is deliberately no recount.
+ * Corrects an overcounted project, and only ever downwards.
  *
- * An earlier version repaired the capacity counters by counting the collection
- * and writing the result back. Every version of that idea lost: a write landing
- * between the count and the write-back makes the repair store a number that is
- * stale by exactly the change it missed, and a write landing just after makes
- * the same item count twice. Guarding it on a quiet window only moved the
- * failure to projects that are never quiet, which are the busy ones.
+ * Full reconciliation kept losing: recounting a collection while it is being
+ * written to stores a number that is stale by exactly the change it missed, and
+ * a write landing just after the count makes the same item count twice. Both
+ * mistakes point the same way, at a counter that is too high, and a counter
+ * that is too high makes a working project reject its own valid work.
  *
- * The counters do not need repairing. Every path that changes them applies an
- * exact delta after its write has succeeded, so the only drift a crash can
- * produce is an undercount, and an undercount hands out slightly more room than
- * it should. That is the mistake worth making: a recount that overcounts turns
- * a working project into one that rejects its own valid work.
+ * So this only ever lowers a counter, and only to a number it has actually
+ * seen. If a concurrent create lands right after the count, the write-back
+ * misses it and the project is briefly one slot generous, which nobody notices.
+ * If a process died between closing an item and giving back its slot, the
+ * overcount is repaired within a minute instead of lasting forever.
  */
+export async function correctOvercount(store: Store, projectId: string): Promise<boolean> {
+  const [openItems, openEscalations] = await Promise.all([
+    store.items.countDocuments({ projectId, status: { $nin: [...TERMINAL_STATUSES] } }),
+    store.escalations.countDocuments({ projectId, status: 'open' }),
+  ]);
+
+  const [items, escalations] = await Promise.all([
+    store.projects.updateOne(
+      { _id: projectId, 'counts.items': { $gt: openItems } },
+      { $set: { 'counts.items': openItems } },
+    ),
+    store.projects.updateOne(
+      { _id: projectId, 'counts.escalations': { $gt: openEscalations } },
+      { $set: { 'counts.escalations': openEscalations } },
+    ),
+  ]);
+  return items.modifiedCount + escalations.modifiedCount > 0;
+}
 
 export async function sweepProject(
   store: Store,
@@ -252,6 +269,7 @@ export async function sweepProject(
   outcomes.push(await resolveAbsent(store, project._id, rules, now));
   outcomes.push(await dropContentless(store, project._id, rules, now));
   outcomes.push(await markStale(store, project._id, rules, now));
+  await correctOvercount(store, project._id);
 
   return outcomes;
 }

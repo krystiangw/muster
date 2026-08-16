@@ -90,7 +90,14 @@ export function normalizeUpsertInput(input: UpsertItemInput): UpsertItemInput {
   };
 }
 
-/** Words only, for the soft duplicate check. Not an identity, just a hint. */
+/**
+ * Words only, for the soft duplicate check. Not an identity, just a hint.
+ *
+ * Word order is kept. An earlier version sorted the words, which made
+ * "route:venue-a->venue-b" and "route:venue-b->venue-a" look like the same ticket on
+ * a real board, and a duplicate warning that fires on genuinely different work
+ * is a warning agents learn to ignore.
+ */
 export function titleKey(title: string): string {
   return title
     .normalize('NFKD')
@@ -98,8 +105,7 @@ export function titleKey(title: string): string {
     .replace(/[^a-z0-9]+/g, ' ')
     .trim()
     .split(' ')
-    .filter((w) => w.length > 2)
-    .sort()
+    .filter((word) => word.length > 2)
     .join(' ')
     .slice(0, 200);
 }
@@ -320,6 +326,24 @@ export async function upsertItem(
   const now = new Date();
   const warnings: string[] = [];
 
+  // Parsed before anything is written. A bad timestamp buried in a hundred
+  // carried entries must not surface as a 400 after the item has already
+  // changed status and moved the project's counters.
+  const carriedHistory = (input.history ?? [])
+    .map((entry) => {
+      const at = entry.at instanceof Date ? entry.at : new Date(entry.at);
+      if (Number.isNaN(at.getTime())) {
+        throw badRequest('bad_history', 'Every history entry needs a valid "at" timestamp.');
+      }
+      return {
+        at,
+        by: (entry.by ?? 'imported').slice(0, 48),
+        kind: 'note' as const,
+        message: String(entry.message ?? '').slice(0, 4000),
+      };
+    })
+    .sort((a, b) => a.at.getTime() - b.at.getTime());
+
   const existing = await store.items.findOne(
     { projectId: project._id, slug },
     { projection: { _id: 1, status: 1, title: 1 } },
@@ -459,19 +483,22 @@ export async function upsertItem(
   // A's second write closes it again while the counter still reflects B.
 
   const entries: TimelineEntry[] = [];
-  if (input.history) {
-    for (const entry of input.history.slice(-TIMELINE_KEEP)) {
-      const at = entry.at instanceof Date ? entry.at : new Date(entry.at);
-      if (Number.isNaN(at.getTime())) {
-        throw badRequest('bad_history', 'Every history entry needs a valid "at" timestamp.');
-      }
-      entries.push({
-        at,
-        by: (entry.by ?? 'imported').slice(0, 48),
-        kind: 'note',
-        message: String(entry.message ?? '').slice(0, 4000),
-      });
+  if (carriedHistory.length > 0 && !existing) {
+    // Only on the first write of a slug. A migration re-run after a failure
+    // would otherwise append the same history again, which is exactly the
+    // duplication the slug exists to prevent.
+    //
+    // The document keeps a bounded timeline, so a longer history is truncated
+    // to its most recent entries and the caller is told, rather than being let
+    // to believe everything was stored.
+    const room = TIMELINE_KEEP - 1;
+    const kept = carriedHistory.slice(-room);
+    if (kept.length < carriedHistory.length) {
+      warnings.push(
+        `Kept the ${kept.length} most recent of ${carriedHistory.length} carried timeline entries; an item holds ${TIMELINE_KEEP}.`,
+      );
     }
+    entries.push(...kept);
   }
   if (!existing) {
     entries.push({ at: now, by: input.actor, kind: 'created', message: input.note ?? 'created' });

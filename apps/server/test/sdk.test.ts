@@ -151,6 +151,36 @@ describe('the typed SDK', () => {
     assert.equal(contested.held_by, 'a');
   });
 
+  it('migrates history, answers a question and pages through the queue', async () => {
+    const { client } = await Muster.start({ name: 'migration', actor: 'importer', baseUrl });
+
+    await client.upsert({
+      slug: 'from-elsewhere',
+      title: 'came from another system',
+      history: [
+        { at: '2026-05-02T09:00:00.000Z', by: 'old-loop', message: 'second' },
+        { at: '2026-04-16T20:16:55.485Z', by: 'old-loop', message: 'first' },
+      ],
+    });
+    const migrated = await client.item('from-elsewhere');
+    assert.equal(migrated.item.timeline?.[0]?.message, 'first');
+    assert.equal(migrated.item.timeline?.[0]?.by, 'old-loop');
+
+    for (let i = 0; i < 3; i += 1) {
+      await client.escalate({ question: `question ${i}` });
+    }
+    const everything = await client.allEscalations();
+    assert.equal(everything.length, 3);
+
+    const answered = await client.answer(everything[0]!.id, 'wont_do', 'not this week');
+    assert.equal(answered.escalation.status, 'wont_do');
+    const inbox = await client.inbox();
+    assert.equal(inbox.answers.length, 1);
+
+    await client.deleteItem('from-elsewhere');
+    await assert.rejects(client.item('from-elsewhere'));
+  });
+
   it('raises a typed error with the server’s own message', async () => {
     const { client } = await Muster.start({ name: 'errors', actor: 'a', baseUrl });
     await assert.rejects(client.item('nothing-here'), (error: unknown) => {
