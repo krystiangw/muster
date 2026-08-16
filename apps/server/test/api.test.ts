@@ -127,6 +127,33 @@ describe('items', () => {
     assert.match(item.timeline.at(-1).message, /open -> done: shipped/);
   });
 
+  it('converges when ten agents file the same new slug at once', async () => {
+    const project = await createProject(harness);
+    const responses = await Promise.all(
+      Array.from({ length: 10 }, (_, i) =>
+        post(project, '/items', {
+          slug: 'errors:same-problem',
+          title: 'the same problem',
+          actor: `agent-${i}`,
+          note: `from agent ${i}`,
+        }),
+      ),
+    );
+
+    assert.equal(responses.filter((r) => r.statusCode >= 400).length, 0, 'nobody gets an error');
+    assert.equal(
+      responses.filter((r) => r.json().created === true).length,
+      1,
+      'exactly one writer is told it created the item',
+    );
+
+    const list = await get(project, '/items');
+    assert.equal(list.json().items.length, 1, 'one slug, one item');
+
+    const item = await get(project, '/items/errors:same-problem');
+    assert.equal(item.json().item.timeline.length, 10, 'every writer is in the timeline');
+  });
+
   it('enforces the project item cap', async () => {
     const project = await createProject(harness);
     await harness.store.projects.updateOne(

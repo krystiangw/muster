@@ -111,6 +111,46 @@ describe('the typed SDK', () => {
     assert.equal(ran, false);
   });
 
+  it('throws on a 409 that is a real failure, and only passes the contested claim through', async () => {
+    const { client, created } = await Muster.start({ name: 'conflicts', actor: 'a', baseUrl });
+    await client.upsert({ slug: 'held', title: 'held' });
+    await client.claim('held', 'a', 60);
+
+    // A heartbeat from the wrong agent is a failure, not a result. Swallowing it
+    // would let the caller carry on believing it holds the lease.
+    await assert.rejects(client.heartbeat('held', 'someone-else'), (error: unknown) => {
+      assert.equal((error as { status?: number }).status, 409);
+      assert.equal((error as { code?: string }).code, 'not_claim_holder');
+      return true;
+    });
+
+    // A full project is a failure too.
+    const direct = await fetch(`${baseUrl}/v1/${created.project}/items`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${created.token}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ slug: 'x', title: 'x', actor: 'a' }),
+    });
+    assert.ok(direct.ok);
+    await harness.store.projects.updateOne(
+      { _id: created.project },
+      { $set: { 'limits.items': 1 } },
+    );
+    await assert.rejects(client.upsert({ slug: 'over-the-cap', title: 'nope' }), (error: unknown) => {
+      assert.equal((error as { code?: string }).code, 'limit_reached');
+      return true;
+    });
+
+    // The contested claim still comes back as an answer.
+    const contested = await new Muster({
+      project: created.project,
+      token: created.token,
+      baseUrl,
+      actor: 'b',
+    }).claim('held');
+    assert.equal(contested.ok, false);
+    assert.equal(contested.held_by, 'a');
+  });
+
   it('raises a typed error with the server’s own message', async () => {
     const { client } = await Muster.start({ name: 'errors', actor: 'a', baseUrl });
     await assert.rejects(client.item('nothing-here'), (error: unknown) => {

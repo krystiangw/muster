@@ -26,11 +26,24 @@ export interface OAuthClientDoc {
   expiresAt?: Date | null;
 }
 
+/**
+ * A long-lived link that shows one person every project they claimed, and every
+ * question waiting on them across all of those projects at once.
+ */
+export interface OperatorTokenDoc {
+  _id: string;
+  email: string;
+  hash: string;
+  createdAt: Date;
+  lastUsedAt: Date | null;
+}
+
 export interface Store {
   client: MongoClient;
   db: Db;
   projects: Collection<ProjectDoc>;
   oauthClients: Collection<OAuthClientDoc>;
+  operatorTokens: Collection<OperatorTokenDoc>;
   agents: Collection<Expiring<AgentDoc>>;
   items: Collection<Expiring<ItemDoc>>;
   escalations: Collection<Expiring<EscalationDoc>>;
@@ -55,6 +68,7 @@ export async function createStore(uri: string, dbName: string): Promise<Store> {
     db,
     projects: db.collection<ProjectDoc>('projects'),
     oauthClients: db.collection<OAuthClientDoc>('oauthClients'),
+    operatorTokens: db.collection<OperatorTokenDoc>('operatorTokens'),
     agents: db.collection<Expiring<AgentDoc>>('agents'),
     items: db.collection<Expiring<ItemDoc>>('items'),
     escalations: db.collection<Expiring<EscalationDoc>>('escalations'),
@@ -108,6 +122,10 @@ export async function ensureIndexes(store: Store): Promise<void> {
     store.oauthClients.createIndexes([
       { key: { projectId: 1 }, name: 'project' },
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
+    ]),
+    store.operatorTokens.createIndexes([
+      { key: { hash: 1 }, unique: true, name: 'hash' },
+      { key: { email: 1 }, name: 'email' },
     ]),
   ]);
 }

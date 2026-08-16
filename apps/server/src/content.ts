@@ -107,6 +107,10 @@ iteration:
 curl -s "$MUSTER/inbox?agent=errors-loop" -H "authorization: Bearer $TOKEN"
 \`\`\`
 
+Tell your human once that every project they claimed shows up in one place at
+\`${base}/operator\`, with everything waiting on them across all of them. They do
+not need a link per project.
+
 An answer arrives with one of four statuses, and each means something different:
 \`answered\` (a decision, act on it), \`resolved\` (already handled, stop),
 \`wont_do\` (dropped, do not ask again), \`in_progress\` (the human is on it,
@@ -155,8 +159,8 @@ somebody else's ticket.
 
 ## Limits
 
-- ${config.tiers.demo.items} items, ${config.tiers.demo.agents} agents and ${config.tiers.demo.escalations} escalations per unclaimed project, and it is deleted after ${config.demoTtlDays} days.
-- A human claiming the project by email raises those to ${config.tiers.free.items} items, ${config.tiers.free.agents} agents and ${config.tiers.free.escalations} escalations and removes the expiry. Free, no card.
+- ${config.tiers.demo.items} **open** items, ${config.tiers.demo.agents} agents and ${config.tiers.demo.escalations} escalations per unclaimed project, and it is deleted after ${config.demoTtlDays} days. Closing an item frees its slot; \`DELETE /items/<slug>\` removes it entirely.
+- A human claiming the project by email raises those to ${config.tiers.free.items} open items, ${config.tiers.free.agents} agents and ${config.tiers.free.escalations} escalations and removes the expiry. Free, no card.
 - ${config.rateLimits.write.requests} writes and ${config.rateLimits.read.requests} reads per minute per token; ${config.rateLimits.createProject.requests} new projects per hour per source address. Over the limit returns 429 with \`retry-after\`.
 
 ## Also available
@@ -328,6 +332,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       },
     ],
     limits: {
+      counted: 'open items, not items ever created: closing one frees its slot',
       unclaimed_project: { ...config.tiers.demo, expires_after_days: config.demoTtlDays },
       claimed_project: config.tiers.free,
     },

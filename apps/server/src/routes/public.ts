@@ -209,7 +209,7 @@ There is no authorization code flow, because there is no end user to ask for con
 What limits you is the size of a project, and those numbers are published rather than discovered.</p>
 
 <div class="scroll"><table>
-<thead><tr><th>Plan</th><th class="mono">items</th><th class="mono">agents</th><th class="mono">escalations</th><th>Retention</th></tr></thead>
+<thead><tr><th>Plan</th><th class="mono">open items</th><th class="mono">agents</th><th class="mono">escalations</th><th>Retention</th></tr></thead>
 <tbody>
 <tr><td><b>Unclaimed project</b><br><span class="mono">created by an agent, no email yet</span></td>
 <td class="mono">${demo.items}</td><td class="mono">${demo.agents}</td><td class="mono">${demo.escalations}</td>
@@ -218,6 +218,10 @@ What limits you is the size of a project, and those numbers are published rather
 <td class="mono">${free.items}</td><td class="mono">${free.agents}</td><td class="mono">${free.escalations}</td>
 <td>Kept as long as you use it.</td></tr>
 </tbody></table></div>
+
+<p>The limit counts <b>open</b> items, not items you have ever written. Closing one frees its slot,
+so a project that has finished a thousand tickets is not full; it is empty. Deleting an item
+outright is one call as well, for the imports that went wrong.</p>
 
 <p>The free tier is the product, not a trial of it: claiming a project costs nothing, needs no
 card, and exists so that a junk project created by a stray script disposes of itself while a real

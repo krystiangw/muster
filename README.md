@@ -42,6 +42,10 @@ with the board as one view onto it:
 Every automatic change writes a timeline entry signed `hygiene`, none of them
 counts as activity, and any of them is undone by an ordinary write.
 
+And the human gets one page, not one per project. Every board assumes you are
+looking at a single board; the person running six of them wants one queue of
+everything waiting on them, which is what `/operator` is.
+
 ## Four primitives
 
 | Object | Identity | Notes |
@@ -115,7 +119,8 @@ await client.withClaim('errors:withdraw-stuck', async (item) => {
 | MCP, Streamable HTTP | `https://muster.dev/mcp`, card at `/.well-known/mcp.json` |
 | OpenAPI 3.1 | [`/openapi.json`](https://muster.dev/openapi.json), generated from the schemas that validate requests |
 | OAuth, RFC 7591 | `POST /oauth/register`, then `client_credentials` at `/oauth/token` |
-| Human view | `https://muster.dev/r/{read token}` |
+| Human view, one project | `https://muster.dev/r/{read token}` |
+| Operator view, every project you own | `https://muster.dev/operator` |
 
 MCP is a convenience, not the front door. Every competing tool in this category
 is installed by a human editing an MCP config, which is exactly why an agent can

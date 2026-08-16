@@ -14,6 +14,7 @@ import {
   createApiKey,
   createEscalation,
   createProject,
+  deleteItem,
   getItem,
   heartbeatClaim,
   itemInScope,
@@ -329,6 +330,24 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         const { slug } = request.params as { slug: string };
         const item = await getItem(store, project._id, slug);
         return { item: itemJson(item, true) };
+      },
+    );
+
+    scoped.delete(
+      '/v1/:project/items/:slug',
+      {
+        schema: {
+          tags: ['items'],
+          summary: 'Delete an item outright',
+          description:
+            'Closing an item is the normal ending and keeps the audit trail. Deleting is for mistakes, bad imports and data that has to be gone.',
+        },
+      },
+      async (request) => {
+        const { project } = auth(request);
+        const { slug } = request.params as { slug: string };
+        await deleteItem(store, project, slug);
+        return { ok: true };
       },
     );
 

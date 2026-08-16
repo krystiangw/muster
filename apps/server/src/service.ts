@@ -1,9 +1,11 @@
 import type { Config } from './config.js';
 import type { Store } from './db.js';
 import { resolveAbsent } from './hygiene.js';
-import { hashToken, newId, newToken, normalizeHandle, normalizeSlug } from './ids.js';
+import { hashToken, isValidHandle, newId, newToken, normalizeHandle, normalizeSlug } from './ids.js';
 import {
   DEFAULT_RULES,
+  ESCALATION_PRIORITIES,
+  ITEM_STATUSES,
   TERMINAL_STATUSES,
   type AgentDoc,
   type ApiKeyDoc,
@@ -37,6 +39,54 @@ function limitReached(what: string, limit: number): ServiceError {
     `This project is capped at ${limit} ${what}. Close or delete some, or claim the project to raise the cap.`,
     { limit, resource: what },
   );
+}
+
+/**
+ * Input validation lives here, not in the HTTP schemas, because there is more
+ * than one door. REST bodies are checked by Fastify, but MCP tool arguments
+ * arrive from a model that may have invented them, and both end up in the same
+ * documents. A status of "in progress" written through MCP would be invisible
+ * to every query that knows only the four real statuses, so the domain layer
+ * rejects it once, for everybody.
+ */
+function clamp(value: string | undefined, max: number): string | undefined {
+  return value === undefined ? undefined : value.slice(0, max);
+}
+
+function badRequest(code: string, message: string): ServiceError {
+  return new ServiceError(400, code, message);
+}
+
+export function normalizeUpsertInput(input: UpsertItemInput): UpsertItemInput {
+  if (input.status !== undefined && !ITEM_STATUSES.includes(input.status)) {
+    throw badRequest(
+      'bad_status',
+      `Status must be one of ${ITEM_STATUSES.join(', ')}. There is no "in progress": an item is in progress when it has a live claim.`,
+    );
+  }
+  if (input.priority !== undefined) {
+    if (!Number.isInteger(input.priority) || input.priority < -10 || input.priority > 10) {
+      throw badRequest('bad_priority', 'Priority is an integer between -10 and 10.');
+    }
+  }
+  if (input.labels !== undefined) {
+    if (!Array.isArray(input.labels) || input.labels.some((label) => typeof label !== 'string')) {
+      throw badRequest('bad_labels', 'Labels are an array of strings.');
+    }
+  }
+  if (input.fields !== undefined && (typeof input.fields !== 'object' || input.fields === null)) {
+    throw badRequest('bad_fields', 'Fields is an object.');
+  }
+  return {
+    ...input,
+    title: clamp(input.title, 300),
+    body: clamp(input.body, 20_000),
+    note: clamp(input.note, 2_000),
+    owner: input.owner === undefined || input.owner === null ? input.owner : input.owner.slice(0, 48),
+    source: input.source === undefined || input.source === null ? input.source : input.source.slice(0, 64),
+    labels: input.labels?.slice(0, 20).map((label) => label.slice(0, 48)),
+    actor: input.actor.slice(0, 48) || 'unknown-agent',
+  };
 }
 
 /** Words only, for the soft duplicate check. Not an identity, just a hint. */
@@ -155,7 +205,18 @@ export async function registerAgent(
   project: ProjectDoc,
   input: { handle: string; scope?: string[]; description?: string; meta?: Record<string, unknown> },
 ): Promise<{ agent: AgentDoc; created: boolean }> {
-  const handle = normalizeHandle(input.handle);
+  const handle = normalizeHandle(input.handle ?? '');
+  if (!isValidHandle(handle)) {
+    throw badRequest(
+      'bad_handle',
+      'A handle is lowercase letters, digits, dot, dash or underscore, starting with a letter or digit.',
+    );
+  }
+  if (input.scope !== undefined) {
+    if (!Array.isArray(input.scope) || input.scope.some((token) => typeof token !== 'string')) {
+      throw badRequest('bad_scope', 'Scope is an array of strings.');
+    }
+  }
   const now = new Date();
   const existing = await store.agents.findOne({ projectId: project._id, handle });
   if (!existing && project.counts.agents >= project.limits.agents) {
@@ -241,8 +302,9 @@ export interface UpsertItemResult {
 export async function upsertItem(
   store: Store,
   project: ProjectDoc,
-  input: UpsertItemInput,
+  rawInput: UpsertItemInput,
 ): Promise<UpsertItemResult> {
+  const input = normalizeUpsertInput(rawInput);
   const slug = normalizeSlug(input.slug);
   if (!slug) {
     throw new ServiceError(400, 'bad_slug', 'slug must contain at least one alphanumeric character.');
@@ -255,9 +317,21 @@ export async function upsertItem(
     { projection: { _id: 1, status: 1, title: 1 } },
   );
 
+  // The cap counts open items, not slugs ever written, so a project that has
+  // closed a thousand tickets is not bricked. The slot is taken atomically:
+  // reading the count and then inserting lets a burst of agents walk straight
+  // past the limit together.
+  const willBeTerminal = input.status !== undefined && TERMINAL_STATUSES.includes(input.status);
+  let reserved = false;
   if (!existing) {
-    if (project.counts.items >= project.limits.items) {
-      throw limitReached('items', project.limits.items);
+    if (!willBeTerminal) {
+      const slot = await store.projects.findOneAndUpdate(
+        { _id: project._id, 'counts.items': { $lt: project.limits.items } },
+        { $inc: { 'counts.items': 1 } },
+        { projection: { _id: 1 } },
+      );
+      if (!slot) throw limitReached('open items', project.limits.items);
+      reserved = true;
     }
     if (input.title) {
       const key = titleKey(input.title);
@@ -335,23 +409,59 @@ export async function upsertItem(
     }
   }
 
-  const result = await store.items.findOneAndUpdate(
-    { projectId: project._id, slug },
-    {
-      $set: set,
-      $setOnInsert: setOnInsert,
-      $push: { timeline: { $each: entries, $slice: -TIMELINE_KEEP } },
-      $inc: { timelineCount: entries.length },
-    },
-    { upsert: true, returnDocument: 'after', includeResultMetadata: true },
-  );
+  const write = () =>
+    store.items.findOneAndUpdate(
+      { projectId: project._id, slug },
+      {
+        $set: set,
+        $setOnInsert: setOnInsert,
+        $push: { timeline: { $each: entries, $slice: -TIMELINE_KEEP } },
+        $inc: { timelineCount: entries.length },
+      },
+      { upsert: true, returnDocument: 'after', includeResultMetadata: true },
+    );
+
+  let result;
+  try {
+    result = await write();
+  } catch (error) {
+    // Two agents filing the same new slug in the same instant is the normal
+    // case here, not an edge case, and MongoDB documents that concurrent
+    // upserts against a unique index can surface E11000. The retry finds the
+    // document the other writer just inserted and updates it, which is exactly
+    // what convergence on a slug is supposed to mean.
+    if ((error as { code?: number }).code !== 11000) throw error;
+    delete setOnInsert._id;
+    result = await write();
+  }
 
   const created = !result.lastErrorObject?.updatedExisting;
+  const item = result.value as ItemDoc;
+  const isTerminal = TERMINAL_STATUSES.includes(item.status);
+
+  // Keep the open-item count honest across every path a write can take. The
+  // periodic sweep recomputes it from the collection anyway, so a lost race
+  // costs a minute of drift rather than a wrong limit forever.
+  let delta = 0;
   if (created) {
-    await store.projects.updateOne({ _id: project._id }, { $inc: { 'counts.items': 1 } });
+    if (reserved && isTerminal) delta -= 1;
+    if (!reserved && !isTerminal) delta += 1;
+  } else {
+    if (reserved) {
+      // Another writer inserted the same slug between our check and our write.
+      delta -= 1;
+    } else if (existing) {
+      const wasTerminal = TERMINAL_STATUSES.includes(existing.status);
+      if (wasTerminal && !isTerminal) delta += 1;
+      if (!wasTerminal && isTerminal) delta -= 1;
+    }
   }
+  if (delta !== 0) {
+    await store.projects.updateOne({ _id: project._id }, { $inc: { 'counts.items': delta } });
+  }
+
   void touchAgent(store, project._id, input.actor);
-  return { item: result.value as ItemDoc, created, warnings };
+  return { item, created, warnings };
 }
 
 export async function appendNote(
@@ -450,7 +560,16 @@ export async function heartbeatClaim(
   const now = new Date();
   const ttl = Math.min(Math.max(ttlMinutes ?? project.rules.claimTtlMinutes, 1), 1440);
   const item = await store.items.findOneAndUpdate(
-    { projectId: project._id, slug: normalizeSlug(slug), 'claim.agent': agent },
+    {
+      projectId: project._id,
+      slug: normalizeSlug(slug),
+      'claim.agent': agent,
+      // A lapsed lease cannot be extended, only re-taken. Between expiry and
+      // the sweep that clears it, the item is already fair game for everybody
+      // else, and letting the old holder quietly extend would hand it back
+      // after it was released.
+      'claim.expiresAt': { $gt: now },
+    },
     {
       $set: {
         'claim.heartbeatAt': now,
@@ -464,7 +583,7 @@ export async function heartbeatClaim(
     throw new ServiceError(
       409,
       'not_claim_holder',
-      `You do not hold the claim on "${slug}". Claim it again if the previous one expired.`,
+      `You do not hold a live claim on "${slug}". Claim it again if the previous one expired.`,
     );
   }
   return item as ItemDoc;
@@ -498,6 +617,26 @@ export async function releaseItem(
     throw new ServiceError(409, 'not_claim_holder', `You do not hold the claim on "${slug}".`);
   }
   return item as ItemDoc;
+}
+
+/**
+ * Removes an item outright. Closing is the normal end of a piece of work and
+ * keeps the audit trail; deleting exists for the mistakes, the imports that
+ * went wrong and the data somebody needs gone.
+ */
+export async function deleteItem(
+  store: Store,
+  project: ProjectDoc,
+  slug: string,
+): Promise<void> {
+  const deleted = await store.items.findOneAndDelete({
+    projectId: project._id,
+    slug: normalizeSlug(slug),
+  });
+  if (!deleted) throw notFound(slug);
+  if (!TERMINAL_STATUSES.includes(deleted.status)) {
+    await store.projects.updateOne({ _id: project._id }, { $inc: { 'counts.items': -1 } });
+  }
 }
 
 export interface ListItemsQuery {
@@ -693,6 +832,12 @@ export async function createEscalation(
 ): Promise<EscalationDoc> {
   if (project.counts.escalations >= project.limits.escalations) {
     throw limitReached('escalations', project.limits.escalations);
+  }
+  if (typeof input.question !== 'string' || input.question.trim().length === 0) {
+    throw badRequest('bad_question', 'An escalation needs a question the operator can answer.');
+  }
+  if (input.priority !== undefined && !ESCALATION_PRIORITIES.includes(input.priority)) {
+    throw badRequest('bad_priority', `Priority is one of ${ESCALATION_PRIORITIES.join(', ')}.`);
   }
   const now = new Date();
   const doc: EscalationDoc = {

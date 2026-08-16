@@ -10,6 +10,7 @@ import { registerAgentFiles } from './routes/agentfiles.js';
 import { registerApi } from './routes/api.js';
 import { registerMcp } from './routes/mcp.js';
 import { registerOAuth } from './routes/oauth.js';
+import { registerOperator } from './routes/operator.js';
 import { registerPublic } from './routes/public.js';
 import { ServiceError } from './service.js';
 
@@ -74,8 +75,9 @@ export async function buildApp(config: Config, store: Store): Promise<App> {
 
   registerAgentFiles(server, config);
   registerOAuth(server, { store, config, limiter });
-  registerMcp(server, { store, config });
+  registerMcp(server, { store, config, limiter });
   registerApi(server, { store, config, limiter, mailer });
+  registerOperator(server, { store, config, limiter, mailer });
   registerPublic(server, { store, config, limiter });
 
   server.setErrorHandler((error: FastifyError, request, reply) => {

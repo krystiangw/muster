@@ -130,6 +130,7 @@ ${
     <a href="/docs">docs</a>
     <a href="/skill.md">skill.md</a>
     <a href="/pricing">pricing</a>
+    <a href="/operator">operator</a>
     <a href="/signup">start</a>
   </nav>
 </header>`

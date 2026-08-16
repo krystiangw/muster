@@ -188,7 +188,15 @@ export class Muster {
 
     const text = await response.text();
     const body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
-    if (!response.ok && response.status !== 409) {
+
+    // A contested claim is the one 409 that is an answer rather than a failure:
+    // "somebody else is on it" is information the caller acts on. Every other
+    // 409, a full project or a heartbeat from the wrong agent, is an error and
+    // must not be handed back as if the write had happened.
+    const isContestedClaim =
+      response.status === 409 && body.ok === false && typeof body.held_by === 'string';
+
+    if (!response.ok && !isContestedClaim) {
       throw new MusterError(
         response.status,
         String(body.error ?? 'error'),

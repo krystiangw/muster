@@ -40,7 +40,7 @@ export function registerAgentFiles(app: FastifyInstance, config: Config): void {
   );
 
   app.get('/sitemap.xml', { schema: { hide: true } }, (_request, reply) => {
-    const pages = ['/', '/docs', '/docs/keys', '/pricing', '/signup'];
+    const pages = ['/', '/docs', '/docs/keys', '/pricing', '/signup', '/operator'];
     const urls = pages
       .map((page) => `  <url><loc>${config.baseUrl}${page}</loc></url>`)
       .join('\n');

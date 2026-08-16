@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
 import { maybeSweep } from '../hygiene.js';
+import type { RateLimiter } from '../rateLimit.js';
 import { escalationJson, itemJson } from '../serialize.js';
 import {
   ServiceError,
@@ -46,6 +47,7 @@ interface JsonRpcRequest {
 export interface McpDeps {
   store: Store;
   config: Config;
+  limiter: RateLimiter;
 }
 
 interface ToolDefinition {
@@ -218,7 +220,7 @@ const TOOLS: ToolDefinition[] = [
 ];
 
 export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
-  const { store, config } = deps;
+  const { store, config, limiter } = deps;
 
   app.get('/mcp', { schema: { hide: true } }, async (_request, reply) =>
     // A plain GET is not an MCP handshake. Say what this endpoint is instead of
@@ -356,6 +358,20 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
     request: FastifyRequest,
   ): Promise<Record<string, unknown>> {
     if (!tool.requiresProject) {
+      // The same published limit as POST /p. A tool call is a cheaper way to
+      // ask for a project, not a way around the cap.
+      const ip =
+        (typeof request.headers['x-forwarded-for'] === 'string'
+          ? request.headers['x-forwarded-for'].split(',')[0]!.trim()
+          : request.ip) || 'unknown';
+      const verdict = limiter.check(`create:${ip}`, config.rateLimits.createProject);
+      if (!verdict.ok) {
+        throw new ServiceError(
+          429,
+          'rate_limited',
+          `Too many new projects from this address. Retry in ${verdict.retryAfterSeconds}s. If you already have a project, use its token instead of making another.`,
+        );
+      }
       const { project, adminToken } = await createProject(store, config, {
         name: str(args.name, 'Untitled project'),
       });

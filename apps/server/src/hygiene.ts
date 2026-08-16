@@ -200,6 +200,41 @@ export async function resolveAbsent(
   return { rule: 'absence_resolve', affected: result.modifiedCount };
 }
 
+/**
+ * Repairs the open-item count if, and only if, nothing is writing right now.
+ *
+ * The count is maintained by exact increments on every path that changes it, so
+ * this exists for the leftovers: a process that died between reserving a slot
+ * and inserting, or an item edited straight in the database. The guard matters
+ * more than the recount. A plain recompute-and-set clobbers concurrent
+ * reservations with a stale number, which is how a cap silently stops holding;
+ * writing only when the counter still reads what we read makes the repair skip
+ * itself instead of corrupting a live project.
+ */
+export async function reconcileCounts(store: Store, projectId: string): Promise<boolean> {
+  const before = await store.projects.findOne(
+    { _id: projectId },
+    { projection: { counts: 1 } },
+  );
+  if (!before) return false;
+
+  const [items, agents] = await Promise.all([
+    store.items.countDocuments({ projectId, status: { $nin: [...TERMINAL_STATUSES] } }),
+    store.agents.countDocuments({ projectId }),
+  ]);
+  if (before.counts.items === items && before.counts.agents === agents) return false;
+
+  const result = await store.projects.updateOne(
+    {
+      _id: projectId,
+      'counts.items': before.counts.items,
+      'counts.agents': before.counts.agents,
+    },
+    { $set: { 'counts.items': items, 'counts.agents': agents } },
+  );
+  return result.modifiedCount === 1;
+}
+
 export async function sweepProject(
   store: Store,
   project: Pick<ProjectDoc, '_id' | 'rules'>,
@@ -211,6 +246,21 @@ export async function sweepProject(
   outcomes.push(await resolveAbsent(store, project._id, rules, now));
   outcomes.push(await dropContentless(store, project._id, rules, now));
   outcomes.push(await markStale(store, project._id, rules, now));
+
+  // Closing work frees its slot. These two rules are the only ones here that
+  // move an item into a terminal status, and both report exactly how many, so
+  // the counter follows without a recount.
+  const closed = outcomes
+    .filter((outcome) => outcome.rule === 'absence_resolve' || outcome.rule === 'require_body')
+    .reduce((sum, outcome) => sum + outcome.affected, 0);
+  if (closed > 0) {
+    await store.projects.updateOne(
+      { _id: project._id },
+      { $inc: { 'counts.items': -closed } },
+    );
+  }
+
+  await reconcileCounts(store, project._id);
   return outcomes;
 }
 
