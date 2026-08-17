@@ -61,6 +61,41 @@ async function recentTimelines(
   return timelines;
 }
 
+/**
+ * What each agent on this page is for, in its own words.
+ *
+ * Asked for by handle rather than by taking the first N agents of the project:
+ * a project on the paid tier can register two hundred, and a page that loaded
+ * an arbitrary fifty of them would drop the description off some cards and not
+ * others, which reads as a bug rather than as a limit.
+ */
+async function agentDescriptions(
+  store: Store,
+  projectId: string,
+  view: BoardView,
+): Promise<Map<string, string>> {
+  const handles = new Set<string>();
+  for (const row of view.rows) {
+    for (const cell of row.columns) {
+      for (const item of cell.items.slice(0, COLUMN_RENDER_LIMIT)) {
+        if (item.claim) handles.add(item.claim.agent);
+        if (item.lastActor) handles.add(item.lastActor);
+      }
+    }
+  }
+  const described = new Map<string, string>();
+  if (handles.size === 0) return described;
+
+  const docs = await store.agents
+    .find(
+      { projectId, handle: { $in: [...handles] }, description: { $ne: '' } },
+      { projection: { handle: 1, description: 1 } },
+    )
+    .toArray();
+  for (const doc of docs) described.set(doc.handle, doc.description);
+  return described;
+}
+
 export function registerPublic(app: FastifyInstance, deps: PublicDeps): void {
   const { store, config, limiter } = deps;
   const base = config.baseUrl;
@@ -596,21 +631,14 @@ ${
       owner?: string;
       agent?: string;
     };
-    const [view, facets, registered] = await Promise.all([
+    const [view, facets] = await Promise.all([
       loadBoard(store, project, {
         ...(query.owner ? { owner: query.owner.slice(0, 48) } : {}),
         ...(query.agent ? { agent: query.agent.slice(0, 48) } : {}),
       }),
       boardFacets(store, project),
-      store.agents.find({ projectId: project._id }).limit(50).toArray(),
     ]);
-    // A handle is which agent; the description it registered is what that agent
-    // is for. Carrying it onto the card means nobody has to look it up.
-    const agents = new Map(
-      registered
-        .filter((agent) => agent.description)
-        .map((agent) => [agent.handle, agent.description] as const),
-    );
+    const agents = await agentDescriptions(store, project._id, view);
 
     // A move redirects back here saying what it did. The message is built from
     // the board's own columns rather than carried in the URL, so a crafted link

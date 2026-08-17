@@ -251,9 +251,13 @@ export async function loadBoard(
 }
 
 /**
- * The people and agents a board could be narrowed to. Read from the items
- * themselves rather than a list somebody maintains, so the filter never offers
- * a name with nothing behind it.
+ * The people and agents a board could be narrowed to.
+ *
+ * Read from the work itself, plus the agents that registered. Those two are
+ * different on purpose: registering is an agent declaring it is here, so it is
+ * offered even before it writes anything, while a claim that expired is a
+ * leftover and its holder is not. Offering a name whose board comes back empty
+ * is how a filter teaches people not to trust it.
  */
 export async function boardFacets(
   store: Store,
@@ -262,7 +266,10 @@ export async function boardFacets(
   const [owners, actors, holders, registered] = await Promise.all([
     store.items.distinct('owner', { projectId: project._id }),
     store.items.distinct('lastActor', { projectId: project._id }),
-    store.items.distinct('claim.agent', { projectId: project._id }),
+    store.items.distinct('claim.agent', {
+      projectId: project._id,
+      'claim.expiresAt': { $gt: new Date() },
+    }),
     store.agents.distinct('handle', { projectId: project._id }),
   ]);
   const clean = (values: unknown[]): string[] =>

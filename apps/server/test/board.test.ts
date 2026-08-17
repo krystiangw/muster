@@ -907,6 +907,56 @@ describe('a board many agents write to', () => {
     assert.ok(facets.agents.includes('errors-loop'));
     assert.ok(facets.agents.includes('idle-loop'), 'a registered agent counts even before it writes');
   });
+
+  it('stops offering an agent whose only trace is a lapsed claim', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'passed-on', title: 'passed on', actor: 'first-loop' });
+    await post(project, '/items/passed-on/claim', { agent: 'ghost-loop', ttl_minutes: 30 });
+    await post(project, '/items/passed-on/timeline', { actor: 'first-loop', message: 'took over' });
+
+    const facets = async () =>
+      (
+        await harness.server.inject({
+          method: 'GET',
+          url: `${project.api}/board/facets`,
+          headers: authed(project),
+        })
+      ).json().agents as string[];
+
+    assert.ok((await facets()).includes('ghost-loop'), 'while the lease is live');
+
+    await harness.store.items.updateOne(
+      { projectId: project.id, slug: 'passed-on' },
+      { $set: { 'claim.expiresAt': new Date(Date.now() - 60_000) } },
+    );
+    // Offering a name whose board comes back empty is how a filter teaches
+    // people not to trust it.
+    assert.ok(!(await facets()).includes('ghost-loop'), 'and not once it has lapsed');
+    assert.ok((await facets()).includes('first-loop'));
+  });
+
+  it('describes every agent on the page, not the first fifty of the project', async () => {
+    const project = await createProject(harness, 'crowded');
+    // A paid project registers up to two hundred agents; this is the tier the
+    // old fixed limit of fifty was wrong for.
+    await harness.store.projects.updateOne(
+      { _id: project.id },
+      { $set: { tier: 'pro', limits: { items: 20_000, agents: 200, escalations: 5_000 } } },
+    );
+    // Registered last, so an unsorted head of the collection would miss it.
+    for (let index = 0; index < 55; index += 1) {
+      const registered = await post(project, '/agents', {
+        handle: `loop-${index}`,
+        description: `loop number ${index}`,
+      });
+      assert.equal(registered.statusCode, 201, `loop-${index} registered`);
+    }
+    await post(project, '/items', { slug: 'late', title: 'late', actor: 'loop-54' });
+
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(page.body, /title="loop number 54"/);
+  });
 });
 
 describe('the card preview', () => {
