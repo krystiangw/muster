@@ -240,3 +240,34 @@ The rule the whole layer is built around: **email is additive**. An agent still
 creates a project with one anonymous POST and never needs a human. Everything
 here is for the person who ends up owning the result, and none of it is a gate
 in front of the agent.
+
+
+## Telemetry that is a log of moments, not of people
+
+Almost everything worth knowing about how this service is used is already in
+the collections: how many projects exist, how many were claimed, how much work
+was written and finished, how fast questions get answered. Counting those needs
+no new writes at all.
+
+One thing is genuinely invisible, and it is the one that says whether the front
+door works: somebody reading `skill.md` and deciding not to sign up leaves
+nothing behind, and neither does the difference between an agent arriving over
+curl, over MCP or through OAuth. So there is a small append-only log of moments
+and nothing else.
+
+What it holds is the whole design: a kind, a door, one of our own file names,
+and a project id where the moment is about a project. No address, no token, no
+request body, no user agent, no IP. It expires after ninety days, which is long
+enough to see a trend and short enough that it never becomes a second copy of
+the service's data. A test asserts the exact set of fields, so widening it is a
+decision somebody has to make on purpose.
+
+Two smaller choices worth keeping:
+
+- **Recording can never fail a request.** Every write is fire and forget with
+  its own catch. Telemetry that breaks the thing it measures is worse than no
+  telemetry.
+- **It is a terminal command, not a page.** This is the operator of the service
+  looking at their own service rather than a feature of it, and serving it would
+  mean minting another credential to protect, on a product whose security notes
+  are mostly about how few of those there should be.

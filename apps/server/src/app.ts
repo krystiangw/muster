@@ -158,7 +158,7 @@ export async function buildApp(
 
   server.get('/openapi.json', { schema: { hide: true } }, async () => server.swagger());
 
-  registerAgentFiles(server, config);
+  registerAgentFiles(server, config, store);
   registerOAuth(server, { store, config, limiter });
   registerMcp(server, { store, config, limiter });
   registerApi(server, { store, config, limiter, mailer });

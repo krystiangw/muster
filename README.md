@@ -131,6 +131,25 @@ Three things follow from owning a project rather than holding a link:
   agent wrote, so the page assumes the local part of your address means you and
   lets you name whatever else does.
 
+## Knowing whether it works
+
+Counting how the service is used needs almost no new data: the collections
+already say how many projects exist, how many were claimed, how much work was
+written and finished, and how fast questions get answered. The one invisible
+thing is the top of the funnel, because reading the protocol and walking away
+leaves nothing behind, so a small append-only log records that and the door each
+agent arrived through. It holds a kind, a door, one of our own file names and a
+project id, with no address, token, body, user agent or IP, and it expires after
+ninety days.
+
+```bash
+MONGODB_URI="$(heroku config:get MONGODB_URI -a muster-web)" node apps/server/tools/insights.mjs
+```
+
+A terminal command rather than a page: this is the operator of the service
+looking at their own service, and serving it would mean another credential to
+protect.
+
 ## Four primitives
 
 | Object | Identity | Notes |

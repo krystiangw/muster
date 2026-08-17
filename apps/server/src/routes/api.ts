@@ -4,6 +4,7 @@ import type { Store } from '../db.js';
 import { maybeSweep, sweepProject } from '../hygiene.js';
 import { hashToken, isValidHandle, newOtpCode, newId } from '../ids.js';
 import { RateLimiter } from '../rateLimit.js';
+import { record } from '../events.js';
 import {
   BOARD_PRESETS,
   boardConfigOf,
@@ -146,6 +147,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
 
       const body = (request.body ?? {}) as { name?: string; description?: string };
       const { project, adminToken } = await createProject(store, config, body);
+      record(store, 'signup', { door: 'http', projectId: project._id });
       return reply.code(201).send({
         project: project._id,
         name: project.name,
@@ -244,6 +246,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           );
         }
         const { agent, created } = await registerAgent(store, project, body);
+        if (created) record(store, 'register', { door: 'http', projectId: project._id });
         return reply.code(created ? 201 : 200).send({ agent: agentJson(agent), created });
       },
     );
@@ -322,6 +325,9 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           history: body.history as UpsertItemInput['history'],
           actor,
         });
+        if (result.created && project.counts.items === 0) {
+          record(store, 'first_write', { door: 'http', projectId: project._id });
+        }
 
         const warnings = [...result.warnings];
         if (project.rules.scopeWarnings && actor !== 'unknown-agent') {
@@ -759,6 +765,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           priority?: EscalationPriority;
           item_slug?: string | null;
         };
+        record(store, 'escalate', { door: 'http', projectId: project._id });
         const doc = await createEscalation(store, project, {
           agent: body.agent ?? 'unknown-agent',
           question: body.question,
@@ -1228,6 +1235,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           throw new ServiceError(400, 'bad_code', 'That code does not match.');
         }
         await claimProjectWithEmail(store, project, email.toLowerCase(), config);
+        record(store, 'claim', { door: 'http', projectId: project._id });
         await store.claimCodes.deleteMany({ projectId: project._id });
         const updated = await store.projects.findOne({ _id: project._id });
         return { ok: true, project: projectJson(updated!, config) };

@@ -22,6 +22,7 @@ import {
 } from '../session.js';
 import { ESCALATION_STATUSES, type EscalationStatus } from '../types.js';
 import { clientIp } from './api.js';
+import { record } from '../events.js';
 
 /**
  * The operator view: every project one person owns, and every question waiting
@@ -603,6 +604,7 @@ ${
       return reply.redirect('/operator', 303);
     }
     await acceptShare(store, config, session.email, id);
+    record(store, 'accept', { door: 'browser' });
     return reply.redirect('/operator', 303);
   });
 
@@ -716,6 +718,7 @@ curl -sX DELETE ${escapeHtml(config.baseUrl)}/v1/${escapeHtml(project._id)}/keys
       throw new ServiceError(400, 'bad_status', 'Unknown answer type.');
     }
     await answerEscalation(store, project._id, id, status, (form.answer ?? '').slice(0, 8000));
+    record(store, 'answer', { door: 'browser', projectId: project._id });
     return reply.redirect('/operator', 303);
   });
 }

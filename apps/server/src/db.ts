@@ -1,5 +1,6 @@
 import type { IndexDescription } from 'mongodb';
 import { MongoClient, type Collection, type Db } from 'mongodb';
+import type { EventDoc } from './events.js';
 import type {
   AgentDoc,
   ApiKeyDoc,
@@ -89,6 +90,7 @@ export interface Store {
   operatorSessions: Collection<OperatorSessionDoc>;
   operatorCodes: Collection<OperatorCodeDoc>;
   operatorAliases: Collection<OperatorAliasDoc>;
+  events: Collection<EventDoc>;
   agents: Collection<Expiring<AgentDoc>>;
   items: Collection<Expiring<ItemDoc>>;
   escalations: Collection<Expiring<EscalationDoc>>;
@@ -118,6 +120,7 @@ export async function createStore(uri: string, dbName: string): Promise<Store> {
     operatorSessions: db.collection<OperatorSessionDoc>('operatorSessions'),
     operatorCodes: db.collection<OperatorCodeDoc>('operatorCodes'),
     operatorAliases: db.collection<OperatorAliasDoc>('operatorAliases'),
+    events: db.collection<EventDoc>('events'),
     agents: db.collection<Expiring<AgentDoc>>('agents'),
     items: db.collection<Expiring<ItemDoc>>('items'),
     escalations: db.collection<Expiring<EscalationDoc>>('escalations'),
@@ -245,6 +248,10 @@ export async function ensureIndexes(store: Store): Promise<void> {
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
     ]),
     ensure(store.operatorAliases, [{ key: { email: 1 }, unique: true, name: 'email' }]),
+    ensure(store.events, [
+      { key: { kind: 1, at: -1 }, name: 'kind' },
+      { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
+    ]),
     ensure(store.operatorCodes, [
       // Unique, so two overlapping requests for the same address cannot leave
       // two live codes behind and make the newer email the one that fails.
