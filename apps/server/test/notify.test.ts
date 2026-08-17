@@ -82,6 +82,34 @@ describe('the mail an escalation sends', () => {
     });
   });
 
+  it('goes out for a question filed over MCP too', async () => {
+    // The twin path. An interface that files the question and quietly skips
+    // the one thing that reaches a human is the same class of fault the
+    // verification pass found in the MCP inbox, and it would be invisible:
+    // the escalation is there, the board shows it, nobody is told.
+    await withMailer(async (harness, sent) => {
+      const project = await claimedProject(harness, 'owner@example.com');
+      const called = await harness.server.inject({
+        method: 'POST',
+        url: '/mcp',
+        headers: authed(project),
+        payload: {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: {
+            name: 'escalate',
+            arguments: { question: 'bridge it or wait?', agent: 'errors-loop' },
+          },
+        },
+      });
+      assert.ok(called.json().result.structuredContent.escalation.id);
+      assert.equal(sent.length, 1);
+      assert.equal(sent[0]!.to, 'owner@example.com');
+      assert.equal(sent[0]!.notice.question, 'bridge it or wait?');
+    });
+  });
+
   it('says nothing to a project nobody has claimed', async () => {
     // There is no address to write to, and inventing one out of whoever created
     // the project would mean mailing a stranger because an agent said so.
