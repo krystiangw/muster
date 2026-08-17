@@ -39,6 +39,7 @@ import {
   itemInScope,
   listApiKeys,
   escalationCursor,
+  itemCursor,
   listEscalations,
   listItems,
   nextItem,
@@ -49,7 +50,7 @@ import {
   appendNote,
   upsertItem,
 } from '../service.js';
-import type { AuthContext, UpsertItemInput } from '../service.js';
+import type { AuthContext, ItemOrder, UpsertItemInput } from '../service.js';
 import type { Mailer } from '../email.js';
 import {
   ESCALATION_PRIORITIES,
@@ -366,6 +367,17 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
               stale: { type: 'boolean' },
               claimed: { type: 'boolean' },
               limit: { type: 'integer', minimum: 1, maximum: 200 },
+              order: {
+                type: 'string',
+                enum: ['urgency', 'id'],
+                description:
+                  'urgency (default) is most urgent first. id is a stable order for reading everything back: priority and updatedAt change while you page, and an item that moves behind the cursor is an item your export never saw.',
+              },
+              cursor: {
+                type: 'string',
+                description:
+                  'Paging cursor: pass the next_cursor from the previous page, with the same order. null next_cursor means that was the last page.',
+              },
             },
             additionalProperties: false,
           },
@@ -374,6 +386,8 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       async (request) => {
         const { project } = auth(request);
         const query = request.query as Record<string, unknown>;
+        const limit = Math.min(Math.max((query.limit as number | undefined) ?? 50, 1), 200);
+        const order: ItemOrder = query.order === 'id' ? 'id' : 'urgency';
         const items = await listItems(store, project._id, {
           status: query.status as ItemStatus | undefined,
           owner: query.owner as string | undefined,
@@ -381,9 +395,17 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           source: query.source as string | undefined,
           stale: query.stale as boolean | undefined,
           claimed: query.claimed as boolean | undefined,
-          limit: query.limit as number | undefined,
+          limit,
+          order,
+          cursor: query.cursor as string | undefined,
         });
-        return { items: items.map((item) => itemJson(item)) };
+        return {
+          items: items.map((item) => itemJson(item)),
+          // Null on a short page, so the caller learns it is done without
+          // spending one more request to find out.
+          next_cursor:
+            items.length === limit ? itemCursor(items[items.length - 1]!, order) : null,
+        };
       },
     );
 

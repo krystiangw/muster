@@ -140,6 +140,68 @@ describe('items', () => {
     assert.equal(next.json().item.slug, 'urgent', 'the larger number goes first');
   });
 
+  it('pages through everything, so an import can be checked against its source', async () => {
+    // Reported from another project mid-migration: 781 rows to move and no way
+    // to read back past the two hundredth, which makes the import unverifiable.
+    const project = await createProject(harness, 'migrated');
+    for (let n = 0; n < 25; n += 1) {
+      await post(project, '/items', {
+        slug: `row-${String(n).padStart(3, '0')}`,
+        title: `row ${n}`,
+        priority: n % 3,
+        actor: 'importer',
+      });
+    }
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    let pages = 0;
+    do {
+      const page: { items: Array<{ slug: string }>; next_cursor: string | null } = (
+        await get(project, `/items?limit=10&order=id${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`)
+      ).json();
+      seen.push(...page.items.map((item) => item.slug));
+      cursor = page.next_cursor;
+      pages += 1;
+      assert.ok(pages < 10, 'the cursor has to end, not loop');
+    } while (cursor);
+
+    assert.equal(seen.length, 25, 'every row came back exactly once');
+    assert.equal(new Set(seen).size, 25);
+    assert.equal(pages, 3, 'and the short last page said so rather than making us ask again');
+  });
+
+  it('pages in urgency order without losing the rows that tie', async () => {
+    const project = await createProject(harness, 'tied');
+    // Every row has the same priority, and several land in the same
+    // millisecond: a cursor on one field alone drops all but the first.
+    await Promise.all(
+      Array.from({ length: 12 }, (_, n) =>
+        post(project, '/items', { slug: `tie-${n}`, title: `tie ${n}`, priority: 4, actor: 'a' }),
+      ),
+    );
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const page: { items: Array<{ slug: string }>; next_cursor: string | null } = (
+        await get(project, `/items?limit=5${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`)
+      ).json();
+      seen.push(...page.items.map((item) => item.slug));
+      cursor = page.next_cursor;
+    } while (cursor);
+
+    assert.equal(new Set(seen).size, 12, 'all twelve, none twice');
+  });
+
+  it('refuses a cursor from the other order instead of quietly restarting', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'one', title: 'one', actor: 'a' });
+    const refused = await get(project, '/items?limit=1&order=id&cursor=3|not-a-date|x');
+    assert.equal(refused.statusCode, 400);
+    assert.equal(refused.json().error, 'bad_cursor');
+  });
+
   it('records a status transition in the timeline', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'x', title: 'x', actor: 'a' });

@@ -334,8 +334,16 @@ export class Muster {
       source?: string;
       stale?: boolean;
       limit?: number;
+      /**
+       * `urgency` (default) is most urgent first. `id` is a stable order for
+       * reading everything back: priority and updatedAt change while you page,
+       * so an item that moves behind the cursor is one your export never saw.
+       */
+      order?: 'urgency' | 'id';
+      /** From the previous page's `next_cursor`, in the same order. */
+      cursor?: string;
     } = {},
-  ): Promise<{ items: Item[] }> {
+  ): Promise<{ items: Item[]; next_cursor: string | null }> {
     return this.request('GET', '/items', undefined, {
       status: query.status,
       owner: query.owner,
@@ -343,7 +351,23 @@ export class Muster {
       source: query.source,
       stale: query.stale === undefined ? undefined : String(query.stale),
       limit: query.limit === undefined ? undefined : String(query.limit),
+      order: query.order,
+      cursor: query.cursor,
     });
+  }
+
+  /**
+   * Every item, in an order nothing reshuffles while you read. This is the call
+   * for checking an import against its source, which is the only thing that can
+   * tell you a migration worked.
+   */
+  async *allItems(query: { status?: ItemStatus; label?: string; source?: string } = {}) {
+    let cursor: string | undefined;
+    do {
+      const page = await this.items({ ...query, limit: 200, order: 'id', cursor });
+      for (const item of page.items) yield item;
+      cursor = page.next_cursor ?? undefined;
+    } while (cursor);
   }
 
   async item(slug: string): Promise<{ item: Item }> {

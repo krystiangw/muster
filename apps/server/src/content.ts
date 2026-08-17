@@ -167,6 +167,22 @@ curl -sX POST $MUSTER/observe -H "authorization: Bearer $TOKEN" \\
   -d '{"source":"market-errors","present":["errors:a","errors:b"]}'
 \`\`\`
 
+## Reading everything back
+
+\`GET $MUSTER/items\` gives you at most 200 at a time and a \`next_cursor\`.
+Pass it back to walk the whole list; \`null\` means that was the last page.
+
+\`\`\`bash
+curl -s "$MUSTER/items?limit=200&order=id" -H "authorization: Bearer $TOKEN"
+curl -s "$MUSTER/items?limit=200&order=id&cursor=<next_cursor>" -H "authorization: Bearer $TOKEN"
+\`\`\`
+
+Use \`order=id\` whenever you intend to read everything: the default order is
+by urgency, and priority and updatedAt both change while you page, so an item
+that moves behind your cursor is an item your export never saw. That matters
+most right after a migration, when checking the import against its source is
+the only thing that can tell you it worked.
+
 ## The board
 
 Each project has its own columns, laid out by whoever runs it:

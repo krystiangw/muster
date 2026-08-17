@@ -927,6 +927,9 @@ export async function deleteItem(
   }
 }
 
+/** Most urgent first, or an order that cannot move under a long read. */
+export type ItemOrder = 'urgency' | 'id';
+
 export interface ListItemsQuery {
   status?: ItemStatus;
   owner?: string;
@@ -936,6 +939,52 @@ export interface ListItemsQuery {
   claimed?: boolean;
   limit?: number;
   includeTimeline?: boolean;
+  order?: ItemOrder;
+  /** From a previous page's `next_cursor`, read in the same order. */
+  cursor?: string;
+}
+
+/**
+ * The cursor for a page of items.
+ *
+ * Two orders, because they answer different questions and one of them cannot
+ * answer the other honestly:
+ *
+ *  - `urgency` is what an agent browsing wants: the most urgent first. Its
+ *    cursor carries the whole sort key, since priority and updatedAt both tie
+ *    constantly and a cursor on one field alone skips every row that ties.
+ *  - `id` is what an export wants: an order nothing can reshuffle underneath
+ *    you. Priority and updatedAt change while you read, so a long scan in
+ *    urgency order can miss an item that moved behind the cursor, and an
+ *    import nobody can verify is exactly what a migration must not have.
+ */
+export function itemCursor(doc: ItemDoc, order: ItemOrder): string {
+  return order === 'id'
+    ? doc._id
+    : `${doc.priority}|${doc.updatedAt.toISOString()}|${doc._id}`;
+}
+
+function afterCursor(cursor: string, order: ItemOrder): Record<string, unknown> | null {
+  if (order === 'id') {
+    // An id cursor is opaque but not shapeless. Accepting anything here would
+    // turn an urgency cursor passed to the wrong order into an empty page,
+    // and an empty page is how a verification run concludes, wrongly, that it
+    // has read everything.
+    return /^i_[a-z0-9]+$/.test(cursor) ? { _id: { $gt: cursor } } : null;
+  }
+  const parts = cursor.split('|');
+  if (parts.length < 3) return null;
+  const priority = Number(parts[0]);
+  const updatedAt = new Date(parts[1]!);
+  const id = parts.slice(2).join('|');
+  if (!Number.isFinite(priority) || Number.isNaN(updatedAt.getTime())) return null;
+  return {
+    $or: [
+      { priority: { $lt: priority } },
+      { priority, updatedAt: { $lt: updatedAt } },
+      { priority, updatedAt, _id: { $lt: id } },
+    ],
+  };
 }
 
 export async function listItems(
@@ -952,11 +1001,26 @@ export async function listItems(
   if (query.claimed === true) filter.claim = { $ne: null };
   if (query.claimed === false) filter.claim = null;
 
+  const order: ItemOrder = query.order === 'id' ? 'id' : 'urgency';
+  if (query.cursor) {
+    const after = afterCursor(query.cursor, order);
+    if (!after) {
+      throw new ServiceError(
+        400,
+        'bad_cursor',
+        'That cursor does not belong to this order. Pass back the next_cursor you were given, with the same order=.',
+      );
+    }
+    Object.assign(filter, after);
+  }
+
   const limit = Math.min(Math.max(query.limit ?? 50, 1), 200);
   const projection = query.includeTimeline ? undefined : { timeline: 0 };
+  const sort: Record<string, 1 | -1> =
+    order === 'id' ? { _id: 1 } : { priority: -1, updatedAt: -1, _id: -1 };
   return store.items
     .find(filter, projection ? { projection } : {})
-    .sort({ priority: -1, updatedAt: -1 })
+    .sort(sort)
     .limit(limit)
     .toArray() as Promise<ItemDoc[]>;
 }
