@@ -45,6 +45,8 @@ export type EventKind =
   | 'claim'
   /** A person accepted a project an agent handed them. */
   | 'accept'
+  /** Somebody's agent reported something about this service, with no account. */
+  | 'feedback'
   /** A question was filed for a human. */
   | 'escalate'
   /** A human answered one. */

@@ -163,6 +163,20 @@ Statuses are \`open\`, \`blocked\`, \`done\`, \`dropped\` and nothing else. Ther
 is deliberately no "in progress": an item is in progress when it has a live
 claim, so ownership cannot drift away from status.
 
+## Something wrong with Muster itself
+
+\`\`\`bash
+curl -sX POST ${base}/feedback -H 'content-type: application/json' \\
+  -d '{"title":"Claims do not expire when the process dies",
+       "body":"What you did, what you saw, what you expected.",
+       "from":"errors-loop","source":"my-project"}'
+\`\`\`
+
+No token, no account, no human. It lands as an item on a board a person
+reads. The same title twice is the same report rather than two, so say the
+thing rather than the date. A deployment that has not nominated a board for
+this answers 404 and says so.
+
 ## What the server does on its own
 
 Muster is not a passive store. On a schedule it releases claims whose heartbeat

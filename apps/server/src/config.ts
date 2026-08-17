@@ -21,6 +21,7 @@ export interface Config {
     read: RateLimitRule;
     claimEmail: RateLimitRule;
     verifyCode: RateLimitRule;
+    feedback: RateLimitRule;
   };
   resendApiKey: string | null;
   /**
@@ -33,6 +34,7 @@ export interface Config {
   /** Support address published in the agent files. */
   contactEmail: string;
   siteVerification: string;
+  feedbackProject: string;
   logLevel: string;
 }
 
@@ -73,6 +75,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       // guesses and two clean sign ins per address behind a shared address,
       // while the real ceiling on guessing is the five attempts a code allows.
       verifyCode: { requests: int(env.LIMIT_CODE_ATTEMPTS_PER_HOUR, 60), windowSeconds: 3600 },
+      // Somebody reporting a problem is not somebody signing up, and ten an
+      // hour is more than anyone with something real to say will need.
+      feedback: { requests: int(env.LIMIT_FEEDBACK_PER_HOUR, 10), windowSeconds: 3600 },
     },
     resendApiKey: env.RESEND_API_KEY ?? null,
     logUnsentEmails: env.NODE_ENV !== 'production',
@@ -89,6 +94,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     // Proving to a search console that this deployment is ours. Empty on a
     // self-host, which then renders no tag at all rather than an empty one.
     siteVerification: env.SITE_VERIFICATION ?? '',
+    /**
+     * Where an unauthenticated report lands, if this deployment accepts any.
+     *
+     * Empty by default, and that default is the honest one: an open write
+     * endpoint is a decision about somebody's board, so it belongs to whoever
+     * runs the deployment rather than to whoever wrote the code.
+     */
+    feedbackProject: env.FEEDBACK_PROJECT ?? '',
     logLevel: env.LOG_LEVEL ?? 'info',
   };
 }

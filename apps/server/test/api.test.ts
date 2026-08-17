@@ -635,3 +635,113 @@ describe('saying an answer was acted on', () => {
     assert.match(acted.json().escalation.acted_note, /waited/);
   });
 });
+
+describe('a report from somebody with no account', () => {
+  it('is refused by a deployment that never opted in', async () => {
+    const closed = await harness.server.inject({
+      method: 'POST',
+      url: '/feedback',
+      payload: { title: 'something is wrong' },
+    });
+    assert.equal(closed.statusCode, 404);
+    assert.equal(closed.json().error, 'not_accepting');
+  });
+
+  it('lands on the nominated board, and the same report twice is one item', async () => {
+    // The project has to exist in the deployment that names it, so it is made
+    // in the same database the second harness will read.
+    const open = await startHarness();
+    const host = await createProject(open, 'inbox for reports');
+    await open.stop();
+    const nominated = await startHarness({
+      MONGODB_DB: open.config.mongoDb,
+      FEEDBACK_PROJECT: host.id,
+    });
+    try {
+      const first = await nominated.server.inject({
+        method: 'POST',
+        url: '/feedback',
+        payload: {
+          title: 'Claims do not expire when the process dies',
+          body: 'Seen twice on our fleet.',
+          from: 'kanga-arbitrage',
+          source: 'arbitrage-fleet',
+        },
+      });
+      assert.equal(first.statusCode, 201);
+      assert.equal(first.json().created, true);
+      assert.match(first.json().slug, /^feedback:/);
+      // A receipt, not a capability: nothing here opens somebody's board.
+      assert.ok(!JSON.stringify(first.json()).includes(host.id));
+      assert.ok(!JSON.stringify(first.json()).includes('/r/'));
+
+      const again = await nominated.server.inject({
+        method: 'POST',
+        url: '/feedback',
+        payload: { title: 'Claims do not expire when the process dies', body: 'Third time.' },
+      });
+      assert.equal(again.statusCode, 200);
+      assert.equal(again.json().created, false);
+
+      const item = (
+        await nominated.server.inject({
+          method: 'GET',
+          url: `${host.api}/items/${encodeURIComponent(first.json().slug)}`,
+          headers: authed(host),
+        })
+      ).json().item;
+      assert.deepEqual(item.labels, ['feedback']);
+      assert.equal(item.source, 'arbitrage-fleet');
+      assert.equal(item.status, 'open');
+      // The second report said nothing about who sent it, so the last writer is
+      // the anonymous one. That is the truth about who touched it last, which
+      // is what the field means everywhere else in this system.
+      assert.equal(item.last_actor, 'a passing agent');
+      assert.ok(
+        item.timeline.some((entry: { by: string }) => entry.by === 'kanga-arbitrage'),
+        'and the first reporter is still in the record',
+      );
+    } finally {
+      await nominated.stop();
+    }
+  });
+
+  it('cannot touch anything outside the feedback namespace', async () => {
+    const seeded = await startHarness();
+    const host = await createProject(seeded, 'guarded inbox');
+    await seeded.stop();
+    const open = await startHarness({
+      MONGODB_DB: seeded.config.mongoDb,
+      FEEDBACK_PROJECT: host.id,
+    });
+    try {
+      await open.server.inject({
+        method: 'POST',
+        url: `${host.api}/items`,
+        headers: authed(host),
+        payload: { slug: 'ops:production', title: 'real work', actor: 'a' },
+      });
+      // A title that would normalise onto an existing slug still cannot reach
+      // it: every report is created inside its own namespace.
+      const attempt = await open.server.inject({
+        method: 'POST',
+        url: '/feedback',
+        payload: { title: 'ops production', body: 'take this over' },
+      });
+      assert.equal(attempt.statusCode, 201);
+      assert.match(attempt.json().slug, /^feedback:/);
+
+      const untouched = (
+        await open.server.inject({
+          method: 'GET',
+          url: `${host.api}/items/ops:production`,
+          headers: authed(host),
+        })
+      ).json().item;
+      assert.equal(untouched.title, 'real work');
+      assert.deepEqual(untouched.labels, []);
+    } finally {
+      await open.stop();
+    }
+  });
+});

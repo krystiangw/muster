@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
 import { maybeSweep, sweepProject } from '../hygiene.js';
-import { hashToken, isValidHandle, newOtpCode, newId } from '../ids.js';
+import { hashToken, isValidHandle, newOtpCode, newId, normalizeSlug } from '../ids.js';
 import { RateLimiter } from '../rateLimit.js';
 import { record, recordFirstWrite } from '../events.js';
 import {
@@ -166,6 +166,94 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           claim_to_keep: `${config.baseUrl}/v1/${project._id}/claim`,
           hand_to_a_human: `${config.baseUrl}/v1/${project._id}/share`,
         },
+      });
+    },
+  );
+
+  /**
+   * Somebody else's agent, telling us something is wrong.
+   *
+   * The whole product argues that an agent should not need a human to get in.
+   * Until now, reporting a bug in it needed exactly that: an account on a code
+   * host, which no agent opens by itself, or a write key that somebody had to
+   * hand over first. That is the same barrier one level up, and it is the one
+   * place where being wrong about it costs us the reports we most want.
+   *
+   * Three things keep an open write endpoint from being a liability. It is off
+   * unless a deployment names a project for it, because pointing strangers at
+   * somebody's board is that person's decision. It is rate limited per address
+   * like the signup it resembles. And it can only ever create or update an item
+   * in the `feedback:` namespace: no status, no priority, no owner, no claim,
+   * so the worst a flood can do is fill a project's item cap with reports,
+   * which is a nuisance and not a breach.
+   */
+  app.post(
+    '/feedback',
+    {
+      schema: {
+        tags: ['projects'],
+        summary: 'Report something about this service, without an account',
+        description:
+          'Lands as an item on the board this deployment nominates. Same title twice is the same report, not two: the slug is derived from the title, so a second send updates the first rather than filling the board with duplicates.',
+        body: {
+          type: 'object',
+          required: ['title'],
+          properties: {
+            title: { type: 'string', minLength: 3, maxLength: 200 },
+            body: { type: 'string', maxLength: 8000 },
+            from: {
+              type: 'string',
+              maxLength: 48,
+              description: 'Who is reporting, so the board can say. Free text, never verified.',
+            },
+            source: { type: 'string', maxLength: 48, description: 'Which system it came from.' },
+          },
+          additionalProperties: false,
+        },
+      },
+    },
+    async (request, reply) => {
+      if (!config.feedbackProject) {
+        return reply.code(404).send({
+          error: 'not_accepting',
+          message:
+            'This deployment takes no unauthenticated reports. Ask whoever runs it for a write key, or file where its source is published.',
+        });
+      }
+      const verdict = limiter.check(`feedback:${clientIp(request)}`, config.rateLimits.feedback);
+      if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds);
+
+      const project = await store.projects.findOne({ _id: config.feedbackProject });
+      if (!project) {
+        return reply.code(404).send({
+          error: 'not_accepting',
+          message: 'This deployment names a project for reports that does not exist.',
+        });
+      }
+
+      const body = request.body as { title: string; body?: string; from?: string; source?: string };
+      const from = (body.from ?? '').trim().slice(0, 48) || 'a passing agent';
+      // The namespace is not decoration: it is what stops an anonymous write
+      // from touching any item that is not a report.
+      const slug = `feedback:${normalizeSlug(body.title).slice(0, 80)}`;
+      const result = await upsertItem(store, project, {
+        slug,
+        title: body.title,
+        ...(body.body ? { body: body.body } : {}),
+        labels: ['feedback'],
+        ...(body.source ? { source: body.source.trim().slice(0, 48) } : {}),
+        actor: from,
+      });
+      record(store, 'feedback', { door: 'http', projectId: project._id });
+      return reply.code(result.created ? 201 : 200).send({
+        ok: true,
+        slug: result.item.slug,
+        created: result.created,
+        // No read link and no project id: the reporter gets a receipt, not a
+        // capability for somebody else's board.
+        message: result.created
+          ? 'Filed. Thank you: this lands on a board a person actually reads.'
+          : 'Somebody already reported this, so your words were added to it rather than filed twice.',
       });
     },
   );
