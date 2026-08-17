@@ -419,3 +419,166 @@ describe('starting up against a database that has already run', () => {
     assert.equal(email?.unique, true, 'and it ends up with the definition the code asked for');
   });
 });
+
+/**
+ * The decision audit of 2026-08-18, which asked whether the read link should be
+ * enough to take a project and answered no. Ownership is a door that opens one
+ * way: nothing in this service ever sets `claimedBy` back to null, and an owner
+ * mints admin keys at will, so a forwarded link that could take a board would
+ * turn a paste into a permanent loss. What the link gets instead is the ability
+ * to ask.
+ */
+describe('a read link can ask for a project and never take one', () => {
+  it('refuses to claim without the project token, whatever else it carries', async () => {
+    const project = await createProject(harness);
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    const attempt = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/claim`,
+      payload: 'email=passerby@example.com',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    // Whatever the page says back, the only thing that matters is here: no
+    // owner, and no code minted that could produce one.
+    void attempt;
+    const after = await harness.store.projects.findOne({ _id: project.id });
+    assert.equal(after?.claimedBy ?? null, null, 'a link alone never moves ownership');
+    assert.equal(await harness.store.claimCodes.countDocuments({ projectId: project.id }), 0);
+  });
+
+  it('records the ask, and only the ask, for somebody signed in', async () => {
+    const project = await createProject(harness);
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const session = await signIn(harness, 'operator@example.com');
+
+    const asked = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/handover`,
+      payload: session.form({ note: 'I run this fleet' }),
+      headers: session.headers,
+    });
+    assert.equal(asked.statusCode, 303);
+
+    const requests = await harness.store.handovers.find({ projectId: project.id }).toArray();
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0]!.email, 'operator@example.com');
+    const after = await harness.store.projects.findOne({ _id: project.id });
+    assert.equal(after?.claimedBy ?? null, null, 'asking is not taking');
+
+    // Asking twice is the same ask.
+    await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/handover`,
+      payload: session.form({ note: 'still me' }),
+      headers: session.headers,
+    });
+    assert.equal(await harness.store.handovers.countDocuments({ projectId: project.id }), 1);
+  });
+
+  it('refuses the ask without a session, and without a csrf token', async () => {
+    const project = await createProject(harness);
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    const anonymous = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/handover`,
+      payload: 'note=hello',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    assert.equal(anonymous.statusCode, 200, 'it explains how to sign in');
+    assert.equal(await harness.store.handovers.countDocuments({ projectId: project.id }), 0);
+
+    // A cookie is ambient authority, so the form has to prove it came from us.
+    const session = await signIn(harness, 'someone@example.com');
+    const forged = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/handover`,
+      payload: 'note=from+another+site',
+      headers: session.headers,
+    });
+    assert.equal(forged.statusCode, 403);
+    assert.equal(await harness.store.handovers.countDocuments({ projectId: project.id }), 0);
+  });
+
+  it('closes the loop: ask, the agent offers, one click owns it', async () => {
+    const project = await createProject(harness);
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const session = await signIn(harness, 'owner@example.com');
+    await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/handover`,
+      payload: session.form({ note: 'mine please' }),
+      headers: session.headers,
+    });
+
+    // The agent sees it where it looks for everything else.
+    const inbox = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/inbox`,
+      headers: authed(project),
+    });
+    assert.equal(inbox.json().handover_requests[0].email, 'owner@example.com');
+
+    // And answers with the offer, which is the only thing that moves ownership.
+    const offered = await post(project, '/share', { email: 'owner@example.com' });
+    assert.equal(offered.statusCode, 201);
+    assert.equal(
+      await harness.store.handovers.countDocuments({ projectId: project.id }),
+      0,
+      'answering the request closes it',
+    );
+
+    const share = await harness.store.shares.findOne({ projectId: project.id });
+    const accepted = await harness.server.inject({
+      method: 'POST',
+      url: `/operator/shares/${share!._id}`,
+      payload: session.form({}),
+      headers: session.headers,
+    });
+    assert.ok([200, 303].includes(accepted.statusCode), `accept answered ${accepted.statusCode}`);
+    const owned = await harness.store.projects.findOne({ _id: project.id });
+    assert.equal(owned?.claimedBy, 'owner@example.com');
+  });
+
+  it('refuses to offer the project from a worker key, over HTTP and over MCP', async () => {
+    // Offering it to an address the holder controls, then accepting, is
+    // claiming the project in two steps. The claim endpoints have always
+    // refused a write key; this one used to take any key at all.
+    const project = await createProject(harness);
+    const worker = (await post(project, '/keys', { name: 'worker', role: 'write' })).json().token;
+
+    const overHttp = await post(project, '/share', { email: 'attacker@example.com' }, worker);
+    assert.equal(overHttp.statusCode, 403);
+
+    const overMcp = await harness.server.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: { authorization: `Bearer ${worker}` },
+      payload: {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'share_project', arguments: { email: 'attacker@example.com' } },
+      },
+    });
+    assert.equal(overMcp.json().result.isError, true);
+    assert.equal(await harness.store.shares.countDocuments({ projectId: project.id }), 0);
+  });
+
+  it('will not take an ask for a project that already has an owner', async () => {
+    const project = await createProject(harness);
+    const readToken = project.readUrl.split('/r/')[1]!;
+    await claimForEmail(project, 'first@example.com');
+
+    const session = await signIn(harness, 'second@example.com');
+    const asked = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/handover`,
+      payload: session.form({}),
+      headers: session.headers,
+    });
+    assert.equal(asked.statusCode, 409);
+    assert.equal(await harness.store.handovers.countDocuments({ projectId: project.id }), 0);
+  });
+});

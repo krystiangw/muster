@@ -166,6 +166,10 @@ export function projectJson(project: ProjectDoc, config: Config): Record<string,
     read_url: `${config.baseUrl}/r/${project.readToken}`,
     board: boardConfigJson(project.board ?? DEFAULT_BOARD),
     claimed: project.claimedBy !== null,
+    // The address, not just the fact. An agent that cannot see who owns the
+    // board it writes to cannot notice that the answer changed.
+    claimed_by: project.claimedBy,
+    claimed_at: project.claimedAt,
     expires_at: project.expiresAt,
     limits: project.limits,
     counts: project.counts,

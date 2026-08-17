@@ -9,6 +9,7 @@ import type {
   ItemDoc,
   ProjectDoc,
   ShareDoc,
+  HandoverRequestDoc,
 } from './types.js';
 
 /**
@@ -97,6 +98,7 @@ export interface Store {
   keys: Collection<Expiring<ApiKeyDoc>>;
   claimCodes: Collection<ClaimCodeDoc>;
   shares: Collection<ShareDoc>;
+  handovers: Collection<HandoverRequestDoc>;
   close(): Promise<void>;
 }
 
@@ -127,6 +129,7 @@ export async function createStore(uri: string, dbName: string): Promise<Store> {
     keys: db.collection<Expiring<ApiKeyDoc>>('apiKeys'),
     claimCodes: db.collection<ClaimCodeDoc>('claimCodes'),
     shares: db.collection<ShareDoc>('shares'),
+    handovers: db.collection<HandoverRequestDoc>('handoverRequests'),
     close: () => client.close(),
   };
 
@@ -278,6 +281,12 @@ export async function ensureIndexes(store: Store): Promise<void> {
     ]),
     ensure(store.shares, [
       { key: { email: 1, createdAt: -1 }, name: 'inbox' },
+      { key: { projectId: 1, email: 1 }, unique: true, name: 'once' },
+      { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
+    ]),
+    ensure(store.handovers, [
+      { key: { projectId: 1, createdAt: -1 }, name: 'project' },
+      // One per address per project: asking twice is the same ask.
       { key: { projectId: 1, email: 1 }, unique: true, name: 'once' },
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
     ]),

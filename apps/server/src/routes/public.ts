@@ -13,6 +13,7 @@ import {
 } from '../board.js';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
+import { redactAddress } from '../email.js';
 import { record, recordView } from '../events.js';
 import { ago, chip, escapeHtml, layout, when } from '../html.js';
 import { avatar, who } from '../identity.js';
@@ -25,10 +26,11 @@ import {
   answerEscalation,
   appendNote,
   createProject,
+  requestHandover,
   upsertItem,
   verifyClaimCode,
 } from '../service.js';
-import { readSession } from '../session.js';
+import { checkCsrf, csrfField, readSession } from '../session.js';
 import {
   ESCALATION_STATUSES,
   type EscalationDoc,
@@ -668,6 +670,13 @@ address. Claiming is free and raises the limits:</p>
     const answered = escalations.filter((doc) => doc.status !== 'open');
     const answeredId = one((request.query as { answered?: string }).answered);
     const justAnswered = answered.find((doc) => doc._id === answeredId) ?? null;
+    // Who is reading, when they happen to be signed in. Only the unclaimed
+    // banner uses it, and only to offer the one thing a person without the
+    // token can do: ask for the board.
+    const session = project.claimedBy ? null : await readSession(store, request);
+    const asked = session
+      ? await store.handovers.findOne({ projectId: project._id, email: session.email })
+      : null;
 
     const answerForm = (id: string, answer = '') => `
   <form method="post" action="/r/${escapeHtml(readToken)}/escalations/${escapeHtml(id)}">
@@ -733,16 +742,47 @@ ${
 waiting for you.${project.expiresAt ? ` This project is unclaimed and will be deleted ${when(project.expiresAt)}.` : ''}</p>
 
 ${
+      // Unclaimed, and the person reading this is usually the one who should
+      // own it and the one who does not have the token. So the first thing
+      // offered is the thing they can actually do: ask. The agents answer with
+      // an offer, which is the existing /share path, and ownership still only
+      // ever moves because the project moved it.
       project.expiresAt
-        ? `<div class="notice warn"><b>Unclaimed.</b> Confirm an email address to keep it and raise
-the limits. An agent starts the claim with <code>POST /v1/${escapeHtml(project._id)}/claim</code>,
-or paste the token below.
-<form class="row" method="post" action="/r/${escapeHtml(readToken)}/claim" style="margin-top:12px">
+        ? `<div class="notice warn"><b>Unclaimed.</b> Nobody owns this board yet, so it is on a
+timer and on the small limits. Claiming it stops the timer, raises the caps and puts it in one
+page with everything else you own.
+${
+  asked
+    ? `<p style="margin:12px 0 0"><b>You asked for it ${when(asked.createdAt)}.</b> The agents see
+that on their next iteration and hand it over by offering it to your address; the offer then
+appears in <a href="/operator">your projects</a>, where one click accepts it.</p>`
+    : session
+      ? `<form method="post" action="/r/${escapeHtml(readToken)}/handover" style="margin-top:12px">
+  ${csrfField(session)}
+  <label>Anything the agents should know
+    <input name="note" maxlength="200" placeholder="I am the operator for this fleet.">
+  </label>
+  <button type="submit">Ask the agents to hand this over</button>
+</form>
+<p class="why" style="margin:8px 0 0">Asks as ${escapeHtml(session.email)}. It does not take the
+project: the agents grant it, which is why a link that gets forwarded cannot cost somebody their
+board.</p>`
+      : `<p style="margin:12px 0 0"><a href="/operator"><b>Sign in</b></a> and you can ask the
+agents to hand this board over. No account and no password: a six digit code proves the address is
+yours.</p>`
+}
+<details style="margin-top:12px"><summary class="why">I have the project token</summary>
+<form class="row" method="post" action="/r/${escapeHtml(readToken)}/claim" style="margin-top:10px">
   <label>Email<input type="email" name="email" required placeholder="you@example.com"></label>
   <label>Project token<input type="password" name="token" required placeholder="mk_..."></label>
   <button type="submit">Send code</button>
-</form></div>`
-        : ''
+</form>
+<p class="why" style="margin:8px 0 0">Or the agent does it itself with
+<code>POST /v1/${escapeHtml(project._id)}/claim</code>.</p>
+</details></div>`
+        : `<p class="why">Owned by ${escapeHtml(redactAddress(project.claimedBy ?? ''))}${
+            project.claimedAt ? ` since ${when(project.claimedAt)}` : ''
+          }.</p>`
     }
 
 ${
@@ -1149,6 +1189,46 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     // Named in the redirect so the page can confirm it. Four buttons that look
     // alike and a silent reload is how somebody ends up answering twice.
     return reply.redirect(`/r/${readToken}?answered=${encodeURIComponent(id)}`, 303);
+  });
+
+  /**
+   * A person with the link asking the agents to hand the board over.
+   *
+   * The address comes from the signed in session, never from a field: a typed
+   * address would have to be proved with another code, and the operator sign
+   * in already proves exactly this. Which means a cookie is in play, so the
+   * form carries the CSRF token like every other cookie-authenticated write
+   * in this service.
+   *
+   * This never moves ownership. It records an ask; the project answers it with
+   * `POST /share`, and that is still the only way `claimedBy` changes.
+   */
+  app.post('/r/:readToken/handover', { schema: { hide: true } }, async (request, reply) => {
+    if (!limitWrites(request, reply)) return reply;
+    const { readToken } = request.params as { readToken: string };
+    const project = await store.projects.findOne({ readToken });
+    if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
+    if (!(await readableBy(store, request, project))) {
+      throw new ServiceError(404, 'not_found', 'No such project.');
+    }
+    const session = await readSession(store, request);
+    if (!session) {
+      return reply.type('text/html; charset=utf-8').send(
+        layout(
+          { title: 'Sign in first' },
+          `<h1>Sign in first</h1>
+           <p>Asking for a board means saying which address should own it, and this one is not
+           signed in. <a href="/operator">Sign in</a> with a six digit code and come back to this
+           link.</p>`,
+        ),
+      );
+    }
+    checkCsrf(session, request.body);
+
+    const form = (request.body ?? {}) as { note?: string };
+    await requestHandover(store, project, session.email, one(form.note));
+    record(store, 'handover_request', { door: 'browser', projectId: project._id });
+    return reply.redirect(`/r/${readToken}`, 303);
   });
 
   app.post('/r/:readToken/claim', { schema: { hide: true } }, async (request, reply) => {

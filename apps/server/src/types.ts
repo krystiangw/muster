@@ -374,6 +374,26 @@ export interface ShareDoc {
   expiresAt: Date;
 }
 
+/**
+ * A person asking the agents to hand a project over.
+ *
+ * The mirror of a share, and deliberately not its equal: a share is an offer
+ * the project makes and a person accepts, this is a request a person makes and
+ * the project grants by making that offer. Only the project can move
+ * ownership, because ownership has no way back: nothing in this service ever
+ * sets `claimedBy` to null again, and the owner can mint an admin key at will.
+ * So the read link is enough to ask, and never enough to take.
+ */
+export interface HandoverRequestDoc {
+  _id: string;
+  projectId: string;
+  /** Taken from the signed in session, so the address is proven, not typed. */
+  email: string;
+  note: string;
+  createdAt: Date;
+  expiresAt: Date;
+}
+
 /** A pending email claim of a demo project. */
 export interface ClaimCodeDoc {
   _id: string;

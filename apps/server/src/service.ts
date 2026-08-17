@@ -13,6 +13,7 @@ import {
   type EscalationDoc,
   type EscalationPriority,
   type EscalationStatus,
+  type HandoverRequestDoc,
   type ItemDoc,
   type ItemStatus,
   type ProjectDoc,
@@ -303,7 +304,93 @@ export async function shareProject(
     },
     { upsert: true, returnDocument: 'after' },
   );
+  // Answering somebody's request closes it. Leaving it open would keep telling
+  // the agents to do the thing they just did.
+  await store.handovers.deleteOne({ projectId: project._id, email }).catch(() => undefined);
   return { share: (result ?? share) as ShareDoc, alreadyOwned: false };
+}
+
+/** How many people can have an outstanding request on one project. */
+const MAX_HANDOVER_REQUESTS = 5;
+
+/**
+ * A person with the read link asking the agents to hand the board over.
+ *
+ * The other half of `shareProject`, and the asymmetry is the point. A share
+ * moves ownership because the project offered it; this only records that
+ * somebody would like it, and the project still has to answer with a share.
+ * Ownership is a door that opens one way: nothing here ever sets `claimedBy`
+ * back to null, and an owner can mint an admin key at will, so a read link
+ * that could take a project would turn a forwarded URL into a permanent loss.
+ * A read link that can ask costs nothing and unblocks the person who actually
+ * has the link.
+ */
+export async function requestHandover(
+  store: Store,
+  project: ProjectDoc,
+  email: string,
+  note?: string,
+): Promise<HandoverRequestDoc> {
+  const address = email.trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(address)) {
+    throw badRequest('bad_email', 'That does not look like an email address.');
+  }
+  if (project.claimedBy) {
+    throw new ServiceError(
+      409,
+      'already_owned',
+      project.claimedBy === address
+        ? 'You already own this project.'
+        : 'Somebody already owns this project. Ask them to hand it over.',
+    );
+  }
+  const now = new Date();
+  const outstanding = await store.handovers.countDocuments({ projectId: project._id });
+  if (outstanding >= MAX_HANDOVER_REQUESTS) {
+    // A queue of requests on one unclaimed project is not a queue, it is a
+    // list of people who will not get it.
+    const existing = await store.handovers.findOne({ projectId: project._id, email: address });
+    if (!existing) {
+      throw new ServiceError(
+        409,
+        'too_many_requests',
+        'Several people are already waiting on this project. The agents have to answer one of them first.',
+      );
+    }
+  }
+
+  const request: HandoverRequestDoc = {
+    _id: newId('h'),
+    projectId: project._id,
+    email: address,
+    note: (note ?? '').slice(0, 500),
+    createdAt: now,
+    expiresAt: new Date(now.getTime() + 14 * 86_400_000),
+  };
+  // Asking twice is the same ask: the note is refreshed, the moment of asking
+  // belongs to the first one.
+  const result = await store.handovers.findOneAndUpdate(
+    { projectId: project._id, email: address },
+    {
+      $set: { note: request.note, expiresAt: request.expiresAt },
+      $setOnInsert: {
+        _id: request._id,
+        projectId: request.projectId,
+        email: request.email,
+        createdAt: request.createdAt,
+      },
+    },
+    { upsert: true, returnDocument: 'after' },
+  );
+  return (result ?? request) as HandoverRequestDoc;
+}
+
+/** Who has asked for this project, oldest first. */
+export async function listHandoverRequests(
+  store: Store,
+  projectId: string,
+): Promise<HandoverRequestDoc[]> {
+  return store.handovers.find({ projectId }).sort({ createdAt: 1 }).limit(10).toArray();
 }
 
 export async function acceptShare(
@@ -424,6 +511,9 @@ export async function claimProjectWithEmail(
     store.items.updateMany({ projectId: project._id }, clear),
     store.agents.updateMany({ projectId: project._id }, clear),
     store.escalations.updateMany({ projectId: project._id }, clear),
+    // A project with an owner cannot be handed to anybody else, so every
+    // request for it is answered, whichever way it went.
+    store.handovers.deleteMany({ projectId: project._id }),
     // Every key except the ones that expire for a reason of their own. An
     // access token from the OAuth endpoint carries an hour, and clearing that
     // here because the project stopped expiring would silently promote it to a

@@ -34,7 +34,7 @@ export interface Mailer {
 }
 
 /** Enough of an address to match it to a report, not enough to be a mailing list. */
-function redactAddress(address: string): string {
+export function redactAddress(address: string): string {
   const [name = '', domain = ''] = address.split('@');
   return `${name.slice(0, 2)}***@${domain}`;
 }

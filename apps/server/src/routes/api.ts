@@ -44,6 +44,7 @@ import {
   escalationCursor,
   itemCursor,
   listEscalations,
+  listHandoverRequests,
   listItems,
   nextItem,
   observe,
@@ -1114,9 +1115,26 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           .sort({ createdAt: 1 })
           .limit(50)
           .toArray();
+        // Somebody asking for the board is not an answer, but it is the other
+        // thing an agent has to notice and would otherwise never see: nothing
+        // in the API told it that a person is standing at the read link asking
+        // to be made the owner.
+        const handovers = project.claimedBy
+          ? []
+          : await listHandoverRequests(store, project._id);
         return {
           answers: docs.map((doc) => escalationJson(doc)),
           waiting: waiting.map((doc) => escalationJson(doc)),
+          ...(handovers.length > 0
+            ? {
+                handover_requests: handovers.map((doc) => ({
+                  email: doc.email,
+                  note: doc.note,
+                  asked_at: doc.createdAt,
+                })),
+                hint: `Somebody wants this board. Hand it over with POST ${config.baseUrl}/v1/${project._id}/share and their address, which puts the offer in their operator view. Never send them the project token.`,
+              }
+            : {}),
         };
       },
     );
@@ -1332,7 +1350,11 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         },
       },
       async (request, reply) => {
-        const { project } = auth(request);
+        // Admin, not write, for the same reason /claim is: this decides who
+        // ends up owning the project, and ownership has no way back. A worker
+        // key offering the board to an address it controls, then accepting the
+        // offer, is the two step version of claiming it outright.
+        const { project } = requireAdmin(request);
         const body = request.body as { email: string; note?: string; agent?: string };
         const verdict = limiter.check(`share:${project._id}`, config.rateLimits.claimEmail);
         if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds);

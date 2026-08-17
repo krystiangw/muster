@@ -510,8 +510,19 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
       );
     }
 
-    const { project } = await authenticate(store, token);
+    const { project, key } = await authenticate(store, token);
     const actor = str(args.actor) || str(args.agent) || 'unknown-agent';
+
+    // Offering the project to a person decides who ends up owning it, and
+    // ownership has no way back. The HTTP route asks for an admin key; a tool
+    // call is the same act through a different door.
+    if (tool.name === 'share_project' && key.role !== 'admin') {
+      throw new ServiceError(
+        403,
+        'admin_required',
+        'Offering this project to a person needs an admin token. The bootstrap token returned by create_project is one.',
+      );
+    }
 
     switch (tool.name) {
       case 'register_agent': {

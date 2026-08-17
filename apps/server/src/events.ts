@@ -45,6 +45,15 @@ export type EventKind =
   | 'claim'
   /** A person accepted a project an agent handed them. */
   | 'accept'
+  /**
+   * A person with the read link asked the agents to hand the board over.
+   *
+   * The measurement the claim funnel was missing. "Nobody has claimed a
+   * project" says nothing about why: this separates "no person ever wanted
+   * one" from "they wanted it and the only button asked for a token they were
+   * never supposed to have".
+   */
+  | 'handover_request'
   /** Somebody's agent reported something about this service, with no account. */
   | 'feedback'
   /** A question was filed for a human. */
@@ -216,6 +225,12 @@ export interface Insights {
     signups: number;
     withAnAgent: number;
     withWork: number;
+    /**
+     * Projects where a person asked for the board. Between work and ownership
+     * on purpose: "nobody claimed one" was a number with two very different
+     * explanations behind it, and this is the one that tells them apart.
+     */
+    asked: number;
     claimed: number;
   };
   doors: Record<string, number>;
@@ -267,6 +282,7 @@ export async function insights(store: Store): Promise<Insights> {
     signups,
     registered,
     firstWrites,
+    asked,
     claims,
     doorRows,
     pageRows,
@@ -294,6 +310,13 @@ export async function insights(store: Store): Promise<Insights> {
       ])
       .toArray(),
     store.events.countDocuments({ kind: 'first_write' }),
+    store.events
+      .aggregate<{ n: number }>([
+        { $match: { kind: 'handover_request', projectId: { $ne: null } } },
+        { $group: { _id: '$projectId' } },
+        { $count: 'n' },
+      ])
+      .toArray(),
     // Both doors into ownership, counted as projects rather than as events. A
     // project handed over by an agent and accepted by a person is owned exactly
     // as much as one claimed with a code, and the handover is the path our own
@@ -361,6 +384,7 @@ export async function insights(store: Store): Promise<Insights> {
       signups,
       withAnAgent: registered[0]?.n ?? 0,
       withWork: firstWrites,
+      asked: asked[0]?.n ?? 0,
       claimed: claims[0]?.n ?? 0,
     },
     doors: Object.fromEntries(doorRows.map((row) => [row._id, row.count])),

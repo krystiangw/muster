@@ -42,6 +42,7 @@ const [
   signups,
   registered,
   firstWrites,
+  asked,
   claims,
   doorRows,
   fileRows,
@@ -65,6 +66,7 @@ const [
   count(events, { kind: 'signup' }),
   events.aggregate([{ $match: { kind: 'register', projectId: { $ne: null } } }, { $group: { _id: '$projectId' } }, { $count: 'n' }]).toArray(),
   count(events, { kind: 'first_write' }),
+  events.aggregate([{ $match: { kind: 'handover_request', projectId: { $ne: null } } }, { $group: { _id: '$projectId' } }, { $count: 'n' }]).toArray(),
   events.aggregate([{ $match: { kind: { $in: ['claim', 'accept'] }, projectId: { $ne: null } } }, { $group: { _id: '$projectId' } }, { $count: 'n' }]).toArray(),
   events.aggregate([{ $match: { kind: 'signup' } }, { $group: { _id: '$door', n: { $sum: 1 } } }]).toArray(),
   events.aggregate([{ $match: { kind: 'discover' } }, { $group: { _id: '$detail', n: { $sum: 1 } } }, { $sort: { n: -1 } }]).toArray(),
@@ -100,6 +102,9 @@ row('reads of the protocol', discovered);
 row('created a project', signups);
 row('registered an agent', registered[0]?.n ?? 0);
 row('wrote something', firstWrites);
+// Between work and ownership, because "nobody claimed one" has two very
+// different explanations and this is the line that tells them apart.
+row('a person asked for it', asked[0]?.n ?? 0);
 row('claimed by a person', claims[0]?.n ?? 0);
 console.log(`  ${'reads per signup'.padEnd(28)} ${discovered === 0 ? '  n/a' : (discovered / Math.max(signups, 1)).toFixed(1).padStart(5)}`);
 console.log(`  ${'signup -> wrote something'.padEnd(28)} ${rate(firstWrites, signups)}`);

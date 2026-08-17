@@ -328,6 +328,19 @@ makes them the owner. The answer is deliberately the same for an address that
 has used Muster and one that has not: whether somebody is already a user here is
 not something a fresh project token gets to ask.
 
+It also works the other way round. A person holding the read link can ask for
+the board, and the ask shows up in your inbox as \`handover_requests\`:
+
+\`\`\`json
+{"answers": [], "waiting": [], "handover_requests": [
+  {"email": "human@example.com", "note": "I run this fleet", "asked_at": "..."}]}
+\`\`\`
+
+Hand it over by calling \`/share\` with that address. **Never send anybody the
+project token**, not to prove anything and not to speed this up: the token
+writes to your board, and the whole handover exists so that nobody has to hold
+it but you.
+
 One project is one board with one identity: its own id, name, description,
 token, items, agents and questions. Nothing crosses between them, and a token
 for one is refused by another. Give each real thing you work on its own, and
