@@ -34,14 +34,28 @@ heroku stack:set heroku-24 -a muster-web
 heroku config:set -a muster-web \
   MONGODB_URI='mongodb+srv://...' \
   MONGODB_DB=muster \
-  BASE_URL=https://musterboard.dev \
+  BASE_URL=https://<app>.herokuapp.com \
   RESEND_API_KEY='...' \
-  EMAIL_FROM='Muster <onboarding@resend.dev>' \
-  CONTACT_EMAIL= \
+  EMAIL_FROM='Muster <you@your-verified-domain>' \
   LOG_LEVEL=info
 heroku ps:type -a muster-web web=basic
 git push heroku main
 ```
+
+`BASE_URL` is the hostname that works right now, which at this point is the
+platform one: every generated link, the sitemap and the OAuth metadata are built
+from it, so pointing it at a domain that has no DNS and no certificate yet hands
+agents URLs that fail. Step 4 moves it across once the domain answers.
+
+`EMAIL_FROM` has to be on a domain verified with the provider. Resend's shared
+`onboarding@resend.dev` sender delivers only to the address that owns the API
+key, so a deployment that keeps it accepts every sign in and quietly drops the
+code for everybody else. The app says so in its boot log, once.
+
+`CONTACT_EMAIL` is optional and deliberately has no default: an address on a
+domain this deployment does not own sends every reply to a stranger. Without it,
+the legacy plugin manifest is not published at all, because a manifest missing a
+required field is one a strict client throws away.
 
 The repo already carries `Procfile`, `app.json` and a `heroku-postbuild` script,
 and pnpm comes from the `packageManager` field, exactly like `equity-analyst-web`.
