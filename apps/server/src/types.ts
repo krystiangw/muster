@@ -139,6 +139,17 @@ export interface EscalationDoc {
   answer: string | null;
   answeredAt: Date | null;
   itemSlug: string | null;
+  /**
+   * When an agent said it had acted on the answer, and what it did.
+   *
+   * A separate axis from the four statuses on purpose: those are the human's
+   * decision, and this is what happened next. Without it an answered question
+   * looks identical before and after the work, so the next session cannot tell
+   * whether to act, and the person who answered never learns that it landed.
+   */
+  acknowledgedAt: Date | null;
+  acknowledgedBy: string | null;
+  acknowledgedNote: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

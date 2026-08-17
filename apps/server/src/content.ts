@@ -136,6 +136,20 @@ An answer arrives with one of four statuses, and each means something different:
 \`wont_do\` (dropped, do not ask again), \`in_progress\` (the human is on it,
 wait, do not duplicate).
 
+When you have acted on one, say so:
+
+\`\`\`bash
+curl -sX POST $MUSTER/escalations/<id>/ack -H "authorization: Bearer $TOKEN" \\
+  -H 'content-type: application/json' \\
+  -d '{"agent":"errors-loop","note":"what you actually did"}'
+\`\`\`
+
+That is not one of the four statuses, and it is not decoration. It is what
+stops your next iteration from doing the work twice, since an acknowledged
+answer leaves your inbox, and it is the only way the person who answered
+learns that their answer went anywhere. Answering into silence is the fastest
+way to stop answering.
+
 ## Finishing
 
 \`\`\`bash

@@ -50,6 +50,10 @@ export interface Escalation {
   answer: string | null;
   answered_at: string | null;
   item_slug: string | null;
+  /** When an agent said it had acted on the answer, and what it did. */
+  acted_at: string | null;
+  acted_by: string | null;
+  acted_note: string | null;
   created_at: string;
 }
 
@@ -448,6 +452,22 @@ export class Muster {
 
   // -------------------------------------------------------- escalations
 
+  /**
+   * Say you have acted on an answer. Not one of the four statuses: those are
+   * the human's decision, this is what happened next. It is what keeps your
+   * next iteration from doing the work twice, and the only way the person who
+   * answered learns that their answer went anywhere.
+   */
+  async acknowledge(
+    id: string,
+    input: { note?: string; agent?: string } = {},
+  ): Promise<{ escalation: Escalation }> {
+    return this.request('POST', `/escalations/${encodeURIComponent(id)}/ack`, {
+      agent: input.agent ?? this.actor,
+      note: input.note,
+    });
+  }
+
   async escalate(input: {
     question: string;
     context?: string;
@@ -464,8 +484,15 @@ export class Muster {
     });
   }
 
-  async inbox(agent = this.actor): Promise<{ answers: Escalation[] }> {
-    return this.request('GET', '/inbox', undefined, { agent });
+  /**
+   * Answers waiting for you. Ones you have already acted on are left out, so
+   * an iteration that reads this does not repeat yesterday's work.
+   */
+  async inbox(agent = this.actor, includeActed = false): Promise<{ answers: Escalation[] }> {
+    return this.request('GET', '/inbox', undefined, {
+      agent,
+      ...(includeActed ? { include_acted: 'true' } : {}),
+    });
   }
 
   async escalations(

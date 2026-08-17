@@ -14,7 +14,7 @@ import type { Config } from '../config.js';
 import type { Store } from '../db.js';
 import { record, recordView } from '../events.js';
 import { chip, escapeHtml, formatWhen, layout } from '../html.js';
-import { avatar } from '../identity.js';
+import { avatar, who } from '../identity.js';
 import { renderBoard, renderBoardFilters, renderBoardSettings } from './boardHtml.js';
 import { maybeSweep } from '../hygiene.js';
 import type { RateLimiter } from '../rateLimit.js';
@@ -719,6 +719,14 @@ ${
                   doc.status,
                 )}</span><span>${escapeHtml(doc.question)}${
                   doc.answer ? `<br><span style="color:var(--ink-2)">${escapeHtml(doc.answer)}</span>` : ''
+                }${
+                  // Whether the answer landed. Answering into silence is the
+                  // fastest way to stop answering at all.
+                  doc.acknowledgedAt
+                    ? `<br><span class="why">${who(doc.acknowledgedBy ?? 'an agent')} acted ${escapeHtml(
+                        formatWhen(doc.acknowledgedAt),
+                      )}${doc.acknowledgedNote ? `: ${escapeHtml(doc.acknowledgedNote)}` : ''}</span>`
+                    : ''
                 }</span></li>`,
             )
             .join('')}</ul>`

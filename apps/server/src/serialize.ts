@@ -77,6 +77,11 @@ export function escalationJson(doc: EscalationDoc): Record<string, unknown> {
     answer: doc.answer,
     answered_at: doc.answeredAt,
     item_slug: doc.itemSlug,
+    // What happened after the answer, which is a different question from what
+    // the answer was. Null means nobody has acted on it yet.
+    acted_at: doc.acknowledgedAt ?? null,
+    acted_by: doc.acknowledgedBy ?? null,
+    acted_note: doc.acknowledgedNote ?? null,
     created_at: doc.createdAt,
   };
 }

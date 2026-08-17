@@ -1171,6 +1171,67 @@ export async function observe(
 
 // -------------------------------------------------------------- escalations
 
+/**
+ * An agent saying it has acted on an answer.
+ *
+ * Deliberately not one of the four statuses. Those carry the human's decision,
+ * and this is what happened afterwards: keeping them apart is what lets the
+ * next session tell "answered, do it" from "answered, already done", and what
+ * lets the person who answered see that their answer landed somewhere.
+ *
+ * Only an answered question can be acknowledged. Acting on a question nobody
+ * has answered is not an acknowledgement, it is a guess.
+ */
+export async function acknowledgeEscalation(
+  store: Store,
+  project: ProjectDoc,
+  id: string,
+  input: { agent: string; note?: string },
+): Promise<EscalationDoc> {
+  const now = new Date();
+  const updated = await store.escalations.findOneAndUpdate(
+    { _id: id, projectId: project._id, status: { $ne: 'open' }, acknowledgedAt: null },
+    {
+      $set: {
+        acknowledgedAt: now,
+        acknowledgedBy: input.agent.slice(0, 48),
+        acknowledgedNote: (input.note ?? '').slice(0, 2000) || null,
+        updatedAt: now,
+      },
+    },
+    { returnDocument: 'after' },
+  );
+  if (!updated) {
+    const existing = await store.escalations.findOne({ _id: id, projectId: project._id });
+    if (!existing) throw new ServiceError(404, 'not_found', 'No such question in this project.');
+    if (existing.status === 'open') {
+      throw new ServiceError(
+        409,
+        'not_answered',
+        'That question has no answer yet. Acting on it now would be a guess, not an acknowledgement.',
+      );
+    }
+    throw new ServiceError(
+      409,
+      'already_acknowledged',
+      `${existing.acknowledgedBy} already acted on this one. Read the note before doing it twice.`,
+    );
+  }
+
+  if (updated.itemSlug) {
+    await appendNote(
+      store,
+      project,
+      updated.itemSlug,
+      input.agent,
+      input.note
+        ? `acted on the operator's answer: ${input.note.slice(0, 160)}`
+        : "acted on the operator's answer",
+    ).catch(() => undefined);
+  }
+  return updated as EscalationDoc;
+}
+
 export async function createEscalation(
   store: Store,
   project: ProjectDoc,
@@ -1209,6 +1270,9 @@ export async function createEscalation(
     answer: null,
     answeredAt: null,
     itemSlug: input.itemSlug ? normalizeSlug(input.itemSlug) : null,
+    acknowledgedAt: null,
+    acknowledgedBy: null,
+    acknowledgedNote: null,
     createdAt: now,
     updatedAt: now,
   };

@@ -24,6 +24,7 @@ import {
 } from '../serialize.js';
 import {
   ServiceError,
+  acknowledgeEscalation,
   answerEscalation,
   authenticate,
   claimItem,
@@ -883,6 +884,34 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       },
     );
 
+    scoped.post(
+      '/v1/:project/escalations/:id/ack',
+      {
+        schema: {
+          tags: ['escalations'],
+          summary: 'Say you have acted on an answer',
+          description:
+            'Separate from the four statuses, which carry the human decision. This says what happened next, so the next iteration can tell "answered, do it" from "answered, already done", and the person who answered can see that it landed.',
+          body: {
+            type: 'object',
+            required: ['agent'],
+            properties: {
+              agent: { type: 'string', minLength: 1, maxLength: 48 },
+              note: { type: 'string', maxLength: 2000 },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request) => {
+        const { project } = auth(request);
+        const { id } = request.params as { id: string };
+        const body = request.body as { agent: string; note?: string };
+        const doc = await acknowledgeEscalation(store, project, id, body);
+        return { escalation: escalationJson(doc) };
+      },
+    );
+
     scoped.get(
       '/v1/:project/inbox',
       {
@@ -893,17 +922,28 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
             'Four statuses, four meanings: answered (act on it), resolved (already handled, stop), wont_do (dropped, do not ask again), in_progress (the human is on it, wait).',
           querystring: {
             type: 'object',
-            properties: { agent: { type: 'string', maxLength: 48 } },
+            properties: {
+              agent: { type: 'string', maxLength: 48 },
+              include_acted: {
+                type: 'boolean',
+                description:
+                  'Answers you have already acted on are left out by default, so an iteration that reads this does not do the same work twice.',
+              },
+            },
             additionalProperties: false,
           },
         },
       },
       async (request) => {
         const { project } = auth(request);
-        const { agent } = request.query as { agent?: string };
+        const { agent, include_acted: includeActed } = request.query as {
+          agent?: string;
+          include_acted?: boolean;
+        };
         const filter: Record<string, unknown> = {
           projectId: project._id,
           status: { $ne: 'open' },
+          ...(includeActed ? {} : { acknowledgedAt: null }),
         };
         if (agent) filter.agent = agent;
         const docs = await store.escalations

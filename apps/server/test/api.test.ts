@@ -545,3 +545,69 @@ describe('rate limits', () => {
     }
   });
 });
+
+describe('saying an answer was acted on', () => {
+  let project: Project;
+  let id: string;
+
+  before(async () => {
+    project = await createProject(harness, 'answered');
+    await post(project, '/items', { slug: 'stuck', title: 'stuck', actor: 'a' });
+    id = (
+      await post(project, '/escalations', {
+        agent: 'a',
+        question: 'Bridge or wait?',
+        item_slug: 'stuck',
+      })
+    ).json().escalation.id;
+  });
+
+  it('refuses to acknowledge a question nobody answered', async () => {
+    const early = await post(project, `/escalations/${id}/ack`, { agent: 'a', note: 'did it' });
+    assert.equal(early.statusCode, 409);
+    assert.equal(early.json().error, 'not_answered');
+  });
+
+  it('records who acted and what they did, once', async () => {
+    const readToken = project.readUrl.split('/r/')[1]!;
+    await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/escalations/${id}`,
+      payload: new URLSearchParams({ status: 'answered', answer: 'Bridge it.' }).toString(),
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+
+    const acted = await post(project, `/escalations/${id}/ack`, {
+      agent: 'a',
+      note: 'bridged and verified',
+    });
+    assert.equal(acted.statusCode, 200);
+    assert.equal(acted.json().escalation.acted_by, 'a');
+    assert.match(acted.json().escalation.acted_note, /bridged/);
+
+    // The item carries it too, because the work is where somebody looks.
+    const item = (await get(project, '/items/stuck')).json().item;
+    assert.match(item.timeline.at(-1).message, /acted on the operator's answer: bridged/);
+
+    // Twice is a different outcome from once: the second session has to learn
+    // that the first already did it, rather than silently repeating the work.
+    const again = await post(project, `/escalations/${id}/ack`, { agent: 'b' });
+    assert.equal(again.statusCode, 409);
+    assert.equal(again.json().error, 'already_acknowledged');
+  });
+
+  it('drops it from the inbox once it has been acted on', async () => {
+    const inbox = (await get(project, '/inbox?agent=a')).json().answers;
+    assert.ok(!inbox.some((a: { id: string }) => a.id === id), 'not offered a second time');
+
+    const everything = (await get(project, '/inbox?agent=a&include_acted=true')).json().answers;
+    assert.ok(everything.some((a: { id: string }) => a.id === id), 'still readable on purpose');
+  });
+
+  it('shows the human that their answer landed', async () => {
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}` });
+    assert.match(page.body, /acted/);
+    assert.match(page.body, /bridged and verified/);
+  });
+});
