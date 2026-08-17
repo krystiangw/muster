@@ -102,13 +102,15 @@ row('reads of the protocol', discovered);
 row('created a project', signups);
 row('registered an agent', registered[0]?.n ?? 0);
 row('wrote something', firstWrites);
-// Between work and ownership, because "nobody claimed one" has two very
-// different explanations and this is the line that tells them apart.
-row('a person asked for it', asked[0]?.n ?? 0);
 row('claimed by a person', claims[0]?.n ?? 0);
 console.log(`  ${'reads per signup'.padEnd(28)} ${discovered === 0 ? '  n/a' : (discovered / Math.max(signups, 1)).toFixed(1).padStart(5)}`);
 console.log(`  ${'signup -> wrote something'.padEnd(28)} ${rate(firstWrites, signups)}`);
 console.log(`  ${'signup -> claimed'.padEnd(28)} ${rate(claims[0]?.n ?? 0, signups)}`);
+// Beside the funnel, not in it: asking is not a stage every claim passes
+// through, and a stage that can exceed the one above it stops being believed.
+// It exists because "nobody claimed one" has two explanations, and this tells
+// them apart.
+row('asked to be handed a board', asked[0]?.n ?? 0);
 
 if (doorRows.length > 0) {
   console.log('\nWhich door they came through');

@@ -225,14 +225,20 @@ export interface Insights {
     signups: number;
     withAnAgent: number;
     withWork: number;
-    /**
-     * Projects where a person asked for the board. Between work and ownership
-     * on purpose: "nobody claimed one" was a number with two very different
-     * explanations behind it, and this is the one that tells them apart.
-     */
-    asked: number;
     claimed: number;
   };
+  /**
+   * Projects where a person asked the agents to hand the board over.
+   *
+   * Beside the funnel, not inside it. Asking is not a stage every claim passes
+   * through: a project can be claimed with a code having had no request, and a
+   * request can arrive before a single item exists. Put in the column it does
+   * not belong to, it would sooner or later read as a stage larger than the one
+   * above it, which is how a funnel stops being believed. What it is for is
+   * narrower and worth having on its own: "nobody claimed a project" has two
+   * very different explanations, and this is the number that tells them apart.
+   */
+  handoverRequests: number;
   doors: Record<string, number>;
   /** Page views by page, people only. The half of the funnel agents cannot show. */
   pages: Record<string, number>;
@@ -384,9 +390,9 @@ export async function insights(store: Store): Promise<Insights> {
       signups,
       withAnAgent: registered[0]?.n ?? 0,
       withWork: firstWrites,
-      asked: asked[0]?.n ?? 0,
       claimed: claims[0]?.n ?? 0,
     },
+    handoverRequests: asked[0]?.n ?? 0,
     doors: Object.fromEntries(doorRows.map((row) => [row._id, row.count])),
     pages: Object.fromEntries(pageRows.map((row) => [row._id, row.count])),
     pagesLastWeek: viewsLastWeek,

@@ -17,6 +17,7 @@ import {
   createProject,
   appendNote,
   listEscalations,
+  listHandoverRequests,
   listItems,
   nextItem,
   observe,
@@ -658,9 +659,26 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         const docs = await listEscalations(store, project._id, {
           agent: str(args.agent) || undefined,
         });
+        // Somebody standing at the read link asking to be made the owner is
+        // the other thing an agent has to notice here, and an interface that
+        // hides it is an interface through which the handover cannot be
+        // completed at all.
+        const handovers = project.claimedBy
+          ? []
+          : await listHandoverRequests(store, project._id);
         return {
           answers: docs.filter((doc) => doc.status !== 'open').map(escalationJson),
           waiting: docs.filter((doc) => doc.status === 'open').map(escalationJson),
+          ...(handovers.length > 0
+            ? {
+                handover_requests: handovers.map((doc) => ({
+                  email: doc.email,
+                  note: doc.note,
+                  asked_at: doc.createdAt,
+                })),
+                hint: `Somebody wants this board. Hand it over with the share_project tool and their address. Never send them the project token.`,
+              }
+            : {}),
         };
       }
       default:

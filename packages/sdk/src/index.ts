@@ -503,7 +503,17 @@ export class Muster {
   async inbox(
     agent = this.actor,
     includeActed = false,
-  ): Promise<{ answers: Escalation[]; waiting: Escalation[] }> {
+  ): Promise<{
+    answers: Escalation[];
+    waiting: Escalation[];
+    /**
+     * People who asked to be made the owner of this project, if it has none.
+     * Answer one by calling `share` with that address; never send anybody the
+     * project token.
+     */
+    handover_requests?: Array<{ email: string; note: string; asked_at: string }>;
+    hint?: string;
+  }> {
     return this.request('GET', '/inbox', undefined, {
       agent,
       ...(includeActed ? { include_acted: 'true' } : {}),

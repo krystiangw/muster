@@ -512,13 +512,30 @@ describe('a read link can ask for a project and never take one', () => {
       headers: session.headers,
     });
 
-    // The agent sees it where it looks for everything else.
+    // The agent sees it where it looks for everything else, through both doors:
+    // an interface that hides the request is one the handover cannot finish in.
     const inbox = await harness.server.inject({
       method: 'GET',
       url: `${project.api}/inbox`,
       headers: authed(project),
     });
     assert.equal(inbox.json().handover_requests[0].email, 'owner@example.com');
+
+    const overMcp = await harness.server.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: authed(project),
+      payload: {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'inbox', arguments: {} },
+      },
+    });
+    assert.equal(
+      overMcp.json().result.structuredContent.handover_requests[0].email,
+      'owner@example.com',
+    );
 
     // And answers with the offer, which is the only thing that moves ownership.
     const offered = await post(project, '/share', { email: 'owner@example.com' });

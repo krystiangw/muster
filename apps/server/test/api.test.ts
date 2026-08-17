@@ -111,9 +111,30 @@ describe('items', () => {
       title: 'venue-a withdraw stuck',
       actor: 'b',
     });
+    // Two warnings now: the twin, and the fact that "b" never registered.
     const warnings = twin.json().warnings as string[];
-    assert.equal(warnings.length, 1);
-    assert.match(warnings[0]!, /a-one/);
+    assert.equal(warnings.filter((line) => line.includes('a-one')).length, 1);
+  });
+
+  it('says so when the writer is a handle nobody registered', async () => {
+    // Accepted on purpose, because refusing a write over bookkeeping loses the
+    // write. Silent was the problem: one typo in a handle put a second
+    // identity on the board that /next then never offered work to.
+    const project = await createProject(harness);
+    const stranger = await post(project, '/items', {
+      slug: 'ops:thing',
+      title: 'a thing',
+      actor: 'errrors-loop',
+    });
+    assert.match((stranger.json().warnings as string[]).join(' '), /No agent is registered/);
+
+    await post(project, '/agents', { handle: 'errors-loop', scope: [] });
+    const known = await post(project, '/items', {
+      slug: 'ops:thing',
+      title: 'a thing',
+      actor: 'errors-loop',
+    });
+    assert.deepEqual(known.json().warnings, []);
   });
 
   it('says which end of the priority scale is urgent, everywhere it is offered', async () => {

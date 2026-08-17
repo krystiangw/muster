@@ -458,7 +458,17 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         const warnings = [...result.warnings];
         if (project.rules.scopeWarnings && actor !== 'unknown-agent') {
           const agent = await store.agents.findOne({ projectId: project._id, handle: actor });
-          if (agent && agent.scope.length > 0 && !itemInScope(agent.scope, result.item)) {
+          if (!agent) {
+            // The same lookup the scope check already needed, so this costs
+            // nothing extra. An unregistered handle is accepted on purpose,
+            // because refusing a write over bookkeeping would lose the write,
+            // but nothing said so, and a typo in a handle produced a second
+            // silent identity on the board that /next then never offered work
+            // to.
+            warnings.push(
+              `No agent is registered here as "${actor}", so the board shows a handle nobody has described and /next has no scope to offer it work by. Register with POST /agents, or check the spelling.`,
+            );
+          } else if (agent.scope.length > 0 && !itemInScope(agent.scope, result.item)) {
             warnings.push(
               `"${result.item.slug}" is outside your declared scope (${agent.scope.join(', ')}). The write went through; this is a boundary reminder, not a block.`,
             );
