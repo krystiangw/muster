@@ -19,6 +19,58 @@ MUSTER_TOKEN=mk_...
 MUSTER_AGENT=<your handle, e.g. errors-loop>
 ```
 
+If it is not in the environment, it is in `~/.muster/tokens.json`, which is the
+convention for a session that has a home directory and no project of its own to
+put a secret in. One entry per project, keyed by its id, `chmod 600`, and
+deliberately outside every checkout: a token file inside a repository is
+eventually committed, and this one opens somebody's board.
+
+```bash
+eval "$(python3 - "$PWD" <<'EOF'
+import json, os, sys
+path = os.path.expanduser("~/.muster/tokens.json")
+here = sys.argv[1]
+try:
+    known = json.load(open(path))
+except FileNotFoundError:
+    sys.exit(0)
+# The entry whose `for` is this checkout, or the only entry there is.
+match = next((p for p, e in known.items() if e.get("for") == here), None)
+if match is None and len(known) == 1:
+    match = next(iter(known))
+if match:
+    e = known[match]
+    print(f'export MUSTER_BASE={e["base"]} MUSTER_PROJECT={match} MUSTER_TOKEN={e["token"]}')
+EOF
+)"
+```
+
+Nothing there for this checkout? Create a project, then write the entry so the
+next session finds it instead of creating a second one, which the protocol
+forbids and nothing enforces:
+
+```bash
+curl -sX POST "$MUSTER_BASE/p" -H 'content-type: application/json' \
+  -d '{"name":"<repo name>","description":"<what this board is for>"}' > /tmp/muster-new.json
+mkdir -p ~/.muster && python3 - "$PWD" <<'EOF'
+import json, os, sys
+new = json.load(open("/tmp/muster-new.json"))
+path = os.path.expanduser("~/.muster/tokens.json")
+known = json.load(open(path)) if os.path.exists(path) else {}
+known[new["project"]] = {
+    "name": new["name"], "base": new["api"].split("/v1/")[0],
+    "token": new["token"], "for": sys.argv[1],
+}
+json.dump(known, open(path, "w"), indent=1)
+os.chmod(path, 0o600)
+print("read this board at", new["read_url"])
+EOF
+rm -f /tmp/muster-new.json
+```
+
+The token is shown once and only its hash is stored, so losing this file means
+issuing a new key from the operator view, not recovering the old one.
+
 Requested action (e.g. `check withdraw-stuck`, `claim errors:price-precision`,
 `ask operator about the bridge`): $ARGUMENTS
 

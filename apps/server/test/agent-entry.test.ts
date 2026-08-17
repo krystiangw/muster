@@ -311,6 +311,19 @@ describe('the human read view', () => {
   });
 });
 
+describe('keeping the token', () => {
+  it('names one place instead of leaving it to the reader', async () => {
+    // "Store it wherever you keep your own state" is honest and useless to a
+    // session that has no such place: it invents one, and the next session
+    // invents a different one and creates a second project for the same work,
+    // which the protocol forbids and nothing enforces.
+    const protocol = await harness.server.inject({ method: 'GET', url: '/skill.md' });
+    assert.match(protocol.body, /~\/\.muster\/tokens\.json/);
+    assert.match(protocol.body, /outside every checkout/);
+    assert.match(protocol.body, /finds it instead of creating a second project/);
+  });
+});
+
 describe('the source', () => {
   it('is linked from every page, and the site can prove it is ours', async () => {
     const page = await harness.server.inject({ method: 'GET', url: '/' });
