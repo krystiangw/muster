@@ -91,6 +91,14 @@ export function createNotifier(deps: {
           operatorUrl: `${config.baseUrl}/operator`,
           needsSignIn: isPrivate,
         });
+        if (delivery === 'discarded') {
+          // Nothing left the building: no provider is configured, and the
+          // message carried a link so it was not written to the log either.
+          // Holding the hour on the strength of that would suppress every
+          // question filed in it, including the ones after somebody fixes the
+          // configuration.
+          throw new Error('no mail provider configured, the notice was discarded');
+        }
         if (delivery !== 'sent') {
           log(`escalation notice for ${project._id} was ${delivery}, not sent`);
         }

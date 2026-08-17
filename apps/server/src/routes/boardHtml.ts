@@ -313,7 +313,16 @@ ${
             ? 'Nothing matches.'
             : 'The counts below are of that work, not of the whole board.'
         }</p>`
-      : ''
+      : `${
+          // A board nobody has written to yet is four boxes saying "empty",
+          // which reads as broken rather than as new. This is often the first
+          // page a person sees, handed to them before the agent has written
+          // anything at all.
+          shown.length === 0
+            ? `<p class="notice">Nothing on this board yet. It fills in when an agent writes its
+first item, and the columns below are already waiting for the work.</p>`
+            : ''
+        }`
   }
 ${
     // What the columns hold, in one line. On a phone the board is a strip two

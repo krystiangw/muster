@@ -14,7 +14,7 @@ import {
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
 import { record, recordView } from '../events.js';
-import { chip, escapeHtml, layout, when } from '../html.js';
+import { ago, chip, escapeHtml, layout, when } from '../html.js';
 import { avatar, who } from '../identity.js';
 import { renderBoard, renderBoardFilters, renderBoardSettings } from './boardHtml.js';
 import { DEMO_AGENTS, demoBoard } from './demoBoard.js';
@@ -900,8 +900,11 @@ ${
             // card comes back on its own an hour later, and somebody who was
             // never told that returns to a board that changed behind their
             // back.
+            // Plain words, not the `<time>` element: this sentence is escaped
+            // as a whole before it reaches the page, on purpose, so that no
+            // crafted link can put markup on somebody else's board.
             heldUntil
-              ? ` You are holding it until ${when(heldUntil)}, and it returns to where it was if nothing renews that.`
+              ? ` You are holding it, and it goes back to where it was ${ago(heldUntil)} unless something renews that.`
               : ''
           }`
         : `"${touched?.slug ?? query.moved.slice(0, 80)}" matches no column now. Check the layout below.`

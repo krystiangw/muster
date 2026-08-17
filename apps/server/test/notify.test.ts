@@ -32,7 +32,7 @@ async function claimedProject(
 
 async function withMailer(
   run: (harness: Harness, sent: Sent[]) => Promise<void>,
-  fail = false,
+  outcome: 'sent' | 'throws' | 'discarded' = 'sent',
 ): Promise<void> {
   const sent: Sent[] = [];
   const harness = await startHarness(
@@ -43,9 +43,9 @@ async function withMailer(
         sendOperatorCode: async () => 'sent',
         sendOperatorLink: async () => 'sent',
         sendEscalation: async (to, notice) => {
-          if (fail) throw new Error('the provider said no');
+          if (outcome === 'throws') throw new Error('the provider said no');
           sent.push({ to, notice });
-          return 'sent';
+          return outcome === 'discarded' ? 'discarded' : 'sent';
         },
       },
     },
@@ -120,7 +120,21 @@ describe('the mail an escalation sends', () => {
       assert.equal((await ask(harness, project, 'first')).statusCode, 201);
       const after = await harness.store.projects.findOne({ _id: project.id });
       assert.equal(after?.escalationNotifiedAt ?? null, null);
-    }, true);
+    }, 'throws');
+  });
+
+  it('gives the hour back when there is no provider to send through', async () => {
+    // A deployment with no mail key discards the message rather than throwing,
+    // because it carries a link. Treating that as a delivery would silence
+    // every question filed in the next hour, including the ones after somebody
+    // fixes the configuration.
+    await withMailer(async (harness, sent) => {
+      const project = await claimedProject(harness, 'owner@example.com');
+      await ask(harness, project, 'first');
+      assert.equal(sent.length, 1, 'the notifier still tried');
+      const after = await harness.store.projects.findOne({ _id: project.id });
+      assert.equal(after?.escalationNotifiedAt ?? null, null);
+    }, 'discarded');
   });
 
   it('files the question even when the mail fails', async () => {
@@ -129,6 +143,6 @@ describe('the mail an escalation sends', () => {
       const filed = await ask(harness, project, 'still filed?');
       assert.equal(filed.statusCode, 201);
       assert.equal(await harness.store.escalations.countDocuments({ projectId: project.id }), 1);
-    }, true);
+    }, 'throws');
   });
 });

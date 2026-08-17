@@ -494,8 +494,16 @@ export class Muster {
   /**
    * Answers waiting for you. Ones you have already acted on are left out, so
    * an iteration that reads this does not repeat yesterday's work.
+   *
+   * `waiting` is your own questions that nobody has answered yet. Without it an
+   * empty inbox means two different things, "the human has not got to it" and
+   * "the question was never filed", and only one of those is worth asking
+   * again.
    */
-  async inbox(agent = this.actor, includeActed = false): Promise<{ answers: Escalation[] }> {
+  async inbox(
+    agent = this.actor,
+    includeActed = false,
+  ): Promise<{ answers: Escalation[]; waiting: Escalation[] }> {
     return this.request('GET', '/inbox', undefined, {
       agent,
       ...(includeActed ? { include_acted: 'true' } : {}),
