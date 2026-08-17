@@ -119,6 +119,24 @@ async function readableBy(
   return session !== null && session.email === project.claimedBy;
 }
 
+/**
+ * The one answer for a link that does not work, whatever the reason.
+ *
+ * A wrong token and a token for a project its owner closed have to read
+ * identically. Saying "sign in, it is private" only when the token is real
+ * would answer, for anybody willing to guess, the one question the whole
+ * feature exists to refuse: whether this token means anything.
+ */
+function noSuchProject(): string {
+  return layout(
+    { title: 'No such project' },
+    `<h1>No such project</h1>
+     <p>That link is wrong, or the project expired and was deleted.</p>
+     <p>If you believe it is yours, <a href="/operator">sign in</a>: a project can be narrowed to
+     its owner, and then the link alone no longer opens it.</p>`,
+  );
+}
+
 export function registerPublic(app: FastifyInstance, deps: PublicDeps): void {
   const { store, config, limiter } = deps;
   const base = config.baseUrl;
@@ -516,29 +534,10 @@ address. Claiming is free and raises the limits:</p>
     const { readToken } = request.params as { readToken: string };
     const project = await store.projects.findOne({ readToken });
     if (!project) {
-      return reply
-        .code(404)
-        .type('text/html; charset=utf-8')
-        .send(
-          layout(
-            { title: 'No such project' },
-            '<h1>No such project</h1><p>That link is wrong, or the project expired and was deleted.</p>',
-          ),
-        );
+      return reply.code(404).type('text/html; charset=utf-8').send(noSuchProject());
     }
     if (!(await readableBy(store, request, project))) {
-      return reply
-        .code(404)
-        .type('text/html; charset=utf-8')
-        .send(
-          layout(
-            { title: 'No such project' },
-            `<h1>No such project</h1>
-             <p>That link is wrong, or the project expired and was deleted.</p>
-             <p>If it is yours, <a href="/operator">sign in</a>: its owner narrowed it to
-             themselves, so the link alone no longer opens it.</p>`,
-          ),
-        );
+      return reply.code(404).type('text/html; charset=utf-8').send(noSuchProject());
     }
     void maybeSweep(store, project).catch(() => undefined);
 
@@ -662,29 +661,10 @@ ${
     const { readToken } = request.params as { readToken: string };
     const project = await store.projects.findOne({ readToken });
     if (!project) {
-      return reply
-        .code(404)
-        .type('text/html; charset=utf-8')
-        .send(
-          layout(
-            { title: 'No such project' },
-            '<h1>No such project</h1><p>That link is wrong, or the project expired and was deleted.</p>',
-          ),
-        );
+      return reply.code(404).type('text/html; charset=utf-8').send(noSuchProject());
     }
     if (!(await readableBy(store, request, project))) {
-      return reply
-        .code(404)
-        .type('text/html; charset=utf-8')
-        .send(
-          layout(
-            { title: 'No such project' },
-            `<h1>No such project</h1>
-             <p>That link is wrong, or the project expired and was deleted.</p>
-             <p>If it is yours, <a href="/operator">sign in</a>: its owner narrowed it to
-             themselves, so the link alone no longer opens it.</p>`,
-          ),
-        );
+      return reply.code(404).type('text/html; charset=utf-8').send(noSuchProject());
     }
     void maybeSweep(store, project).catch(() => undefined);
     const query = request.query as {

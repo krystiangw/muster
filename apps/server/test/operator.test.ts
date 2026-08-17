@@ -483,6 +483,81 @@ describe('the operator view', () => {
     assert.match(after.body, /filed under a nickname/);
   });
 
+  it('offers the alias form even when there is nothing to show', async () => {
+    const project = await createProject(harness, 'nothing of mine');
+    await claimFor(project, 'empty@example.com');
+    const session = await signIn(harness, 'empty@example.com');
+
+    const view = await harness.server.inject({
+      method: 'GET',
+      url: '/operator',
+      headers: { cookie: session.cookie },
+    });
+    // An empty list is exactly when somebody needs to say which names are
+    // theirs, so hiding the form behind a non-empty list hides it when it
+    // matters.
+    assert.match(view.body, /Your work/);
+    assert.match(view.body, /Names you answer to/);
+  });
+
+  it('counts an abandoned item as work waiting on somebody', async () => {
+    const project = await createProject(harness, 'abandoned');
+    await claimFor(project, 'owner@example.com');
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'dropped-by-a-crash', title: 'left half done', actor: 'a' },
+    });
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items/dropped-by-a-crash/claim`,
+      headers: authed(project),
+      payload: { agent: 'crashed-loop', ttl_minutes: 30 },
+    });
+
+    const session = await signIn(harness, 'owner@example.com');
+    const held = await harness.server.inject({
+      method: 'GET',
+      url: '/operator',
+      headers: { cookie: session.cookie },
+    });
+    assert.doesNotMatch(held.body, /left half done/, 'somebody is on it');
+
+    await harness.store.items.updateOne(
+      { projectId: project.id, slug: 'dropped-by-a-crash' },
+      { $set: { 'claim.expiresAt': new Date(Date.now() - 60_000) } },
+    );
+    const lapsed = await harness.server.inject({
+      method: 'GET',
+      url: '/operator',
+      headers: { cookie: session.cookie },
+    });
+    assert.match(lapsed.body, /left half done/, 'and now nobody is');
+  });
+
+  it('does not send a second code on top of one that just went out', async () => {
+    const project = await createProject(harness, 'impatient');
+    await claimFor(project, 'twice@example.com');
+
+    const ask = () =>
+      harness.server.inject({
+        method: 'POST',
+        url: '/operator',
+        payload: 'email=twice@example.com',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      });
+    assert.equal((await ask()).statusCode, 200);
+    const first = await harness.store.operatorCodes.findOne({ email: 'twice@example.com' });
+
+    // The second press must leave the first code alone: whichever email lands
+    // last would otherwise carry a code that no longer works.
+    assert.equal((await ask()).statusCode, 200);
+    const after = await harness.store.operatorCodes.findOne({ email: 'twice@example.com' });
+    assert.equal(after!.codeHash, first!.codeHash, 'the code in the inbox is still the live one');
+    assert.equal(await harness.store.operatorCodes.countDocuments({ email: 'twice@example.com' }), 1);
+  });
+
   it('does not reveal whether an address owns anything', async () => {
     const unknown = await harness.server.inject({
       method: 'POST',

@@ -45,6 +45,8 @@ export interface OperatorDeps {
 }
 
 const CODE_TTL_MS = 15 * 60_000;
+/** How long a freshly sent code is left alone before a new one replaces it. */
+const CODE_REISSUE_MS = 60_000;
 const MAX_CODE_ATTEMPTS = 5;
 
 export function registerOperator(app: FastifyInstance, deps: OperatorDeps): void {
@@ -148,9 +150,15 @@ and you can end that from the view itself.</p>
       // then inserting lets two overlapping requests both delete before either
       // inserts, which leaves two live codes and makes the newer email the one
       // that fails.
+      // A code is only replaced once the previous one has had a moment to
+      // arrive. Two requests in the same instant would otherwise both write,
+      // and whichever email lands last would carry the code that no longer
+      // works, which reads as the service being broken. Waiting also means a
+      // second press of the button cannot send a second message.
+      const settled = new Date(now.getTime() - CODE_REISSUE_MS);
       const replaceCode = () =>
         store.operatorCodes.updateOne(
-          { email },
+          { email, $or: [{ createdAt: { $lte: settled } }, { expiresAt: { $lte: now } }] },
           {
             $set: {
               codeHash: hashToken(code),
@@ -162,22 +170,29 @@ and you can end that from the view itself.</p>
           },
           { upsert: true },
         );
+
+      let issued = false;
       try {
-        await replaceCode();
+        const result = await replaceCode();
+        issued = result.matchedCount > 0 || result.upsertedCount > 0;
       } catch (error) {
-        // Two requests for the same address in the same instant: the index did
-        // its job and refused the second insert. The document exists now, so
-        // the retry takes the update path and the code in the email we are
-        // about to send is the one that will work.
-        if ((error as { code?: number }).code !== 11000) throw error;
-        await replaceCode();
+        // 11000: the unique index refused an insert because a live code exists.
+        // 66: the upsert tried to write _id onto an existing document, which
+        // means the same thing. Either way the previous code is the live one
+        // and it is on its way, so this request sends nothing.
+        const code = (error as { code?: number }).code;
+        if (code !== 11000 && code !== 66) throw error;
+        issued = false;
       }
-      try {
-        await mailer.sendOperatorCode(email, code);
-      } catch (error) {
-        // A bounced send must not answer differently from an address nobody
-        // has ever used, or the failure itself becomes the account probe.
-        request.log.error({ err: error }, 'operator code delivery failed');
+
+      if (issued) {
+        try {
+          await mailer.sendOperatorCode(email, code);
+        } catch (error) {
+          // A bounced send must not answer differently from an address nobody
+          // has ever used, or the failure itself becomes the account probe.
+          request.log.error({ err: error }, 'operator code delivery failed');
+        }
       }
     }
 
@@ -360,7 +375,14 @@ and you can end that from the view itself.</p>
         .find({
           projectId: { $in: ids },
           status: { $nin: ['done', 'dropped'] },
-          $or: [{ owner: { $in: aliases } }, { status: 'blocked' }],
+          $or: [
+            { owner: { $in: aliases } },
+            { status: 'blocked' },
+            // A lease that ran out is an agent that stopped. Hygiene will clear
+            // the claim on its next pass, and until then the item is nobody's,
+            // which is the operator's problem sooner than it is anybody's.
+            { 'claim.expiresAt': { $lte: new Date() } },
+          ],
         })
         .sort({ priority: -1, updatedAt: -1 })
         .limit(40)
@@ -432,10 +454,13 @@ ${offers
   .join('')}`
     }
 
+<h2>Your work</h2>
 ${
       mine.length === 0
-        ? ''
-        : `<h2>Your work</h2>
+        ? `<p class="empty">Nothing assigned to ${escapeHtml(aliases.join(', '))}, nothing blocked,
+nothing abandoned. If work of yours is missing, it is filed under a name this page does not know
+is you.</p>`
+        : `
 <p style="color:var(--ink-2)">Assigned to ${escapeHtml(aliases.join(', '))}, or blocked and waiting
 for somebody to unblock it. Across every project, because the work does not care which board it
 lives on.</p>
@@ -456,15 +481,16 @@ ${mine
   })
   .join('\n')}
 </tbody></table></div>
-<p style="color:var(--muted);font-size:14px">Nothing here that should be? Tell it which names are
-yours.</p>
+`
+    }
+<p style="color:var(--muted);font-size:14px">An item's owner is free text an agent wrote, so this
+page assumes the front of your address means you. Anything else, say so.</p>
 <form class="row" method="post" action="/operator/aliases">
   ${csrfField(session)}
   <label>Names you answer to<input name="aliases" value="${escapeHtml(aliases.join(', '))}"
     placeholder="alex, ak, alex.k"></label>
   <button class="ghost" type="submit">Save</button>
-</form>`
-    }
+</form>
 
 <h2>Projects</h2>
 <div class="scroll"><table>

@@ -343,10 +343,13 @@ describe('a project narrowed to its owner', () => {
 
     // A stranger holding the link, including one who copied it while the
     // project was open, gets the same page as somebody holding a wrong link.
+    // Byte for byte: a longer body for the real token would answer, for anybody
+    // willing to guess, the one question this feature exists to refuse.
     const stranger = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
     assert.equal(stranger.statusCode, 404);
     const wrongLink = await harness.server.inject({ method: 'GET', url: '/r/r_nosuchtoken/board' });
     assert.equal(stranger.statusCode, wrongLink.statusCode);
+    assert.equal(stranger.body, wrongLink.body);
 
     // Writing through the link is what the link is for, so that closes too.
     const moved = await harness.server.inject({
