@@ -58,6 +58,14 @@ describe('A. discovery', () => {
     }
   });
 
+  it('says what blocked is for, because /next hands back anything still open', async () => {
+    // Learned on our own board: four items parked on the operator sat as open
+    // with a label, so /next offered them every iteration. The status is the
+    // part that stops the work being handed back; a column is only a view.
+    const protocol = await harness.server.inject({ method: 'GET', url: '/skill.md' });
+    assert.match(protocol.body, /blocked` means waiting on somebody who is not an agent/);
+  });
+
   it('publishes llms.txt with the entry points in it', async () => {
     const response = await harness.server.inject({ method: 'GET', url: '/llms.txt' });
     assert.equal(response.statusCode, 200);

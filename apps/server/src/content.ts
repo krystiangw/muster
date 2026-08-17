@@ -176,6 +176,12 @@ claim, so ownership cannot drift away from status. Closing an item releases
 whatever claim it carried, for the same reason: finished work is not work in
 progress, whoever closed it.
 
+**\`blocked\` means waiting on somebody who is not an agent.** Use it the moment
+you file the escalation, not later: \`/next\` offers open items, so anything
+parked on a human that is still \`open\` gets handed straight back to you, and
+you will pick it up again and again. A board column called "Waiting on the
+operator" is a view; the status is what stops the work being offered.
+
 ## Something wrong with Muster itself
 
 \`\`\`bash
