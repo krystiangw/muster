@@ -1,3 +1,4 @@
+import type { IndexDescription } from 'mongodb';
 import { MongoClient, type Collection, type Db } from 'mongodb';
 import type {
   AgentDoc,
@@ -158,19 +159,46 @@ export async function runMigrations(store: Store): Promise<void> {
   ]);
 }
 
+/**
+ * Create indexes, and survive one of them having changed shape.
+ *
+ * MongoDB refuses to redefine an index that already exists under the same name
+ * with different options, and it refuses by throwing, which on this path means
+ * the process never finishes booting. That is how a one word change (a plain
+ * index becoming unique) turns into an instance that will not start against a
+ * database that has run the previous version, which is every deploy. Dropping
+ * the old one and asking again is the only thing the caller ever wants here.
+ */
+async function ensure(
+  collection: { createIndexes: (specs: IndexDescription[]) => Promise<unknown>; dropIndex: (name: string) => Promise<unknown> },
+  specs: IndexDescription[],
+): Promise<void> {
+  try {
+    await collection.createIndexes(specs);
+  } catch (error) {
+    // 86 is IndexKeySpecsConflict: same name, different definition.
+    if ((error as { code?: number }).code !== 86) throw error;
+    for (const spec of specs) {
+      if (!spec.name) continue;
+      await collection.dropIndex(spec.name).catch(() => undefined);
+    }
+    await collection.createIndexes(specs);
+  }
+}
+
 export async function ensureIndexes(store: Store): Promise<void> {
   await Promise.all([
-    store.projects.createIndexes([
+    ensure(store.projects, [
       { key: { readToken: 1 }, unique: true, name: 'readToken' },
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
       { key: { claimedBy: 1 }, name: 'claimedBy', sparse: true },
     ]),
-    store.agents.createIndexes([
+    ensure(store.agents, [
       { key: { projectId: 1, handle: 1 }, unique: true, name: 'handle' },
       { key: { projectId: 1, lastSeenAt: -1 }, name: 'recent' },
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
     ]),
-    store.items.createIndexes([
+    ensure(store.items, [
       // The idempotency key. Two sessions describing the same problem converge
       // on one document instead of two, which is the whole point of the slug.
       { key: { projectId: 1, slug: 1 }, unique: true, name: 'slug' },
@@ -182,42 +210,42 @@ export async function ensureIndexes(store: Store): Promise<void> {
       { key: { projectId: 1, updatedAt: -1 }, name: 'recent' },
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
     ]),
-    store.escalations.createIndexes([
+    ensure(store.escalations, [
       { key: { projectId: 1, status: 1, createdAt: -1 }, name: 'inbox' },
       { key: { projectId: 1, status: 1, priorityRank: -1, createdAt: 1 }, name: 'queue' },
       { key: { projectId: 1, agent: 1, createdAt: -1 }, name: 'byAgent' },
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
     ]),
-    store.keys.createIndexes([
+    ensure(store.keys, [
       { key: { hash: 1 }, unique: true, name: 'hash' },
       { key: { projectId: 1 }, name: 'project' },
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
     ]),
-    store.claimCodes.createIndexes([
+    ensure(store.claimCodes, [
       { key: { projectId: 1 }, name: 'project' },
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
     ]),
-    store.oauthClients.createIndexes([
+    ensure(store.oauthClients, [
       { key: { projectId: 1 }, name: 'project' },
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
     ]),
-    store.shares.createIndexes([
+    ensure(store.shares, [
       { key: { email: 1, createdAt: -1 }, name: 'inbox' },
       { key: { projectId: 1, email: 1 }, unique: true, name: 'once' },
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
     ]),
-    store.operatorTokens.createIndexes([
+    ensure(store.operatorTokens, [
       { key: { hash: 1 }, unique: true, name: 'hash' },
       { key: { email: 1 }, name: 'email' },
     ]),
-    store.operatorSessions.createIndexes([
+    ensure(store.operatorSessions, [
       { key: { hash: 1 }, unique: true, name: 'hash' },
       { key: { email: 1 }, name: 'email' },
       // The session ends on its own even if nobody logs out.
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
     ]),
-    store.operatorAliases.createIndexes([{ key: { email: 1 }, unique: true, name: 'email' }]),
-    store.operatorCodes.createIndexes([
+    ensure(store.operatorAliases, [{ key: { email: 1 }, unique: true, name: 'email' }]),
+    ensure(store.operatorCodes, [
       // Unique, so two overlapping requests for the same address cannot leave
       // two live codes behind and make the newer email the one that fails.
       { key: { email: 1 }, unique: true, name: 'email' },

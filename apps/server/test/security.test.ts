@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { redactCapabilities } from '../src/app.js';
+import { ensureIndexes } from '../src/db.js';
 import { hashToken } from '../src/ids.js';
 import {
   authed,
@@ -396,5 +397,22 @@ describe('a project narrowed to its owner', () => {
     // including the agent that just created it.
     assert.equal(attempt.statusCode, 400);
     assert.equal(attempt.json().error, 'not_claimed');
+  });
+});
+
+describe('starting up against a database that has already run', () => {
+  it('survives an index whose definition changed under it', async () => {
+    // Mongo refuses to redefine an index that exists under the same name with
+    // different options, and it refuses by throwing, which on the boot path is
+    // an instance that never starts. A one word change (a plain index becoming
+    // unique) would otherwise take down every deploy after it.
+    await harness.store.operatorCodes.dropIndex('email').catch(() => undefined);
+    await harness.store.operatorCodes.createIndexes([{ key: { email: 1 }, name: 'email' }]);
+
+    await ensureIndexes(harness.store);
+
+    const indexes = await harness.store.operatorCodes.indexes();
+    const email = indexes.find((index) => index.name === 'email');
+    assert.equal(email?.unique, true, 'and it ends up with the definition the code asked for');
   });
 });
