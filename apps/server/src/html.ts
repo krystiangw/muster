@@ -121,6 +121,22 @@ button.ghost { background:transparent; color:var(--accent); }
 .col .card .meta { display:flex; flex-wrap:wrap; gap:5px; align-items:center; }
 .col .card.is-stale { border-left:2px solid var(--warn); }
 .col .card.is-claimed { border-left:2px solid var(--accent); }
+/* The move control. A select and a button, because a drag needs JavaScript and
+   this page has none. It stays quiet until the card is hovered or the select is
+   focused, so a full column still reads as a list of work. */
+/* flex-direction and max-width are reset explicitly: the page-wide form rule
+   above stacks fields in a 440px column, and inheriting either of those here
+   drops the button onto its own line inside a 230px card. */
+.col .card .move { display:flex; flex-direction:row; align-items:center; gap:4px;
+  max-width:none; opacity:.35; transition:opacity .12s; }
+.col .card:hover .move, .col .card .move:focus-within { opacity:1; }
+.col .card .move select { flex:1; min-width:0; font-size:11.5px; padding:2px 4px;
+  border:1px solid var(--rule); border-radius:2px; background:var(--surface); color:var(--ink); }
+.col .card .move button { font-size:11px; padding:3px 7px; border-radius:2px;
+  background:transparent; border:1px solid var(--rule); color:var(--ink-2); cursor:pointer; }
+.col .card .move button:hover { border-color:var(--accent); color:var(--accent); }
+.sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
+  clip:rect(0 0 0 0); white-space:nowrap; border:0; }
 .col .more { font-family:var(--mono); font-size:11px; color:var(--muted); }
 .col .none { font-size:12.5px; color:var(--muted); font-style:italic; }
 .timeline { list-style:none; padding:0; margin:0; font-size:14px; }

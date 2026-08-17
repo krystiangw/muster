@@ -13,11 +13,38 @@ export interface Harness {
   stop: () => Promise<void>;
 }
 
+/**
+ * One mongod per test file, not one per harness.
+ *
+ * node:test runs the files in parallel and several of them start a second
+ * isolated harness mid-file, so a server each meant a dozen mongod processes
+ * racing to boot, and one of them occasionally timing out. They are already
+ * isolated by database name, which is the isolation the tests actually need.
+ */
+let shared: Promise<MongoMemoryServer> | null = null;
+let users = 0;
+
+async function sharedMongo(): Promise<MongoMemoryServer> {
+  if (!shared) shared = MongoMemoryServer.create();
+  users += 1;
+  return shared;
+}
+
+async function releaseMongo(): Promise<void> {
+  users -= 1;
+  if (users > 0 || !shared) return;
+  const mongo = await shared;
+  shared = null;
+  await mongo.stop();
+}
+
 export async function startHarness(overrides: NodeJS.ProcessEnv = {}): Promise<Harness> {
-  const mongo = await MongoMemoryServer.create();
+  const mongo = await sharedMongo();
   const config = loadConfig({
     MONGODB_URI: mongo.getUri(),
-    MONGODB_DB: `muster_test_${Math.floor(Math.random() * 1e6)}`,
+    // Harnesses in one file share a mongod, so the database name is what keeps
+    // them apart; the counter makes that a fact rather than a probability.
+    MONGODB_DB: `muster_test_${users}_${Math.floor(Math.random() * 1e6)}`,
     BASE_URL: 'http://muster.test',
     LOG_LEVEL: 'silent',
     // Every test in a file shares one source address, so the production
@@ -38,7 +65,7 @@ export async function startHarness(overrides: NodeJS.ProcessEnv = {}): Promise<H
       limiter.stop();
       await server.close();
       await store.close();
-      await mongo.stop();
+      await releaseMongo();
     },
   };
 }

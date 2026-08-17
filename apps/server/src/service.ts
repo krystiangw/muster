@@ -213,20 +213,31 @@ export async function shareProject(
   if (!/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(email)) {
     throw badRequest('bad_email', 'That does not look like an email address.');
   }
+  const now = new Date();
   if (project.claimedBy === email) {
-    const existing: ShareDoc = {
-      _id: newId('s'),
-      projectId: project._id,
-      email,
-      offeredBy: (input.offeredBy ?? 'unknown-agent').slice(0, 48),
-      note: (input.note ?? '').slice(0, 500),
-      createdAt: new Date(),
-      expiresAt: new Date(),
+    return {
+      share: {
+        _id: newId('s'),
+        projectId: project._id,
+        email,
+        offeredBy: (input.offeredBy ?? 'unknown-agent').slice(0, 48),
+        note: (input.note ?? '').slice(0, 500),
+        createdAt: now,
+        expiresAt: now,
+      },
+      alreadyOwned: true,
     };
-    return { share: existing, alreadyOwned: true };
+  }
+  if (project.claimedBy && project.claimedBy !== email) {
+    // An offer that acceptance is guaranteed to refuse is worse than no offer:
+    // the recipient finds out by clicking it.
+    throw new ServiceError(
+      409,
+      'already_owned',
+      'Somebody else already owns this project, so it cannot be offered to another person.',
+    );
   }
 
-  const now = new Date();
   const share: ShareDoc = {
     _id: newId('s'),
     projectId: project._id,
@@ -237,12 +248,28 @@ export async function shareProject(
     // An offer nobody accepted is not worth keeping around for ever.
     expiresAt: new Date(now.getTime() + 30 * 86_400_000),
   };
-  await store.shares.updateOne(
+
+  // Offering the same board twice refreshes the note rather than failing: the
+  // id and the creation time belong to the first offer, and MongoDB refuses to
+  // change an _id on an existing document anyway.
+  const result = await store.shares.findOneAndUpdate(
     { projectId: project._id, email },
-    { $set: share },
-    { upsert: true },
+    {
+      $set: {
+        offeredBy: share.offeredBy,
+        note: share.note,
+        expiresAt: share.expiresAt,
+      },
+      $setOnInsert: {
+        _id: share._id,
+        projectId: share.projectId,
+        email: share.email,
+        createdAt: share.createdAt,
+      },
+    },
+    { upsert: true, returnDocument: 'after' },
   );
-  return { share, alreadyOwned: false };
+  return { share: (result ?? share) as ShareDoc, alreadyOwned: false };
 }
 
 export async function acceptShare(
@@ -261,6 +288,18 @@ export async function acceptShare(
   if (project.claimedBy && project.claimedBy !== email) {
     await store.shares.deleteOne({ _id: shareId });
     throw new ServiceError(409, 'already_owned', 'Somebody else already owns that project.');
+  }
+
+  // Two people accepting offers for the same board at the same moment both read
+  // it as unowned, so ownership is taken with a condition rather than a plain
+  // write: the second one is told, instead of quietly taking it away.
+  const taken = await store.projects.updateOne(
+    { _id: project._id, $or: [{ claimedBy: null }, { claimedBy: email }] },
+    { $set: { claimedBy: email } },
+  );
+  if (taken.matchedCount === 0) {
+    await store.shares.deleteOne({ _id: shareId });
+    throw new ServiceError(409, 'already_owned', 'Somebody else took that project first.');
   }
 
   await claimProjectWithEmail(store, project, email, config);
@@ -353,12 +392,19 @@ export async function registerAgent(
   return { agent: result.value as AgentDoc, created };
 }
 
+/**
+ * Records that an agent was alive. Every caller fires this and walks away, so
+ * it swallows its own failures: a heartbeat timestamp is not worth failing a
+ * write that already succeeded, and a floating rejection takes the whole
+ * process down under Node's default handling.
+ */
 export async function touchAgent(store: Store, projectId: string, handle: string): Promise<void> {
   if (!handle) return;
-  void store.agents.updateOne(
-    { projectId, handle },
-    { $set: { lastSeenAt: new Date() } },
-  );
+  try {
+    await store.agents.updateOne({ projectId, handle }, { $set: { lastSeenAt: new Date() } });
+  } catch {
+    // Deliberately silent.
+  }
 }
 
 /**

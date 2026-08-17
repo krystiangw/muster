@@ -1,5 +1,5 @@
 import type { BoardView } from '../board.js';
-import { BOARD_PRESETS, COLUMN_RENDER_LIMIT } from '../board.js';
+import { BOARD_PRESETS, COLUMN_RENDER_LIMIT, applyForColumn } from '../board.js';
 import { boardConfigJson } from '../serialize.js';
 import { chip, escapeHtml, formatWhen } from '../html.js';
 import type { ItemDoc, ProjectDoc } from '../types.js';
@@ -12,7 +12,31 @@ import type { ItemDoc, ProjectDoc } from '../types.js';
  * page an agent gets over curl.
  */
 
-function card(item: ItemDoc, now: Date): string {
+/**
+ * Moving a card without JavaScript.
+ *
+ * A drag needs a script, a browser and a mouse; a select and a button need
+ * none of the three, and they say out loud where the card is going, which a
+ * drag never does. The destinations are the columns that declare what belongs
+ * in them: a column that is a pure view has nothing to apply, so offering it
+ * here would only produce an error.
+ */
+function moveForm(item: ItemDoc, from: string, targets: MoveTarget[], action: string): string {
+  const options = targets.filter((target) => target.key !== from);
+  if (options.length === 0) return '';
+  return `<form class="move" method="post" action="${escapeHtml(action)}">
+    <input type="hidden" name="slug" value="${escapeHtml(item.slug)}">
+    <label class="sr-only" for="mv-${escapeHtml(from)}-${escapeHtml(item.slug)}">Move ${escapeHtml(item.slug)} to</label>
+    <select id="mv-${escapeHtml(from)}-${escapeHtml(item.slug)}" name="column">
+${options
+  .map((target) => `      <option value="${escapeHtml(target.key)}">${escapeHtml(target.title)}</option>`)
+  .join('\n')}
+    </select>
+    <button type="submit" title="Move this item">move</button>
+  </form>`;
+}
+
+function card(item: ItemDoc, now: Date, move: string): string {
   const claimed = item.claim !== null && new Date(item.claim.expiresAt) > now;
   const classes = ['card', item.stale ? 'is-stale' : '', claimed ? 'is-claimed' : '']
     .filter(Boolean)
@@ -27,12 +51,35 @@ function card(item: ItemDoc, now: Date): string {
     ${(item.labels ?? []).slice(0, 3).map((label) => chip(label, 'open')).join(' ')}
     <span class="slug">${escapeHtml(formatWhen(item.updatedAt))}</span>
   </div>
+  ${move}
 </article>`;
 }
 
-export function renderBoard(view: BoardView, now = new Date()): string {
+interface MoveTarget {
+  key: string;
+  title: string;
+}
+
+export interface BoardRenderOptions {
+  now?: Date;
+  /** Where the per-card move form posts. Omitted renders a read-only board. */
+  moveAction?: string;
+  /** Shown once above the board, after a move that did not land where it was sent. */
+  notice?: string;
+}
+
+export function renderBoard(view: BoardView, options: BoardRenderOptions = {}): string {
+  const now = options.now ?? new Date();
+  const targets: MoveTarget[] = options.moveAction
+    ? view.config.columns
+        .filter((column) => Object.keys(applyForColumn(column)).length > 0)
+        .map((column) => ({ key: column.key, title: column.title }))
+    : [];
   const lanes = view.rows.length > 0 ? view.rows : [{ key: '', title: '', columns: [] }];
-  return `<div class="board">
+  // Above the board, not below it: a column is taller than a screen, and a
+  // confirmation nobody scrolls to is not a confirmation.
+  return `${options.notice ? `<p class="notice">${escapeHtml(options.notice)}</p>` : ''}
+<div class="board">
 ${lanes
   .map(
     (lane) => `<div class="lane">
@@ -48,7 +95,13 @@ ${lane.columns
           ? '<p class="none">empty</p>'
           : cell.items
               .slice(0, COLUMN_RENDER_LIMIT)
-              .map((item) => card(item, now))
+              .map((item) =>
+                card(
+                  item,
+                  now,
+                  options.moveAction ? moveForm(item, cell.key, targets, options.moveAction) : '',
+                ),
+              )
               .join('\n')
       }
       ${

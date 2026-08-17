@@ -219,6 +219,52 @@ describe('a project’s own layout', () => {
     );
   });
 
+  it('refuses two columns whose keys collide only after truncation', async () => {
+    const project = await createProject(harness);
+    const rejected = await put(project, '/board', {
+      columns: [
+        { title: 'Waiting on the exchange to confirm the transfer', match: {} },
+        { title: 'Waiting on the exchange to confirm the withdrawal', match: {} },
+      ],
+    });
+    // Both titles derive a key longer than the 32 char cut and are identical up
+    // to it, so the check has to run after truncation, not before.
+    assert.equal(rejected.statusCode, 400);
+    assert.match(rejected.json().message, /share the key/);
+  });
+
+  it('fills a catch-all column with closed work too', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'live', title: 'live', actor: 'a' });
+    await post(project, '/items', { slug: 'shipped', title: 'shipped', status: 'done', actor: 'a' });
+    await post(project, '/items', {
+      slug: 'binned',
+      title: 'binned',
+      status: 'dropped',
+      actor: 'a',
+    });
+
+    await put(project, '/board', {
+      columns: [
+        { key: 'open', title: 'Open', match: { status: ['open'] } },
+        // No status filter at all: this column means "everything else", which
+        // includes the two terminal statuses. Loading only open items would
+        // silently render it empty.
+        { key: 'rest', title: 'Everything else', match: {} },
+      ],
+    });
+
+    const view = await board(project);
+    assert.equal(cell(view, 'open').count, 1);
+    assert.equal(cell(view, 'rest').count, 2, 'done and dropped are both in the catch-all');
+    assert.deepEqual(
+      cell(view, 'rest')
+        .items.map((item: { slug: string }) => item.slug)
+        .sort(),
+      ['binned', 'shipped'],
+    );
+  });
+
   it('needs an admin token to change the layout', async () => {
     const project = await createProject(harness);
     const minted = await post(project, '/keys', { name: 'worker', role: 'write' });
@@ -302,6 +348,200 @@ describe('the board in the browser', () => {
   });
 });
 
+describe('moving an item into a column', () => {
+  async function move(project: Project, slug: string, column: string, actor = 'mover') {
+    return harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items/${slug}/move`,
+      headers: authed(project),
+      payload: { column, actor },
+    });
+  }
+
+  it('reads the default board as claim, release and status', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'work', title: 'work', actor: 'a' });
+
+    const started = await move(project, 'work', 'doing', 'worker');
+    assert.equal(started.statusCode, 200);
+    assert.equal(started.json().landed_in, 'doing');
+    assert.equal(started.json().item.claim.agent, 'worker', 'in progress is a claim, not a status');
+    assert.equal(started.json().item.status, 'open', 'and no fifth status was invented');
+
+    const back = await move(project, 'work', 'todo');
+    assert.equal(back.json().landed_in, 'todo');
+    assert.equal(back.json().item.claim, null);
+
+    const finished = await move(project, 'work', 'done');
+    assert.equal(finished.json().landed_in, 'done');
+    assert.equal(finished.json().item.status, 'done');
+  });
+
+  it('adds and removes the labels its column filters on', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', {
+      slug: 'signal',
+      title: 'signal',
+      labels: ['triage'],
+      actor: 'a',
+    });
+    await put(project, '/board', {
+      columns: [
+        { key: 'triage', title: 'Triage', match: { labels: ['triage'] } },
+        {
+          key: 'watching',
+          title: 'Watching',
+          match: { labels: ['monitoring'], not_labels: ['triage'] },
+        },
+        { key: 'rest', title: 'Rest', match: {} },
+      ],
+    });
+
+    const moved = await move(project, 'signal', 'watching');
+    assert.equal(moved.json().landed_in, 'watching');
+    assert.deepEqual(moved.json().item.labels, ['monitoring']);
+    assert.deepEqual(moved.json().applied, {
+      add_labels: ['monitoring'],
+      remove_labels: ['triage'],
+    });
+  });
+
+  it('honours an apply the column spells out', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'escalated', title: 'escalated', actor: 'a' });
+    await put(project, '/board', {
+      columns: [
+        {
+          key: 'operator',
+          title: 'Waiting on the operator',
+          match: { status: ['blocked'], labels: ['operator'] },
+          apply: { status: 'blocked', add_labels: ['operator'], owner: 'alex', priority: 3 },
+        },
+        { key: 'rest', title: 'Rest', match: {} },
+      ],
+    });
+
+    const moved = await move(project, 'escalated', 'operator');
+    assert.equal(moved.json().landed_in, 'operator');
+    assert.equal(moved.json().item.owner, 'alex');
+    assert.equal(moved.json().item.priority, 3);
+    assert.equal(moved.json().item.status, 'blocked');
+    assert.ok(moved.json().item.labels.includes('operator'));
+  });
+
+  it('says so when the item does not land where it was sent', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'partial', title: 'partial', actor: 'a' });
+    await put(project, '/board', {
+      // The column wants a label and a source; a move can set the label but
+      // never invents where an item came from.
+      columns: [
+        {
+          key: 'mirrored',
+          title: 'Mirrored',
+          match: { labels: ['mirror'], source: ['scanner'] },
+        },
+        { key: 'rest', title: 'Rest', match: {} },
+      ],
+    });
+
+    const moved = await move(project, 'partial', 'mirrored');
+    assert.equal(moved.statusCode, 200);
+    assert.equal(moved.json().landed_in, 'rest');
+    assert.match(moved.json().warning, /not "mirrored"/);
+  });
+
+  it('refuses a column that has nothing to apply, and one that does not exist', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'thing', title: 'thing', actor: 'a' });
+    await put(project, '/board', {
+      columns: [
+        { key: 'everything', title: 'Everything', match: {} },
+        { key: 'done', title: 'Done', match: { status: ['done'] } },
+      ],
+    });
+
+    const pointless = await move(project, 'thing', 'everything');
+    assert.equal(pointless.statusCode, 400);
+    assert.match(pointless.json().message, /nothing to apply/);
+
+    const missing = await move(project, 'thing', 'nowhere');
+    assert.equal(missing.statusCode, 400);
+    assert.match(missing.json().message, /everything, done/, 'it names the columns it does have');
+  });
+
+  it('refuses to take an item somebody else is holding', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'busy', title: 'busy', actor: 'a' });
+    await post(project, '/items/busy/claim', { agent: 'first', ttl_minutes: 30 });
+
+    const stolen = await move(project, 'busy', 'doing', 'second');
+    assert.equal(stolen.statusCode, 409);
+    assert.match(stolen.json().message, /held by first/);
+
+    const item = await harness.store.items.findOne({ projectId: project.id, slug: 'busy' });
+    assert.equal(item!.claim!.agent, 'first', 'and nothing was changed on the way');
+  });
+
+  it('keeps the layout’s move semantics when the layout is read back and saved', async () => {
+    const project = await createProject(harness);
+    await put(project, '/board', {
+      columns: [
+        {
+          key: 'monitoring',
+          title: 'Monitoring',
+          match: { labels: ['monitoring'] },
+          apply: { add_labels: ['monitoring'], release: true },
+        },
+      ],
+    });
+
+    const read = (
+      await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/board`,
+        headers: authed(project),
+      })
+    ).json().board;
+    assert.deepEqual(read.columns[0].apply, { add_labels: ['monitoring'], release: true });
+
+    // Read, then written back unchanged: the round trip must not erase it,
+    // which is exactly what the settings form does every time it saves.
+    const saved = await put(project, '/board', read);
+    assert.equal(saved.statusCode, 200);
+    assert.deepEqual(saved.json().board.columns[0].apply, {
+      add_labels: ['monitoring'],
+      release: true,
+    });
+  });
+
+  it('moves a card from the board page without JavaScript', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'card', title: 'card', actor: 'a' });
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(page.body, /<form class="move" method="post"/);
+    assert.match(page.body, /name="column"/);
+    assert.ok(!/<script/i.test(page.body), 'still no JavaScript on the page');
+
+    const moved = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/move`,
+      payload: 'slug=card&column=done',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    assert.equal(moved.statusCode, 303);
+    assert.match(moved.headers.location as string, /moved=card&landed=done/);
+
+    const after = await harness.server.inject({
+      method: 'GET',
+      url: moved.headers.location as string,
+    });
+    assert.match(after.body, /is now in Done/);
+  });
+});
+
 describe('the board over MCP', () => {
   it('is the same board an agent sees over HTTP', async () => {
     const project = await createProject(harness);
@@ -320,5 +560,26 @@ describe('the board over MCP', () => {
     });
     const view = response.json().result.structuredContent;
     assert.equal(view.totals.find((total: { key: string }) => total.key === 'todo').count, 1);
+  });
+
+  it('moves a card and reports where it landed', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'one', title: 'one', actor: 'a' });
+
+    const response = await harness.server.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: authed(project),
+      payload: {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'move', arguments: { slug: 'one', column: 'doing', agent: 'worker' } },
+      },
+    });
+    const result = response.json().result.structuredContent;
+    assert.equal(result.landed_in, 'doing');
+    assert.equal(result.item.claim.agent, 'worker');
+    assert.deepEqual(result.applied, { status: 'open', claim: true });
   });
 });

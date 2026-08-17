@@ -3,8 +3,8 @@ import type { Config } from '../config.js';
 import type { Store } from '../db.js';
 import { maybeSweep } from '../hygiene.js';
 import type { RateLimiter } from '../rateLimit.js';
-import { loadBoard } from '../board.js';
-import { boardJson, escalationJson, itemJson } from '../serialize.js';
+import { loadBoard, moveItem } from '../board.js';
+import { boardApplyJson, boardJson, escalationJson, itemJson } from '../serialize.js';
 import {
   ServiceError,
   authenticate,
@@ -223,6 +223,23 @@ const TOOLS: ToolDefinition[] = [
       type: 'object',
       properties: {
         items: { type: 'boolean', description: 'false for counts only' },
+      },
+    },
+    requiresProject: true,
+  },
+  {
+    name: 'move',
+    title: 'Move an item into a column',
+    description:
+      'Puts an item in a column of this board, doing whatever that column says belongs there: a status, a label, an owner, a claim. Read the board first to see the column keys. The answer says which column it actually landed in, which is not always the one you asked for.',
+    inputSchema: {
+      type: 'object',
+      required: ['slug', 'column'],
+      properties: {
+        slug: { type: 'string' },
+        column: { type: 'string', description: 'The column key, from the board tool' },
+        note: { type: 'string' },
+        agent: { type: 'string' },
       },
     },
     requiresProject: true,
@@ -531,19 +548,48 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         const view = await loadBoard(store, project);
         return boardJson(view, args.items !== false);
       }
+      case 'move': {
+        const result = await moveItem(store, project, {
+          slug: str(args.slug),
+          column: str(args.column),
+          actor,
+          ...(args.note === undefined ? {} : { note: str(args.note) }),
+        });
+        return {
+          ok: true,
+          item: itemJson(result.item),
+          applied: boardApplyJson(result.applied),
+          landed_in: result.landedIn,
+          ...(result.warning === undefined ? {} : { warning: result.warning }),
+        };
+      }
       case 'share_project': {
+        const email = str(args.email);
         const { alreadyOwned } = await shareProject(store, project, {
-          email: str(args.email),
+          email,
           note: str(args.note),
           offeredBy: actor,
         });
-        return alreadyOwned
-          ? { ok: true, already_owned: true }
-          : {
-              ok: true,
-              pending: true,
-              hint: 'It is waiting in their operator view at /operator; one click makes them the owner.',
-            };
+        if (alreadyOwned) return { ok: true, already_owned: true };
+
+        // Same answer the HTTP endpoint gives. Somebody who has never claimed a
+        // project has no operator view for the offer to appear in, and an agent
+        // told otherwise leaves the board somewhere nobody will look until it
+        // expires.
+        const known = await store.projects.countDocuments({
+          claimedBy: email.trim().toLowerCase(),
+        });
+        return {
+          ok: true,
+          pending: true,
+          operator_has_an_inbox: known > 0,
+          tell_them:
+            known > 0 ? `${config.baseUrl}/operator` : `${config.baseUrl}/r/${project.readToken}`,
+          hint:
+            known > 0
+              ? 'It is waiting in their operator view; one click makes them the owner.'
+              : 'They have no operator view yet. Send them the read link, or use the claim endpoint to have them confirm an email.',
+        };
       }
       case 'inbox': {
         const docs = await listEscalations(store, project._id, {

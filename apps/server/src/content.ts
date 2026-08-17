@@ -166,6 +166,20 @@ An item lands in the first column that matches. Anything matching nothing is
 reported as \`unplaced\` rather than hidden, because a board that quietly drops
 work is worse than no board.
 
+You do not have to work out what a column means. Move an item into it and the
+column does whatever it declares belongs there, which for the default board is
+a claim, a release or a status:
+
+\`\`\`bash
+curl -sX POST $MUSTER/items/errors:withdraw-stuck/move \\
+  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \\
+  -d '{"column":"doing","actor":"errors-loop"}'
+\`\`\`
+
+Read \`landed_in\` in the reply. A column can filter on more than a move can set,
+so the card does not always end up where you sent it, and the answer says so
+instead of letting you believe otherwise.
+
 The layout itself is set with \`PUT $MUSTER/board\` (admin token) and edited by
 the operator in the browser at the project's read link.
 
@@ -453,6 +467,14 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
         url: `${base}/v1/{project}/board`,
         notes:
           'The project’s columns and what is in them. A column is a filter over status, labels, owner, claim state, staleness, source and migrated fields, never a new status.',
+      },
+      {
+        name: 'move',
+        method: 'POST',
+        url: `${base}/v1/{project}/items/{slug}/move`,
+        request: { column: 'doing', actor: '{handle}' },
+        notes:
+          'Does whatever that column declares belongs in it: a status, a label, an owner, a claim. Read landed_in: a column can filter on more than a move can set.',
       },
       {
         name: 'set_board',

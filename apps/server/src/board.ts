@@ -1,9 +1,12 @@
 import type { Store } from './db.js';
-import { ServiceError } from './service.js';
+import { TIMELINE_KEEP } from './hygiene.js';
+import { normalizeSlug } from './ids.js';
+import { ServiceError, claimItem, upsertItem } from './service.js';
 import {
   DEFAULT_BOARD,
   ITEM_STATUSES,
   MAX_BOARD_COLUMNS,
+  type BoardApply,
   type BoardColumn,
   type BoardConfig,
   type BoardMatch,
@@ -182,12 +185,16 @@ export async function loadBoard(
   const config = boardConfigOf(project);
 
   // Closed work is off the board unless a column asks for it, which keeps the
-  // scan bounded on a project with a long history.
+  // scan bounded on a project with a long history. A column with no status
+  // filter asks for every status, including the closed ones: a catch-all column
+  // that silently dropped finished work would be the board hiding work again.
   const wantsClosed =
     options.includeClosed ??
-    config.columns.some((column) =>
-      (column.match.status ?? []).some((status) => status === 'done' || status === 'dropped'),
-    );
+    config.columns.some((column) => {
+      const statuses = column.match.status;
+      if (!statuses || statuses.length === 0) return true;
+      return statuses.some((status) => status === 'done' || status === 'dropped');
+    });
 
   const filter: Record<string, unknown> = { projectId: project._id };
   if (!wantsClosed) filter.status = { $nin: ['done', 'dropped'] };
@@ -199,6 +206,175 @@ export async function loadBoard(
     .toArray()) as ItemDoc[];
 
   return buildBoard(items, config);
+}
+
+/**
+ * What moving an item into this column does.
+ *
+ * A column that says nothing gets a conservative reading of its own filter: the
+ * status it asks for, the labels it requires, and the labels it excludes. That
+ * covers the ordinary cases without anybody writing the same thing twice, and a
+ * column can always spell it out with `apply` when the filter is cleverer than
+ * the move.
+ */
+export function applyForColumn(column: BoardColumn): BoardApply {
+  if (column.apply) return column.apply;
+
+  const derived: BoardApply = {};
+  if (column.match.status && column.match.status.length === 1) {
+    derived.status = column.match.status[0];
+  }
+  if (column.match.labels && column.match.labels.length > 0) {
+    derived.addLabels = [column.match.labels[0]!];
+  }
+  if (column.match.notLabels && column.match.notLabels.length > 0) {
+    derived.removeLabels = [...column.match.notLabels];
+  }
+  // "Somebody is on it" and "nobody is on it" are the two things the statuses
+  // deliberately do not carry, so a move into such a column is the claim itself.
+  if (column.match.claimed === true) derived.claim = true;
+  if (column.match.claimed === false) derived.release = true;
+  return derived;
+}
+
+export interface MoveResult {
+  item: ItemDoc;
+  /** What the move actually did, so an agent can see it rather than guess. */
+  applied: BoardApply;
+  /** The column the item is in now. Not always the one that was asked for. */
+  landedIn: string | null;
+  /** Set when the item did not end up where it was sent. */
+  warning?: string;
+}
+
+/**
+ * Moves an item into a column.
+ *
+ * Dragging a card is the one gesture every board has, and an agent that can only
+ * read the board has to reverse-engineer what "Monitoring" means before it can
+ * put anything there. The column already declares that, in `apply` or in its own
+ * filter, so a move is: read the declaration, do those things, and say where the
+ * card actually landed. It can only set what an item already has, so no move can
+ * invent a state, and the four statuses stay four.
+ */
+export async function moveItem(
+  store: Store,
+  project: ProjectDoc,
+  options: { slug: string; column: string; actor: string; note?: string },
+): Promise<MoveResult> {
+  const config = boardConfigOf(project);
+  const column = config.columns.find((candidate) => candidate.key === options.column);
+  if (!column) {
+    throw new ServiceError(
+      400,
+      'no_such_column',
+      `This board has no column "${options.column}". Its columns are ${config.columns
+        .map((candidate) => candidate.key)
+        .join(', ')}.`,
+    );
+  }
+
+  const before = (await store.items.findOne({
+    projectId: project._id,
+    slug: normalizeSlug(options.slug),
+  })) as ItemDoc | null;
+  if (!before) {
+    throw new ServiceError(404, 'not_found', `No item with slug "${options.slug}" in this project.`);
+  }
+
+  const apply = applyForColumn(column);
+  if (Object.keys(apply).length === 0) {
+    throw new ServiceError(
+      400,
+      'column_has_no_move',
+      `Column "${column.key}" is a view with nothing to apply, so moving an item into it would change nothing. Give the column an "apply" saying what belongs there.`,
+    );
+  }
+
+  const slug = normalizeSlug(options.slug);
+  const note = options.note ?? `moved to ${column.title}`;
+
+  // The claim goes first because it is the only step that can legitimately
+  // fail: somebody else may be holding the item. Failing before anything has
+  // changed is better than a half-applied move.
+  if (apply.claim) {
+    const claimed = await claimItem(store, project, slug, options.actor);
+    if (!claimed.ok) {
+      throw new ServiceError(
+        409,
+        'held',
+        `"${slug}" is held by ${claimed.heldBy}, so it is already in a column for work in progress.`,
+      );
+    }
+  }
+
+  const labels =
+    apply.addLabels || apply.removeLabels
+      ? [
+          ...new Set(
+            (before.labels ?? [])
+              .filter((label) => !(apply.removeLabels ?? []).includes(label))
+              .concat(apply.addLabels ?? []),
+          ),
+        ]
+      : undefined;
+
+  const { item } = await upsertItem(store, project, {
+    slug,
+    actor: options.actor,
+    note,
+    ...(apply.status === undefined ? {} : { status: apply.status }),
+    ...(apply.owner === undefined ? {} : { owner: apply.owner }),
+    ...(apply.priority === undefined ? {} : { priority: apply.priority }),
+    ...(labels === undefined ? {} : { labels }),
+  });
+
+  let current = item;
+  if (apply.release && current.claim) {
+    // Not releaseItem: that one is an agent letting go of its own lease, and a
+    // move out of "in progress" is usually somebody else deciding nobody is on
+    // it. Who did it is in the timeline either way.
+    const released = await store.items.findOneAndUpdate(
+      { projectId: project._id, slug },
+      {
+        $set: { claim: null, updatedAt: new Date(), touchedAt: new Date() },
+        $push: {
+          timeline: {
+            $each: [
+              {
+                at: new Date(),
+                by: options.actor,
+                kind: 'released' as const,
+                message: `${note} (was held by ${current.claim.agent})`,
+              },
+            ],
+            $slice: -TIMELINE_KEEP,
+          },
+        },
+        $inc: { timelineCount: 1 },
+      },
+      { returnDocument: 'after' },
+    );
+    if (released) current = released as ItemDoc;
+  }
+
+  const now = new Date();
+  const landed = config.columns.find((candidate) => itemMatches(current, candidate.match, now));
+
+  return {
+    item: current,
+    applied: apply,
+    landedIn: landed?.key ?? null,
+    // A column can filter on more than a move can set, and an honest board says
+    // so instead of showing the card somewhere the caller did not send it.
+    ...(landed?.key === column.key
+      ? {}
+      : {
+          warning: landed
+            ? `The item is in "${landed.key}", not "${column.key}": the column filters on something the move does not set.`
+            : `The item matches no column now. Check the board layout.`,
+        }),
+  };
 }
 
 // ------------------------------------------------------------------ config
@@ -276,6 +452,49 @@ function parseMatch(raw: unknown, columnKey: string): BoardMatch {
   return match;
 }
 
+function parseApply(raw: unknown, columnKey: string): BoardApply {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw bad(`Column "${columnKey}" has an apply that is not an object.`);
+  }
+  const source = raw as Record<string, unknown>;
+  const apply: BoardApply = {};
+
+  if (source.status !== undefined) {
+    const status = String(source.status);
+    if (!ITEM_STATUSES.includes(status as ItemStatus)) {
+      throw bad(
+        `Moving to "${columnKey}" cannot set status "${status}". The statuses are ${ITEM_STATUSES.join(', ')}.`,
+      );
+    }
+    apply.status = status as ItemStatus;
+  }
+  const addLabels = stringArray(source.add_labels ?? source.addLabels, 'add_labels');
+  if (addLabels) apply.addLabels = addLabels;
+  const removeLabels = stringArray(source.remove_labels ?? source.removeLabels, 'remove_labels');
+  if (removeLabels) apply.removeLabels = removeLabels;
+  if (source.owner !== undefined) {
+    apply.owner = source.owner === null ? null : String(source.owner).slice(0, 48);
+  }
+  if (source.priority !== undefined) {
+    if (typeof source.priority !== 'number' || !Number.isInteger(source.priority)) {
+      throw bad('apply.priority must be an integer.');
+    }
+    apply.priority = Math.max(-10, Math.min(10, source.priority));
+  }
+  if (source.claim !== undefined) {
+    if (typeof source.claim !== 'boolean') throw bad('apply.claim must be true or false.');
+    apply.claim = source.claim;
+  }
+  if (source.release !== undefined) {
+    if (typeof source.release !== 'boolean') throw bad('apply.release must be true or false.');
+    apply.release = source.release;
+  }
+  if (apply.claim && apply.release) {
+    throw bad(`Column "${columnKey}" both claims and releases; it can do one or the other.`);
+  }
+  return apply;
+}
+
 export function parseBoardConfig(raw: unknown): BoardConfig {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw bad('A board is an object with "columns" and optional "rows".');
@@ -297,21 +516,26 @@ export function parseBoardConfig(raw: unknown): BoardConfig {
     const column = entry as Record<string, unknown>;
     const title = typeof column.title === 'string' ? column.title.trim() : '';
     if (!title) throw bad(`Column ${index} needs a title.`);
-    const key =
+    // Truncated first, then checked: two keys differing only after the cut
+    // would both pass a check on the full strings and then collide in storage,
+    // leaving the board with two columns nothing can tell apart.
+    const key = (
       (typeof column.key === 'string' && column.key.trim()) ||
       title
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-|-$/g, '');
+        .replace(/^-|-$/g, '')
+    ).slice(0, 32);
     if (!key) throw bad(`Column "${title}" needs a key.`);
     if (seen.has(key)) throw bad(`Two columns share the key "${key}".`);
     seen.add(key);
     const hint = typeof column.hint === 'string' ? column.hint.slice(0, 120) : undefined;
     return {
-      key: key.slice(0, 32),
+      key,
       title: title.slice(0, 40),
       ...(hint ? { hint } : {}),
       match: parseMatch(column.match, key),
+      ...(column.apply === undefined ? {} : { apply: parseApply(column.apply, key) }),
     };
   });
 

@@ -4,9 +4,10 @@ import type { Store } from '../db.js';
 import { maybeSweep, sweepProject } from '../hygiene.js';
 import { hashToken, isValidHandle, newOtpCode, newId } from '../ids.js';
 import { RateLimiter } from '../rateLimit.js';
-import { BOARD_PRESETS, boardConfigOf, loadBoard, parseBoardConfig } from '../board.js';
+import { BOARD_PRESETS, boardConfigOf, loadBoard, moveItem, parseBoardConfig } from '../board.js';
 import {
   agentJson,
+  boardApplyJson,
   boardConfigJson,
   boardJson,
   escalationJson,
@@ -511,6 +512,46 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           body.message,
         );
         return { item: itemJson(item, true) };
+      },
+    );
+
+    scoped.post(
+      '/v1/:project/items/:slug/move',
+      {
+        schema: {
+          tags: ['board'],
+          summary: 'Move an item into a column',
+          description:
+            'Does what the column declares in its "apply", or a conservative reading of its own filter: the status it asks for, the labels it requires or excludes, and the claim it implies. It can only set what an item already has, so no move invents a status. The response says which column the item actually landed in, which is not always the one you sent it to.',
+          body: {
+            type: 'object',
+            required: ['column'],
+            properties: {
+              column: { type: 'string', maxLength: 32, description: 'The column key.' },
+              actor: { type: 'string', maxLength: 48 },
+              note: { type: 'string', maxLength: 2000 },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request) => {
+        const { project } = auth(request);
+        const { slug } = request.params as { slug: string };
+        const body = request.body as { column: string; actor?: string; note?: string };
+        const result = await moveItem(store, project, {
+          slug,
+          column: body.column,
+          actor: body.actor ?? 'unknown-agent',
+          ...(body.note === undefined ? {} : { note: body.note }),
+        });
+        return {
+          ok: true,
+          item: itemJson(result.item),
+          applied: boardApplyJson(result.applied),
+          landed_in: result.landedIn,
+          ...(result.warning === undefined ? {} : { warning: result.warning }),
+        };
       },
     );
 

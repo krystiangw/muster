@@ -195,12 +195,34 @@ export interface BoardMatch {
   fields?: Record<string, Array<string | number | boolean>>;
 }
 
+/**
+ * What moving an item into a column means.
+ *
+ * Without this a board is read-only for agents: they can see a column called
+ * Monitoring but have to guess that it means adding a label. Declaring it once,
+ * in the layout, turns the columns into a vocabulary both sides share. It can
+ * only set things an item already has, so a column still cannot invent a state.
+ */
+export interface BoardApply {
+  status?: ItemStatus;
+  addLabels?: string[];
+  removeLabels?: string[];
+  owner?: string | null;
+  priority?: number;
+  /** Claims the item for whoever moved it, for a column that means "mine now". */
+  claim?: boolean;
+  /** Releases the claim, for a column that means "back in the pool". */
+  release?: boolean;
+}
+
 export interface BoardColumn {
   key: string;
   title: string;
   match: BoardMatch;
   /** Shown under the title. Useful for saying what belongs here and what does not. */
   hint?: string;
+  /** Applied by POST /items/{slug}/move. Derived from `match` when absent. */
+  apply?: BoardApply;
 }
 
 export interface BoardConfig {

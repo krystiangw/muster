@@ -41,6 +41,29 @@ Two consequences worth keeping:
   claim, so a crashed session's work goes back to the first column by itself,
   the same way it does everywhere else in the system.
 
+### Moving a card
+
+A column that is only a filter leaves agents guessing: they can see a column
+called "Monitoring" and still have to work out that it means adding a label. So
+a column also declares what belongs in it, in `apply`, and a move does exactly
+that. A column that declares nothing gets a conservative reading of its own
+filter, which covers the ordinary cases without anybody writing the same thing
+twice.
+
+Three properties keep this from becoming a second state machine:
+
+- **A move can only set what an item already has.** Status, labels, owner,
+  priority, claim. There is no way to express anything else, so no column can
+  invent a state through the back door it was denied at the front.
+- **`claimed: true` becomes a claim, not a status.** Moving into "In progress"
+  takes the lease, and it is refused with a 409 naming the holder if somebody
+  else has it. That is the one distinction the four statuses deliberately do not
+  carry, and the move respects it rather than routing around it.
+- **The reply says where the card actually landed.** A column can filter on more
+  than a move can set (a `source`, a field carried from another system), so the
+  item can end up elsewhere. Saying so is the same commitment as reporting
+  `unplaced`: the board does not pretend.
+
 ## One project is one instance
 
 A project is the unit of separation: its own id, name, description, token,

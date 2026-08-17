@@ -3,6 +3,7 @@ import type { Config } from './config.js';
 import {
   DEFAULT_BOARD,
   type AgentDoc,
+  type BoardApply,
   type BoardConfig,
   type EscalationDoc,
   type ItemDoc,
@@ -77,6 +78,23 @@ export function escalationJson(doc: EscalationDoc): Record<string, unknown> {
   };
 }
 
+/**
+ * A column's move semantics, in the same snake_case the rest of the API speaks.
+ * It has to round-trip: a layout read here and written back must still say what
+ * moving into each column does, or the settings form silently erases it.
+ */
+export function boardApplyJson(apply: BoardApply): Record<string, unknown> {
+  return {
+    ...(apply.status === undefined ? {} : { status: apply.status }),
+    ...(apply.addLabels ? { add_labels: apply.addLabels } : {}),
+    ...(apply.removeLabels ? { remove_labels: apply.removeLabels } : {}),
+    ...(apply.owner === undefined ? {} : { owner: apply.owner }),
+    ...(apply.priority === undefined ? {} : { priority: apply.priority }),
+    ...(apply.claim === undefined ? {} : { claim: apply.claim }),
+    ...(apply.release === undefined ? {} : { release: apply.release }),
+  };
+}
+
 export function boardConfigJson(config: BoardConfig): Record<string, unknown> {
   return {
     rows: config.rows,
@@ -84,6 +102,7 @@ export function boardConfigJson(config: BoardConfig): Record<string, unknown> {
       key: column.key,
       title: column.title,
       ...(column.hint ? { hint: column.hint } : {}),
+      ...(column.apply ? { apply: boardApplyJson(column.apply) } : {}),
       match: {
         ...(column.match.status ? { status: column.match.status } : {}),
         ...(column.match.labels ? { labels: column.match.labels } : {}),

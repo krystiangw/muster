@@ -113,10 +113,26 @@ export interface CreatedProject {
  * deliberately no way to express a new status here, which is what stops a board
  * layout from becoming a vocabulary every agent has to learn.
  */
+/**
+ * What moving an item into a column means. A column that declares nothing gets
+ * a conservative reading of its own filter, so the ordinary board works without
+ * anybody writing this twice.
+ */
+export interface BoardApply {
+  status?: ItemStatus;
+  add_labels?: string[];
+  remove_labels?: string[];
+  owner?: string | null;
+  priority?: number;
+  claim?: boolean;
+  release?: boolean;
+}
+
 export interface BoardColumn {
   key?: string;
   title: string;
   hint?: string;
+  apply?: BoardApply;
   match: {
     status?: ItemStatus[];
     labels?: string[];
@@ -473,6 +489,24 @@ export class Muster {
     presets: Array<{ key: string; title: string; description: string; board: BoardConfig }>;
   }> {
     return this.request('GET', '/board/presets');
+  }
+
+  /**
+   * Moves an item into a column, doing whatever that column declares belongs
+   * there. `landed_in` is where the item actually is afterwards: a column can
+   * filter on more than a move can set, and it is worth checking rather than
+   * assuming the card went where you sent it.
+   */
+  async move(
+    slug: string,
+    column: string,
+    options: { note?: string; actor?: string } = {},
+  ): Promise<{ ok: boolean; item: Item; applied: BoardApply; landed_in: string | null; warning?: string }> {
+    return this.request('POST', `/items/${encodeURIComponent(slug)}/move`, {
+      column,
+      note: options.note,
+      actor: options.actor ?? this.actor,
+    });
   }
 
   // ------------------------------------------------------------ project

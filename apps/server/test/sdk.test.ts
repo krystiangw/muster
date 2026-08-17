@@ -214,6 +214,10 @@ describe('the typed SDK', () => {
     const presets = await client.boardPresets();
     assert.ok(presets.presets.length >= 3);
 
+    const moved = await client.move('busy', 'monitoring', { note: 'watching it instead' });
+    assert.equal(moved.landed_in, 'monitoring');
+    assert.ok(moved.item.labels.includes('monitoring'));
+
     const shared = await client.share({ email: 'nobody@example.com', note: 'yours now' });
     assert.equal(shared.ok, true);
     assert.equal(shared.operator_has_an_inbox, false);

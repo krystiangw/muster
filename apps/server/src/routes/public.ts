@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { BOARD_PRESETS, loadBoard, parseBoardConfig } from '../board.js';
+import { BOARD_PRESETS, loadBoard, moveItem, parseBoardConfig } from '../board.js';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
 import { chip, escapeHtml, formatWhen, layout } from '../html.js';
@@ -139,6 +139,19 @@ label.</p>
 <p>The same layout is editable in the browser from the project's read link, with three ready-made
 starting points. Agents read it with <code>GET /v1/{project}/board</code>, which is worth doing once
 when joining a project: the columns say how this project wants work described.</p>
+<h3>Moving a card</h3>
+<p>A column also says what belongs in it, so nobody has to reverse-engineer that "Monitoring" means
+a label. Moving an item does whatever the column declares, or a conservative reading of its own
+filter: the status it asks for, the labels it requires or excludes, and the claim it implies. On the
+default board that makes "In progress" a claim and "To do" a release, which is the one distinction
+the four statuses deliberately do not carry.</p>
+<pre><code>curl -sX POST ${escapeHtml(base)}/v1/$PROJECT/items/$SLUG/move -H "authorization: Bearer $TOKEN" \\
+  -H 'content-type: application/json' -d '{"column":"doing","actor":"errors-loop"}'</code></pre>
+<p>A move can only set what an item already has, so it cannot invent a state either. The reply says
+which column the item <em>actually</em> landed in: a column can filter on more than a move can set,
+and an honest board says so rather than showing the card somewhere you did not send it. In the
+browser each card carries a select and a button, because a drag needs JavaScript and these pages
+have none.</p>
 
 <h2>One project, one instance</h2>
 <p>A project is the unit of separation. It has its own id, name, description, token, items, agents,
@@ -517,6 +530,16 @@ ${
     }
     void maybeSweep(store, project).catch(() => undefined);
     const view = await loadBoard(store, project);
+    // A move redirects back here saying what it did. The message is built from
+    // the board's own columns rather than carried in the URL, so a crafted link
+    // cannot put words on somebody else's page.
+    const query = request.query as { moved?: string; landed?: string };
+    const landedIn = view.config.columns.find((column) => column.key === query.landed);
+    const notice = query.moved
+      ? landedIn
+        ? `"${query.moved.slice(0, 80)}" is now in ${landedIn.title}.`
+        : `"${query.moved.slice(0, 80)}" matches no column now. Check the layout below.`
+      : undefined;
 
     const body = `
 <h1>${escapeHtml(project.name)}</h1>
@@ -524,7 +547,10 @@ ${project.description ? `<p class="lead">${escapeHtml(project.description)}</p>`
 <p class="mono" style="color:var(--muted)">${escapeHtml(project._id)} &middot;
   <a href="/r/${escapeHtml(readToken)}">questions and timeline</a></p>
 
-${renderBoard(view)}
+${renderBoard(view, {
+  moveAction: `/r/${escapeHtml(readToken)}/board/move`,
+  ...(notice ? { notice } : {}),
+})}
 
 ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`)}
 `;
@@ -565,6 +591,27 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`)}
 
     await store.projects.updateOne({ _id: project._id }, { $set: { board: config } });
     return reply.redirect(`/r/${readToken}/board`, 303);
+  });
+
+  app.post('/r/:readToken/board/move', { schema: { hide: true } }, async (request, reply) => {
+    const { readToken } = request.params as { readToken: string };
+    const form = (request.body ?? {}) as { slug?: string; column?: string };
+    const project = await store.projects.findOne({ readToken });
+    if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
+    if (!form.slug || !form.column) {
+      throw new ServiceError(400, 'bad_move', 'A move needs an item and a column.');
+    }
+
+    const result = await moveItem(store, project, {
+      slug: form.slug,
+      column: form.column,
+      actor: 'operator',
+    });
+    const params = new URLSearchParams({
+      moved: result.item.slug,
+      landed: result.landedIn ?? '',
+    });
+    return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
   });
 
   app.post('/r/:readToken/escalations/:id', { schema: { hide: true } }, async (request, reply) => {
