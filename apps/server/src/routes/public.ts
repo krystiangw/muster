@@ -1390,15 +1390,15 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
    * is not always the person who has a terminal open.
    */
   app.post('/r/:readToken/claim/verify', { schema: { hide: true } }, async (request, reply) => {
-    // The bucket built for typing a code into a form, the same one /operator
-    // uses for its own code field, rather than the ordinary write bucket. The
-    // real ceiling is the five attempts a pending claim carries, but a second
-    // code box in the same service should count against the same limit as the
-    // first.
+    if (!limitWrites(request, reply)) return reply;
+    // Plus the bucket built for typing a code into a form, the same one
+    // /operator uses for its own code field: a second code box in one service
+    // should count against the same limit as the first.
+    //
     // Keyed by caller, not by the read link, which every visitor shares: a
-    // bucket on the token lets one of them spend the whole allowance and lock
-    // the person the code was actually sent to out of the form. The real
-    // ceiling on guessing is the five attempts the pending claim carries.
+    // bucket on the token would let one of them spend the whole allowance and
+    // lock out the person the code was actually sent to. The real ceiling on
+    // guessing is the five attempts a pending claim carries.
     const verdict = limiter.check(`verify:${clientIp(request)}`, config.rateLimits.verifyCode);
     if (!verdict.ok) {
       return reply
