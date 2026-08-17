@@ -829,17 +829,28 @@ function parseApply(raw: unknown, columnKey: string): BoardApply {
  */
 export function boardWarnings(config: BoardConfig): string[] {
   const warnings: string[] = [];
-  const terminalColumn = config.columns.findIndex((column) =>
-    (column.match.status ?? []).some((status) => TERMINAL_STATUSES.includes(status)),
-  );
+  // Not "does it name a status" but "can it catch a finished one": a column
+  // asking for ["open", "done"] names statuses and traps closed work exactly
+  // the same, which is the bug wearing a constraint.
+  const catchesTerminal = (column: BoardColumn): boolean => {
+    const statuses = column.match.status ?? [];
+    return statuses.length === 0 || statuses.some((status) => TERMINAL_STATUSES.includes(status));
+  };
+
   config.columns.forEach((column, index) => {
-    const matchesLabel = (column.match.labels ?? []).length > 0;
-    const constrainsStatus = (column.match.status ?? []).length > 0;
-    if (matchesLabel && !constrainsStatus && terminalColumn !== -1 && index < terminalColumn) {
-      warnings.push(
-        `"${column.title}" matches a label without naming a status, and stands before "${config.columns[terminalColumn]!.title}". Finished work keeps the label, so it will stay here rather than move on. Add "status": ["open", "blocked"] to that column.`,
-      );
-    }
+    if ((column.match.labels ?? []).length === 0) return;
+    if (!catchesTerminal(column)) return;
+    // Somewhere later, a column meant for finished work. Without one, nothing
+    // is being trapped: this board simply keeps closed items where they are.
+    const later = config.columns.findIndex(
+      (candidate, at) =>
+        at > index &&
+        (candidate.match.status ?? []).some((status) => TERMINAL_STATUSES.includes(status)),
+    );
+    if (later === -1) return;
+    warnings.push(
+      `"${column.title}" matches a label and can catch finished work, and it stands before "${config.columns[later]!.title}". Finished work keeps the label, so it will stay here rather than move on. Give that column "status": ["open", "blocked"].`,
+    );
   });
   return warnings;
 }

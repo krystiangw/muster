@@ -294,11 +294,20 @@ export async function insights(store: Store): Promise<Insights> {
       ])
       .toArray(),
     store.events.countDocuments({ kind: 'first_write' }),
-    // Both doors into ownership. A project handed over by an agent and accepted
-    // by a person is owned exactly as much as one claimed with a code, and the
-    // handover is the path our own documentation recommends, so counting only
-    // the code path made the funnel understate the thing it exists to measure.
-    store.events.countDocuments({ kind: { $in: ['claim', 'accept'] } }),
+    // Both doors into ownership, counted as projects rather than as events. A
+    // project handed over by an agent and accepted by a person is owned exactly
+    // as much as one claimed with a code, and the handover is the path our own
+    // documentation recommends, so counting only the code path understated the
+    // thing this number exists to measure. Counting the events instead would
+    // overstate it: one project can go through both doors, and a funnel stage
+    // above a hundred percent is a funnel nobody believes twice.
+    store.events
+      .aggregate<{ n: number }>([
+        { $match: { kind: { $in: ['claim', 'accept'] }, projectId: { $ne: null } } },
+        { $group: { _id: '$projectId' } },
+        { $count: 'n' },
+      ])
+      .toArray(),
     store.events
       .aggregate<{ _id: string; count: number }>([
         { $match: { kind: 'signup' } },
@@ -352,7 +361,7 @@ export async function insights(store: Store): Promise<Insights> {
       signups,
       withAnAgent: registered[0]?.n ?? 0,
       withWork: firstWrites,
-      claimed: claims,
+      claimed: claims[0]?.n ?? 0,
     },
     doors: Object.fromEntries(doorRows.map((row) => [row._id, row.count])),
     pages: Object.fromEntries(pageRows.map((row) => [row._id, row.count])),
@@ -367,7 +376,7 @@ export async function insights(store: Store): Promise<Insights> {
     },
     behaviour: {
       activationRate: signups === 0 ? 0 : firstWrites / signups,
-      claimRate: signups === 0 ? 0 : claims / signups,
+      claimRate: signups === 0 ? 0 : (claims[0]?.n ?? 0) / signups,
       medianAnswerHours: median(answerHours),
       answersSampled: answerHours.length,
       closedByHygiene: hygieneClosed,

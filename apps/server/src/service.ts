@@ -1376,6 +1376,12 @@ export async function answerEscalation(
 
   // The previous status is the guard, so two operators answering the same
   // question at once produce one transition and one accounting entry.
+  // A new decision clears whatever an agent did about the old one: leaving it
+  // set would keep the question out of that agent's inbox and refuse its
+  // acknowledgement, so the second decision would reach nobody. The same
+  // decision sent twice is not a new one, though, and a client retrying after
+  // a timeout must not put finished work back in somebody's queue.
+  const changed = before.status !== status || before.answer !== answer;
   const doc = await store.escalations.findOneAndUpdate(
     { projectId, _id: id, status: before.status },
     {
@@ -1384,13 +1390,9 @@ export async function answerEscalation(
         answer,
         answeredAt: now,
         updatedAt: now,
-        // A new answer is a new decision, so whatever an agent did about the
-        // old one no longer counts as having acted on this. Leaving it set
-        // would keep the question out of that agent's inbox and refuse its
-        // acknowledgement, and the second decision would never reach anybody.
-        acknowledgedAt: null,
-        acknowledgedBy: null,
-        acknowledgedNote: null,
+        ...(changed
+          ? { acknowledgedAt: null, acknowledgedBy: null, acknowledgedNote: null }
+          : {}),
       },
     },
     { returnDocument: 'after' },

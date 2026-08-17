@@ -65,7 +65,7 @@ const [
   count(events, { kind: 'signup' }),
   events.aggregate([{ $match: { kind: 'register', projectId: { $ne: null } } }, { $group: { _id: '$projectId' } }, { $count: 'n' }]).toArray(),
   count(events, { kind: 'first_write' }),
-  count(events, { kind: { $in: ['claim', 'accept'] } }),
+  events.aggregate([{ $match: { kind: { $in: ['claim', 'accept'] }, projectId: { $ne: null } } }, { $group: { _id: '$projectId' } }, { $count: 'n' }]).toArray(),
   events.aggregate([{ $match: { kind: 'signup' } }, { $group: { _id: '$door', n: { $sum: 1 } } }]).toArray(),
   events.aggregate([{ $match: { kind: 'discover' } }, { $group: { _id: '$detail', n: { $sum: 1 } } }, { $sort: { n: -1 } }]).toArray(),
   count(projects),
@@ -100,10 +100,10 @@ row('reads of the protocol', discovered);
 row('created a project', signups);
 row('registered an agent', registered[0]?.n ?? 0);
 row('wrote something', firstWrites);
-row('claimed by a person', claims);
+row('claimed by a person', claims[0]?.n ?? 0);
 console.log(`  ${'reads per signup'.padEnd(28)} ${discovered === 0 ? '  n/a' : (discovered / Math.max(signups, 1)).toFixed(1).padStart(5)}`);
 console.log(`  ${'signup -> wrote something'.padEnd(28)} ${rate(firstWrites, signups)}`);
-console.log(`  ${'signup -> claimed'.padEnd(28)} ${rate(claims, signups)}`);
+console.log(`  ${'signup -> claimed'.padEnd(28)} ${rate(claims[0]?.n ?? 0, signups)}`);
 
 if (doorRows.length > 0) {
   console.log('\nWhich door they came through');

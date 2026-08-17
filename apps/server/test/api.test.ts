@@ -636,6 +636,37 @@ describe('saying an answer was acted on', () => {
   });
 });
 
+describe('answering the same thing twice', () => {
+  it('does not put finished work back in the queue', async () => {
+    const project = await createProject(harness, 'retried');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const id = (
+      await post(project, '/escalations', { agent: 'a', question: 'Ship it?' })
+    ).json().escalation.id;
+    const answer = async (text: string) =>
+      harness.server.inject({
+        method: 'POST',
+        url: `/r/${readToken}/escalations/${id}`,
+        payload: new URLSearchParams({ status: 'answered', answer: text }).toString(),
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      });
+
+    await answer('Ship it.');
+    await post(project, `/escalations/${id}/ack`, { agent: 'a', note: 'shipped' });
+
+    // A client that timed out and retried sends the same decision again. That
+    // is not a new decision, and treating it as one hands the same work back.
+    await answer('Ship it.');
+    const inbox = (await get(project, '/inbox?agent=a')).json().answers;
+    assert.ok(!inbox.some((e: { id: string }) => e.id === id), 'still done');
+
+    // A different decision is a different matter.
+    await answer('Actually, hold.');
+    const reopened = (await get(project, '/inbox?agent=a')).json().answers;
+    assert.ok(reopened.some((e: { id: string }) => e.id === id), 'the new one is offered');
+  });
+});
+
 describe('a report from somebody with no account', () => {
   it('is refused by a deployment that never opted in', async () => {
     const closed = await harness.server.inject({

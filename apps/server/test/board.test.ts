@@ -1260,6 +1260,20 @@ describe('a layout that would trap finished work', () => {
     assert.match(page.body, /Finished work keeps the label/);
   });
 
+  it('warns even when the column names a status, if that status is a finished one', async () => {
+    const project = await createProject(harness, 'half careful');
+    const saved = await put(project, '/board', {
+      rows: 'none',
+      columns: [
+        { key: 'waiting', title: 'Waiting', match: { labels: ['waiting'], status: ['open', 'done'] } },
+        { key: 'done', title: 'Done', match: { status: ['done'] } },
+      ],
+    });
+    // Naming statuses is not the same as excluding the finished ones, and the
+    // trap is identical: closed work keeps its label and stays in this column.
+    assert.equal(saved.json().warnings.length, 1);
+  });
+
   it('says nothing when the same column names its statuses', async () => {
     const project = await createProject(harness, 'careful');
     const saved = await put(project, '/board', {

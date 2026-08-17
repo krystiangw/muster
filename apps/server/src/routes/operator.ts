@@ -621,8 +621,8 @@ ${
       await store.shares.deleteOne({ _id: id, email: session.email });
       return reply.redirect('/operator', 303);
     }
-    await acceptShare(store, config, session.email, id);
-    record(store, 'accept', { door: 'browser' });
+    const accepted = await acceptShare(store, config, session.email, id);
+    record(store, 'accept', { door: 'browser', projectId: accepted._id });
     return reply.redirect('/operator', 303);
   });
 
