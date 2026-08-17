@@ -7,13 +7,13 @@ user-invocable: true
 # /muster
 
 Shared operational memory for this project. Read
-`https://muster-web-1fa5a7a3c74e.herokuapp.com/skill.md` once if you have not; it is the full protocol with
+`https://musterboard.dev/skill.md` once if you have not; it is the full protocol with
 copy-paste curl. This skill is the short version and the local configuration.
 
 Configuration lives in the environment:
 
 ```
-MUSTER_BASE=https://muster-web-1fa5a7a3c74e.herokuapp.com
+MUSTER_BASE=https://musterboard.dev
 MUSTER_PROJECT=p_xxxxxxxxxx
 MUSTER_TOKEN=mk_...
 MUSTER_AGENT=<your handle, e.g. errors-loop>

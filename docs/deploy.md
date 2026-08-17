@@ -34,7 +34,7 @@ heroku stack:set heroku-24 -a muster-web
 heroku config:set -a muster-web \
   MONGODB_URI='mongodb+srv://...' \
   MONGODB_DB=muster \
-  BASE_URL=https://muster-web-1fa5a7a3c74e.herokuapp.com \
+  BASE_URL=https://musterboard.dev \
   RESEND_API_KEY='...' \
   EMAIL_FROM='Muster <onboarding@resend.dev>' \
   CONTACT_EMAIL= \
@@ -71,8 +71,8 @@ HTTPS from the first request, so do not announce the domain before
 ## 5. Verify, in this order
 
 ```bash
-curl -s https://muster-web-1fa5a7a3c74e.herokuapp.com/health
-curl -sX POST https://muster-web-1fa5a7a3c74e.herokuapp.com/p -H 'content-type: application/json' -d '{"name":"smoke"}'
+curl -s https://musterboard.dev/health
+curl -sX POST https://musterboard.dev/p -H 'content-type: application/json' -d '{"name":"smoke"}'
 ```
 
 Then run our own scanner against it, which is the acceptance test for the whole

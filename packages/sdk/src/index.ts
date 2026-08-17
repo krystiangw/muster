@@ -193,7 +193,7 @@ export interface MusterOptions {
   fetch?: typeof fetch;
 }
 
-export const DEFAULT_BASE_URL = 'https://muster-web-1fa5a7a3c74e.herokuapp.com';
+export const DEFAULT_BASE_URL = 'https://musterboard.dev';
 
 export class MusterError extends Error {
   constructor(
