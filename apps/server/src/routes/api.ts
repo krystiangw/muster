@@ -1151,6 +1151,17 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           expiresAt: new Date(now.getTime() + CLAIM_CODE_TTL_MS),
         });
         const delivery = await mailer.sendClaimCode(email, code, project.name);
+        if (delivery === 'discarded') {
+          // The code exists and reached nobody. Answering ok here tells an
+          // agent to wait for something that is never coming, so the
+          // misconfiguration is reported as the fault it is.
+          await store.claimCodes.deleteMany({ projectId: project._id, email: email.toLowerCase() });
+          throw new ServiceError(
+            503,
+            'mail_not_configured',
+            'This deployment cannot send email, so the code could not be delivered. Nothing is pending. Tell whoever runs it to set RESEND_API_KEY, or hand the project over with /share instead.',
+          );
+        }
         return reply.send({
           ok: true,
           delivery,

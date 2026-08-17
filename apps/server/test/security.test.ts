@@ -263,4 +263,40 @@ describe('an email that cannot be sent', () => {
       await isolated.stop();
     }
   });
+
+  it('is reported as a fault rather than answered with a cheerful ok', async () => {
+    const isolated = await startHarness({ NODE_ENV: 'production', RESEND_API_KEY: '' });
+    try {
+      const project = await createProject(isolated);
+      const claimed = await isolated.server.inject({
+        method: 'POST',
+        url: `${project.api}/claim`,
+        headers: authed(project),
+        payload: { email: 'victim@example.com' },
+      });
+
+      // The code reached nobody. Answering ok would send an agent off to wait
+      // for something that is never coming.
+      assert.equal(claimed.statusCode, 503);
+      assert.equal(claimed.json().error, 'mail_not_configured');
+      assert.equal(
+        await isolated.store.claimCodes.countDocuments({ projectId: project.id }),
+        0,
+        'and nothing is left pending',
+      );
+
+      // Same for the human door, and the answer does not depend on the address,
+      // so it stays no kind of account probe.
+      const asked = await isolated.server.inject({
+        method: 'POST',
+        url: '/operator',
+        payload: 'email=someone%40example.com',
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      });
+      assert.equal(asked.statusCode, 503);
+      assert.match(asked.body, /cannot send email/i);
+    } finally {
+      await isolated.stop();
+    }
+  });
 });

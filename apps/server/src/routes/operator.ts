@@ -92,6 +92,28 @@ mistake, open a link you still have and turn off every other one from there.</p>
       }
     }
 
+    // A deployment with no mail provider cannot send this link to anybody, and
+    // saying so is safe: it is a property of the deployment, not of the address
+    // that was typed, so it answers the same for everyone and stays no kind of
+    // probe. Telling somebody to check an inbox nothing will arrive in is the
+    // one answer worse than an honest error.
+    if (!config.resendApiKey && !config.logUnsentEmails) {
+      return reply
+        .code(503)
+        .type('text/html; charset=utf-8')
+        .send(
+          layout(
+            { title: 'This Muster cannot send email' },
+            `<h1>This Muster cannot send email</h1>
+             <p>No mail provider is configured here, so the link cannot reach you. Whoever runs
+             this instance needs to set <code>RESEND_API_KEY</code>.</p>
+             <p>If an agent created a project for you, it can hand it over directly instead:
+             the read link it already has works without any email.</p>
+             <p><a href="/">Back</a></p>`,
+          ),
+        );
+    }
+
     // The same answer either way: whether an address owns projects here is not
     // something a stranger gets to probe.
     return reply.type('text/html; charset=utf-8').send(

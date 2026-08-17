@@ -4,9 +4,17 @@ import type { Config } from './config.js';
  * Resend over plain fetch. The SDK would add a dependency to send one message
  * type, and the one message type is six digits long.
  */
+/**
+ * What happened to a message. `logged` is the development fallback, where the
+ * content went to the terminal on purpose. `discarded` is a deployment with no
+ * mail provider configured: the message carried a credential, so it went
+ * nowhere, and the caller has to say so rather than report success.
+ */
+export type Delivery = 'sent' | 'logged' | 'discarded';
+
 export interface Mailer {
-  sendClaimCode(to: string, code: string, projectName: string): Promise<'sent' | 'logged'>;
-  sendOperatorLink(to: string, url: string, projectCount: number): Promise<'sent' | 'logged'>;
+  sendClaimCode(to: string, code: string, projectName: string): Promise<Delivery>;
+  sendOperatorLink(to: string, url: string, projectCount: number): Promise<Delivery>;
 }
 
 /** Enough of an address to match it to a report, not enough to be a mailing list. */
@@ -16,7 +24,7 @@ function redactAddress(address: string): string {
 }
 
 export function createMailer(config: Config, log: (msg: string) => void): Mailer {
-  async function send(to: string, subject: string, lines: string[]): Promise<'sent' | 'logged'> {
+  async function send(to: string, subject: string, lines: string[]): Promise<Delivery> {
     if (!config.resendApiKey) {
       // The fallback exists so a local run and a self-host with no outbound
       // mail can still finish a claim. What it prints is a live credential
@@ -25,12 +33,12 @@ export function createMailer(config: Config, log: (msg: string) => void): Mailer
       // log, and the missing key is reported as the operational fault it is.
       if (config.logUnsentEmails) {
         log(`email to ${to} [${subject}]: ${lines.join(' | ')}`);
-      } else {
-        log(
-          `email to ${redactAddress(to)} was not sent: RESEND_API_KEY is not configured. The message is discarded rather than logged, because it carries a credential.`,
-        );
+        return 'logged';
       }
-      return 'logged';
+      log(
+        `email to ${redactAddress(to)} was not sent: RESEND_API_KEY is not configured. The message is discarded rather than logged, because it carries a credential.`,
+      );
+      return 'discarded';
     }
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',

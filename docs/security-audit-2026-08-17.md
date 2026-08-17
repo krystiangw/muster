@@ -106,6 +106,14 @@ u dostawcy, żeby zacząć wypisywać żywe poświadczenia do logu.
 a log dostaje zredagowany adres i informację, że brak klucza to usterka
 konfiguracji.
 
+Przegląd samej poprawki wyłapał jej skutek uboczny: pierwsza wersja odrzucała
+wiadomość i dalej odpowiadała `ok`, więc `/claim` twierdził, że kod jest
+w drodze, choć nie istniał nigdzie. Teraz odrzucenie jest osobnym wynikiem
+(`discarded`), `/claim` zwraca 503 `mail_not_configured` i kasuje oczekujący
+kod, a strona operatorska mówi wprost, że ta instalacja nie umie wysyłać poczty.
+Ta odpowiedź nie zależy od wpisanego adresu, więc nie otwiera z powrotem
+enumeracji z punktu 5.
+
 ## Sprawdzone i czyste
 
 - **Wstrzyknięcie operatorów Mongo.** Trasy JSON mają schematy, które wymuszają
