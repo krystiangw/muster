@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { redactCapabilities } from '../src/app.js';
 import { hashToken } from '../src/ids.js';
-import { authed, createProject, startHarness, type Harness, type Project } from './helper.js';
+import {
+  authed,
+  createProject,
+  signIn,
+  startHarness,
+  type Harness,
+  type Project,
+} from './helper.js';
 
 /**
  * Regressions for the security audit of 2026-08-17. Each one is a hole that was
@@ -27,6 +34,16 @@ async function post(project: Project, path: string, payload: unknown, token?: st
     headers: token ? { authorization: `Bearer ${token}` } : authed(project),
     payload: payload as Record<string, unknown>,
   });
+}
+
+async function claimForEmail(project: Project, email: string): Promise<void> {
+  await post(project, '/claim', { email });
+  const pending = await harness.store.claimCodes.findOne({ projectId: project.id, email });
+  await harness.store.claimCodes.updateOne(
+    { _id: pending!._id },
+    { $set: { codeHash: hashToken('123456') } },
+  );
+  await post(project, '/claim/verify', { email, code: '123456' });
 }
 
 describe('ownership is not something a worker key can take', () => {
@@ -298,5 +315,86 @@ describe('an email that cannot be sent', () => {
     } finally {
       await isolated.stop();
     }
+  });
+});
+
+describe('a project narrowed to its owner', () => {
+  it('stops opening for the link alone, and still opens for the owner', async () => {
+    const project = await createProject(harness, 'private');
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    // Open by link is the default, and has to be: an agent creates a project
+    // before any person is involved.
+    assert.equal(
+      (await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` })).statusCode,
+      200,
+    );
+
+    await claimForEmail(project, 'owner@example.com');
+    const closed = await harness.server.inject({
+      method: 'PATCH',
+      url: project.api,
+      headers: authed(project),
+      payload: { visibility: 'owner' },
+    });
+    assert.equal(closed.statusCode, 200);
+    assert.equal(closed.json().visibility, 'owner');
+
+    // A stranger holding the link, including one who copied it while the
+    // project was open, gets the same page as somebody holding a wrong link.
+    const stranger = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.equal(stranger.statusCode, 404);
+    const wrongLink = await harness.server.inject({ method: 'GET', url: '/r/r_nosuchtoken/board' });
+    assert.equal(stranger.statusCode, wrongLink.statusCode);
+
+    // Writing through the link is what the link is for, so that closes too.
+    const moved = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/move`,
+      payload: 'slug=whatever&column=done',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    assert.equal(moved.statusCode, 404);
+
+    const session = await signIn(harness, 'owner@example.com');
+    const mine = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board`,
+      headers: { cookie: session.cookie },
+    });
+    assert.equal(mine.statusCode, 200);
+
+    // Somebody else's session is not a way in either.
+    const other = await createProject(harness, 'anchor');
+    await claimForEmail(other, 'other@example.com');
+    const otherSession = await signIn(harness, 'other@example.com');
+    const theirs = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board`,
+      headers: { cookie: otherSession.cookie },
+    });
+    assert.equal(theirs.statusCode, 404);
+
+    // And the agent that works the board never notices any of this.
+    const agent = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/board`,
+      headers: authed(project),
+    });
+    assert.equal(agent.statusCode, 200);
+  });
+
+  it('refuses to close a project that nobody owns', async () => {
+    const project = await createProject(harness, 'ownerless');
+    const attempt = await harness.server.inject({
+      method: 'PATCH',
+      url: project.api,
+      headers: authed(project),
+      payload: { visibility: 'owner' },
+    });
+    // Closing it to an owner it does not have would lock out everybody,
+    // including the agent that just created it.
+    assert.equal(attempt.statusCode, 400);
+    assert.equal(attempt.json().error, 'not_claimed');
   });
 });

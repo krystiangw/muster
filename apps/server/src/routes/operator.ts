@@ -5,7 +5,13 @@ import type { Mailer } from '../email.js';
 import { chip, escapeHtml, formatWhen, layout } from '../html.js';
 import { hashToken, newId, newOtpCode } from '../ids.js';
 import type { RateLimiter } from '../rateLimit.js';
-import { ServiceError, acceptShare, answerEscalation, createApiKey } from '../service.js';
+import {
+  ServiceError,
+  acceptShare,
+  answerEscalation,
+  createApiKey,
+  updateProject,
+} from '../service.js';
 import {
   checkCsrf,
   csrfField,
@@ -420,6 +426,18 @@ ${projects
              ${csrfField(session)}
              <button class="ghost" type="submit"
                      title="For an agent that lost its token">new token</button>
+           </form>
+           <form method="post" action="/operator/projects/${escapeHtml(project._id)}/visibility"
+                 style="margin-top:6px">
+             ${csrfField(session)}
+             <input type="hidden" name="visibility"
+                    value="${(project.visibility ?? 'link') === 'owner' ? 'link' : 'owner'}">
+             <button class="ghost" type="submit"
+                     title="${
+                       (project.visibility ?? 'link') === 'owner'
+                         ? 'Anybody holding the read link can open this board again'
+                         : 'The read link stops working for everybody but you'
+                     }">${(project.visibility ?? 'link') === 'owner' ? 'private' : 'open by link'}</button>
            </form></td></tr>`,
   )
   .join('\n')}
@@ -528,6 +546,30 @@ curl -sX DELETE ${escapeHtml(config.baseUrl)}/v1/${escapeHtml(project._id)}/keys
   -H "authorization: Bearer ${escapeHtml(token)}"</code></pre>
        <p><a href="/operator">Back to your projects</a></p>`,
     );
+  });
+
+  /**
+   * Open by link, or only to me.
+   *
+   * A project starts open because it has to: an agent creates one before any
+   * person is involved, and the handover is a URL that works. Owning it is what
+   * earns the right to close it, and closing it makes the link alone worthless
+   * to everybody else, including anybody who copied it while it was open.
+   */
+  app.post('/operator/projects/:id/visibility', { schema: { hide: true } }, async (request, reply) => {
+    const session = await requireSession(request, reply);
+    if (!session) return reply;
+    checkCsrf(session, request.body);
+
+    const { id } = request.params as { id: string };
+    const form = (request.body ?? {}) as { visibility?: string };
+    const project = await store.projects.findOne({ _id: id, claimedBy: session.email });
+    if (!project) throw new ServiceError(404, 'not_found', 'No project of yours with that id.');
+
+    await updateProject(store, project._id, {
+      visibility: form.visibility === 'owner' ? 'owner' : 'link',
+    });
+    return reply.redirect('/operator', 303);
   });
 
   app.post('/operator/escalations/:id', { schema: { hide: true } }, async (request, reply) => {

@@ -22,11 +22,11 @@ Watchdog czyta ten plik i podejmuje pierwszą niezaznaczoną pozycję.
   - [x] 2a. `POST /operator/projects/:id/keys` wystawia nowy token admina właścicielowi
   - [x] 2b. Widoczne w widoku operatora per projekt, z ostrzeżeniem że token pokazuje się raz
   - [x] 2c. Testy: tylko właściciel, tylko z sesją, stare klucze nietknięte
-- [ ] 3. Prywatność projektu po przejęciu
-  - [ ] 3a. `visibility: 'link' | 'owner'` na projekcie, domyślnie `link`
-  - [ ] 3b. `owner` wymaga sesji z adresem równym `claimedBy` na `/r/<token>` i `/r/<token>/board`
-  - [ ] 3c. Przełącznik w widoku operatora i w API (`PATCH /v1/{project}`)
-  - [ ] 3d. Testy: obcy z linkiem dostaje 404, właściciel z sesją wchodzi, agent z tokenem nietknięty
+- [x] 3. Prywatność projektu po przejęciu
+  - [x] 3a. `visibility: 'link' | 'owner'` na projekcie, domyślnie `link`
+  - [x] 3b. `owner` wymaga sesji z adresem równym `claimedBy` na `/r/<token>` i `/r/<token>/board`
+  - [x] 3c. Przełącznik w widoku operatora i w API (`PATCH /v1/{project}`)
+  - [x] 3d. Testy: obcy z linkiem dostaje 404, właściciel z sesją wchodzi, agent z tokenem nietknięty
 - [ ] 4. Przekrój "Twoja robota" ponad projektami
   - [ ] 4a. Aliasy właściciela na koncie mailowym (na jakie nazwy w polu `owner` odpowiadasz)
   - [ ] 4b. Sekcja w widoku operatora: otwarte itemy przypisane do Ciebie, ze wszystkich projektów

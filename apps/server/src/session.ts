@@ -93,7 +93,12 @@ export async function readSession(
     expiresAt: { $gt: now },
   });
   if (!doc) return null;
-  void store.operatorSessions.updateOne({ _id: doc._id }, { $set: { lastUsedAt: now } });
+  // Best effort, and never awaited: when this browser was last seen is worth
+  // knowing and worth nothing next to the request in hand. It swallows its own
+  // failures because a floating rejection takes the process down.
+  void store.operatorSessions
+    .updateOne({ _id: doc._id }, { $set: { lastUsedAt: now } })
+    .catch(() => undefined);
   return { id: doc._id, email: doc.email, csrf: doc.csrf };
 }
 

@@ -173,8 +173,12 @@ export async function authenticate(store: Store, token: string): Promise<AuthCon
   if (!project) {
     throw new ServiceError(404, 'project_gone', 'The project this token belongs to no longer exists.');
   }
-  // Best effort, and deliberately not awaited on the request path.
-  void store.keys.updateOne({ _id: key._id }, { $set: { lastUsedAt: new Date() } });
+  // Best effort, deliberately not awaited on the request path, and deliberately
+  // silent: a floating rejection here would fail a request that has already
+  // succeeded, or take the process with it.
+  void store.keys
+    .updateOne({ _id: key._id }, { $set: { lastUsedAt: new Date() } })
+    .catch(() => undefined);
   return { project, key };
 }
 

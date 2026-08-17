@@ -1015,6 +1015,12 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
             properties: {
               name: { type: 'string', maxLength: 120 },
               description: { type: 'string', maxLength: 500 },
+              visibility: {
+                type: 'string',
+                enum: ['link', 'owner'],
+                description:
+                  'Who may open the read link. "link" is the default and is what makes a handover possible. "owner" needs a project somebody owns, after which the link alone stops working and the reader has to be signed in as that person.',
+              },
             },
             additionalProperties: false,
           },
@@ -1022,7 +1028,11 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       },
       async (request) => {
         const { project } = requireAdmin(request);
-        const body = request.body as { name?: string; description?: string };
+        const body = request.body as {
+          name?: string;
+          description?: string;
+          visibility?: 'link' | 'owner';
+        };
         const updated = await updateProject(store, project._id, body);
         return projectJson(updated, config);
       },
