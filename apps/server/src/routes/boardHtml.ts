@@ -2,6 +2,7 @@ import type { AgentFacet, BoardFacets, BoardFilter, BoardView } from '../board.j
 import { BOARD_PRESETS, COLUMN_RENDER_LIMIT, applyForColumn } from '../board.js';
 import { boardConfigJson } from '../serialize.js';
 import { chip, escapeHtml, formatWhen } from '../html.js';
+import { who } from '../identity.js';
 import type { ItemDoc, ProjectDoc, TimelineEntry } from '../types.js';
 
 /**
@@ -21,6 +22,20 @@ import type { ItemDoc, ProjectDoc, TimelineEntry } from '../types.js';
  * in them: a column that is a pure view has nothing to apply, so offering it
  * here would only produce an error.
  */
+/**
+ * The narrowing, carried through a write.
+ *
+ * Somebody working through one agent's queue, or one label, or a search, must
+ * land back where they were. A form that dropped it would throw them to the
+ * whole board on every card they touched.
+ */
+function keptFilter(keep: BoardFilter): string {
+  return (['owner', 'agent', 'label', 'q'] as const)
+    .filter((name) => keep[name])
+    .map((name) => `<input type="hidden" name="${name}" value="${escapeHtml(keep[name]!)}">`)
+    .join('');
+}
+
 function moveForm(
   item: ItemDoc,
   from: string,
@@ -35,9 +50,7 @@ function moveForm(
     ${
       // Moving a card off a narrowed board must not throw the narrowing away:
       // somebody looking at one agent's work wants to still be there afterwards.
-      keep.owner ? `<input type="hidden" name="owner" value="${escapeHtml(keep.owner)}">` : ''
-    }${
-      keep.agent ? `<input type="hidden" name="agent" value="${escapeHtml(keep.agent)}">` : ''
+      keptFilter(keep)
     }
     <label class="sr-only" for="mv-${escapeHtml(from)}-${escapeHtml(item.slug)}">Move ${escapeHtml(item.slug)} to</label>
     <select id="mv-${escapeHtml(from)}-${escapeHtml(item.slug)}" name="column">
@@ -61,16 +74,14 @@ function whoChips(item: ItemDoc, claimed: boolean, agents?: Map<string, string>)
   const parts: string[] = [];
   // A handle says which agent; its registered description says what that agent
   // is for, which is the thing somebody reading the board actually wants and
-  // which nobody should have to look up in another view.
-  const named = (handle: string, text: string, kind: string): string => {
-    const about = agents?.get(handle);
-    return about
-      ? `<span title="${escapeHtml(about)}">${chip(text, kind)}</span>`
-      : chip(text, kind);
-  };
-  if (claimed) parts.push(named(item.claim!.agent, item.claim!.agent, 'claim'));
-  else if (item.lastActor) parts.push(named(item.lastActor, `last: ${item.lastActor}`, 'note'));
-  if (item.owner) parts.push(chip(`owner: ${item.owner}`, 'dropped'));
+  // which nobody should have to look up in another view. The colour says it
+  // before either is read: on a board six agents write to, "whose is this" is
+  // the question every card gets asked, and a colour answers it for free.
+  const named = (handle: string, prefix?: string): string =>
+    who(handle, { title: agents?.get(handle), prefix });
+  if (claimed) parts.push(named(item.claim!.agent));
+  else if (item.lastActor) parts.push(named(item.lastActor, 'last:'));
+  if (item.owner) parts.push(named(item.owner, 'owner:'));
   return parts.join(' ');
 }
 
@@ -109,7 +120,8 @@ function preview(
   item: ItemDoc,
   now: Date,
   timeline: TimelineEntry[],
-  agents?: Map<string, string>,
+  agents: Map<string, string> | undefined,
+  edit: string,
 ): string {
   const claimed = item.claim !== null && new Date(item.claim.expiresAt) > now;
   return `<div class="peeked" id="${escapeHtml(item._id)}">
@@ -142,17 +154,74 @@ function preview(
 ${timeline
   .map(
     (entry) => `      <li><span class="when">${escapeHtml(formatWhen(entry.at))}</span>
-        <span class="who${entry.by === 'hygiene' ? ' hygiene' : ''}">${escapeHtml(entry.by)}</span>
+        <span class="who${entry.by === 'hygiene' ? ' hygiene' : ''}">${
+          entry.by === 'hygiene' ? escapeHtml(entry.by) : who(entry.by)
+        }</span>
         <span>${escapeHtml(entry.message)}</span></li>`,
   )
   .join('\n')}
     </ul>`
         : ''
     }
+    ${edit}
     <p class="why">updated ${escapeHtml(formatWhen(item.updatedAt))} &middot; created ${escapeHtml(
       formatWhen(item.createdAt),
     )} &middot; ${item.timelineCount} timeline entr${item.timelineCount === 1 ? 'y' : 'ies'}</p>
   </div>
+</div>`;
+}
+
+/**
+ * Assigning somebody, and tagging.
+ *
+ * In the sheet rather than on the card, because a card is read at a glance and
+ * a column is 230px wide: the face of a card is for scanning, the sheet behind
+ * it is where somebody does something. Both are plain forms, so the board keeps
+ * working with scripting switched off, and both carry the current narrowing so
+ * acting on a card does not throw you back to the whole board.
+ *
+ * The owner field is an input with a datalist rather than a select: the people
+ * a board already knows are one keystroke away, and somebody new can still be
+ * named without an administrator adding them first.
+ */
+function editForms(item: ItemDoc, facets: BoardFacets, action: string, keep: BoardFilter): string {
+  const id = escapeHtml(item._id);
+  const labels = item.labels ?? [];
+  return `<div class="edit">
+  <form class="row" method="post" action="${escapeHtml(action)}/owner">
+    <input type="hidden" name="slug" value="${escapeHtml(item.slug)}">${keptFilter(keep)}
+    <label for="own-${id}">Owner
+      <input id="own-${id}" name="owner" list="owners-${id}" size="14"
+        value="${escapeHtml(item.owner ?? '')}" placeholder="nobody">
+    </label>
+    <datalist id="owners-${id}">
+      ${facets.owners.map((name) => `<option value="${escapeHtml(name)}"></option>`).join('')}
+    </datalist>
+    <button type="submit">assign</button>
+  </form>
+  <form class="row" method="post" action="${escapeHtml(action)}/labels">
+    <input type="hidden" name="slug" value="${escapeHtml(item.slug)}">${keptFilter(keep)}
+    <label for="lab-${id}">Add label
+      <input id="lab-${id}" name="add" list="labels-${id}" size="14" placeholder="label">
+    </label>
+    <datalist id="labels-${id}">
+      ${facets.labels.map((name) => `<option value="${escapeHtml(name)}"></option>`).join('')}
+    </datalist>
+    <button type="submit">tag</button>
+  </form>
+  ${
+    labels.length === 0
+      ? ''
+      : `<div class="row tags">${labels
+          .map(
+            (label) => `<form method="post" action="${escapeHtml(action)}/labels">
+      <input type="hidden" name="slug" value="${escapeHtml(item.slug)}">${keptFilter(keep)}
+      <input type="hidden" name="remove" value="${escapeHtml(label)}">
+      <button class="ghost tag" type="submit" title="Remove this label">${escapeHtml(label)} &times;</button>
+    </form>`,
+          )
+          .join('')}</div>`
+  }
 </div>`;
 }
 
@@ -173,6 +242,8 @@ export interface BoardRenderOptions {
   filters?: string;
   /** Agent handle to its registered description, shown on the handle itself. */
   agents?: Map<string, string>;
+  /** Names already in use, offered in the assign and tag fields. */
+  facets?: BoardFacets;
 }
 
 export function renderBoard(view: BoardView, options: BoardRenderOptions = {}): string {
@@ -255,7 +326,17 @@ ${
       : ''
   }
 ${shown
-  .map((item) => preview(item, now, options.timelines?.get(item._id) ?? [], options.agents))
+  .map((item) =>
+    preview(
+      item,
+      now,
+      options.timelines?.get(item._id) ?? [],
+      options.agents,
+      options.moveAction && options.facets
+        ? editForms(item, options.facets, options.moveAction.replace(/\/move$/, ''), view.filter)
+        : '',
+    ),
+  )
   .join('\n')}`;
 }
 
@@ -318,7 +399,9 @@ function agentOptions(agents: AgentFacet[], selected: string | undefined): strin
 }
 
 export function renderBoardFilters(view: BoardView, facets: BoardFacets, action: string): string {
-  if (facets.owners.length === 0 && facets.agents.length === 0) return '';
+  if (facets.owners.length === 0 && facets.agents.length === 0 && facets.labels.length === 0) {
+    return '';
+  }
   const owners = [`<option value="">anyone</option>`]
     .concat(
       facets.owners.includes(view.filter.owner ?? '')
@@ -349,9 +432,29 @@ export function renderBoardFilters(view: BoardView, facets: BoardFacets, action:
       ${agentOptions(facets.agents, view.filter.agent)}
     </select>
   </label>
+  ${
+    facets.labels.length === 0
+      ? ''
+      : `<label>Label
+    <select name="label">
+      ${[`<option value="">any label</option>`]
+        .concat(
+          facets.labels.includes(view.filter.label ?? '') || !view.filter.label
+            ? []
+            : [option(view.filter.label, view.filter.label, view.filter.label)],
+        )
+        .concat(facets.labels.map((value) => option(value, value, view.filter.label)))
+        .join('\n      ')}
+    </select>
+  </label>`
+  }
+  <label>Find
+    <input type="search" name="q" value="${escapeHtml(view.filter.q ?? '')}"
+      placeholder="slug or title" size="16">
+  </label>
   <button type="submit">Show</button>
   ${
-    view.filter.owner || view.filter.agent
+    view.filter.owner || view.filter.agent || view.filter.label || view.filter.q
       ? `<a class="ghost-link" href="${escapeHtml(action)}">whole board</a>`
       : ''
   }

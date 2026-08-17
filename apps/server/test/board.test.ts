@@ -28,6 +28,10 @@ async function post(project: Project, path: string, payload: unknown) {
   });
 }
 
+async function read(project: Project, path: string) {
+  return harness.server.inject({ method: 'GET', url: `${project.api}${path}`, headers: authed(project) });
+}
+
 async function put(project: Project, path: string, payload: unknown) {
   return harness.server.inject({
     method: 'PUT',
@@ -963,8 +967,10 @@ describe('a board many agents write to', () => {
     const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}` });
     assert.match(
       page.body,
-      new RegExp(`<a href="/r/${readToken}/board\\?agent=errors-loop">errors-loop</a>`),
+      new RegExp(`<a href="/r/${readToken}/board\\?agent=errors-loop">.*errors-loop</a>`),
+      'the handle links to its own board, now with the face that goes with it',
     );
+    assert.match(page.body, /<svg class="face"/, 'and a name on this board has a face');
     assert.match(page.body, /watches the exchange error feed/);
     assert.match(page.body, /quiet-loop/, 'a silent agent is still on the roster');
     assert.match(page.body, /said nothing/);
@@ -1106,5 +1112,69 @@ describe('the board over MCP', () => {
     assert.equal(result.landed_in, 'doing');
     assert.equal(result.item.claim.agent, 'worker');
     assert.deepEqual(result.applied, { status: 'open', claim: true });
+  });
+});
+
+describe('acting on a card without a script', () => {
+  let project: Project;
+  let readToken: string;
+
+  before(async () => {
+    project = await createProject(harness, 'hands on');
+    readToken = project.readUrl.split('/r/')[1]!;
+    await post(project, '/items', { slug: 'one', title: 'a thing', actor: 'errors-loop' });
+  });
+
+  const form = async (path: string, body: Record<string, string>) =>
+    harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/${path}`,
+      payload: new URLSearchParams(body).toString(),
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+
+  it('assigns and unassigns somebody, and says so in the timeline', async () => {
+    const assigned = await form('owner', { slug: 'one', owner: 'alex' });
+    assert.equal(assigned.statusCode, 303);
+    let item = (await read(project, '/items/one')).json().item;
+    assert.equal(item.owner, 'alex');
+    assert.match(item.timeline.at(-1).message, /assigned to alex/);
+    assert.equal(item.timeline.at(-1).by, 'operator');
+
+    // Clearing the field is the honest way to say nobody, so it means nobody.
+    await form('owner', { slug: 'one', owner: '' });
+    item = (await read(project, '/items/one')).json().item;
+    assert.equal(item.owner, null);
+    assert.match(item.timeline.at(-1).message, /unassigned/);
+  });
+
+  it('tags and untags, without overwriting a label set in the meantime', async () => {
+    await form('labels', { slug: 'one', add: 'urgent' });
+    // Two tags racing: a read, edit and write back would lose one of them.
+    await Promise.all([
+      form('labels', { slug: 'one', add: 'ops' }),
+      form('labels', { slug: 'one', add: 'docs' }),
+    ]);
+    let item = (await read(project, '/items/one')).json().item;
+    assert.deepEqual([...item.labels].sort(), ['docs', 'ops', 'urgent']);
+
+    await form('labels', { slug: 'one', remove: 'ops' });
+    item = (await read(project, '/items/one')).json().item;
+    assert.deepEqual([...item.labels].sort(), ['docs', 'urgent']);
+    assert.match(item.timeline.at(-1).message, /untagged ops/);
+  });
+
+  it('comes back to the board somebody was actually looking at', async () => {
+    const back = await form('owner', { slug: 'one', owner: 'alex', agent: 'errors-loop', q: 'thing' });
+    const location = back.headers.location as string;
+    assert.match(location, /agent=errors-loop/);
+    assert.match(location, /q=thing/, 'a search survives acting on one of its results');
+  });
+
+  it('refuses to invent an item that is not there', async () => {
+    const missing = await form('owner', { slug: 'never-existed', owner: 'alex' });
+    assert.equal(missing.statusCode, 404);
+    const items = (await read(project, '/items?limit=50')).json().items;
+    assert.ok(!items.some((i: { slug: string }) => i.slug === 'never-existed'));
   });
 });

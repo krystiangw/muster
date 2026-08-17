@@ -85,6 +85,25 @@ td.mono, .mono { font-family:var(--mono); font-size:13px; }
 /* A claim is somebody working now; the last writer is somebody who was. The
    outline says "past tense" without spending another colour on it. */
 .chip.note { color:var(--muted); background:transparent; border:1px solid var(--rule); }
+/* Whose is this. The hue is derived from the handle, so the same agent is the
+   same colour on every board, and no two meanings share a colour: the accent,
+   the danger red and the warning amber are all reserved elsewhere. */
+.who-chip { display:inline-flex; align-items:center; gap:5px; font-family:var(--mono);
+  font-size:11px; padding:2px 7px 2px 3px; border-radius:999px; white-space:nowrap;
+  color:var(--who); background:var(--who-wash); }
+.who-chip .face { flex:none; border-radius:50%; }
+.timeline .who .who-chip { font-size:11px; }
+td .face { vertical-align:-3px; margin-right:4px; }
+.filters .who-chip { font-size:11.5px; }
+/* Acting on a card: in the sheet, where there is room, never on the 230px face. */
+.edit { display:flex; flex-wrap:wrap; gap:10px 18px; align-items:flex-end;
+  border-top:1px solid var(--rule); margin-top:14px; padding-top:14px; }
+.edit form.row { max-width:none; gap:8px; margin:0; }
+.edit label { font-size:12px; }
+.edit .tags { gap:6px; }
+.edit button.tag { font-family:var(--mono); font-size:11px; padding:3px 8px; border-radius:999px; }
+/* A control revealed by hover is a control that does not exist on a phone. */
+@media (hover: none) { .col .card .move { opacity:1; } }
 form { display:flex; flex-direction:column; gap:12px; max-width:440px; }
 form.row { flex-direction:row; align-items:flex-end; gap:10px; max-width:none; flex-wrap:wrap; }
 label { display:flex; flex-direction:column; gap:5px; font-size:14px; color:var(--ink-2); }

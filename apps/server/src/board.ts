@@ -63,6 +63,10 @@ export interface BoardRow {
 export interface BoardFilter {
   owner?: string;
   agent?: string;
+  /** One label, which is how a board of many concerns gets read one at a time. */
+  label?: string;
+  /** Words in the slug or the title. The board's own find. */
+  q?: string;
 }
 
 export interface BoardView {
@@ -227,6 +231,20 @@ export async function loadBoard(
     narrowed.owner = options.owner;
     query.owner = options.owner;
   }
+  if (options.label) {
+    narrowed.label = options.label;
+    query.labels = options.label;
+  }
+  if (options.q) {
+    narrowed.q = options.q;
+    // Slug or title, case insensitive, escaped: the query is a person's words,
+    // not a pattern, and a stray bracket should find nothing rather than throw.
+    const words = options.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    query.$and = [
+      ...((query.$and as unknown[]) ?? []),
+      { $or: [{ slug: { $regex: words, $options: 'i' } }, { title: { $regex: words, $options: 'i' } }] },
+    ];
+  }
   if (options.agent) {
     narrowed.agent = options.agent;
     // Holding it counts, and so does having been the last to write to it. An
@@ -261,6 +279,8 @@ export interface AgentFacet {
 export interface BoardFacets {
   owners: string[];
   agents: AgentFacet[];
+  /** Every label in use, so a filter never offers one with nothing behind it. */
+  labels: string[];
   /** Names left out for length. Zero on every project anybody actually has. */
   omitted: { owners: number; agents: number };
 }
@@ -293,8 +313,9 @@ export const FACET_LIMIT = 400;
  * a name that is only a leftover on an old item is the one worth losing first.
  */
 export async function boardFacets(store: Store, project: ProjectDoc): Promise<BoardFacets> {
-  const [owners, actors, holders, registered] = await Promise.all([
+  const [owners, labels, actors, holders, registered] = await Promise.all([
     store.items.distinct('owner', { projectId: project._id }),
+    store.items.distinct('labels', { projectId: project._id }),
     store.items.distinct('lastActor', { projectId: project._id }),
     store.items.distinct('claim.agent', {
       projectId: project._id,
@@ -335,6 +356,7 @@ export async function boardFacets(store: Store, project: ProjectDoc): Promise<Bo
 
   return {
     owners: ownerNames.slice(0, FACET_LIMIT),
+    labels: names(labels).slice(0, FACET_LIMIT),
     agents: agents.slice(0, FACET_LIMIT),
     omitted: {
       owners: Math.max(0, ownerNames.length - FACET_LIMIT),
@@ -392,6 +414,52 @@ export interface MoveResult {
  * card actually landed. It can only set what an item already has, so no move can
  * invent a state, and the four statuses stay four.
  */
+/**
+ * Adds and removes labels in one write, in the database.
+ *
+ * Never read, edit and write back the whole set: two people tagging the same
+ * card in the same second would each save a set computed before the other's,
+ * and one tag would vanish with nothing to show it ever existed. This is the
+ * same lesson the move path already learned, so it is the same mechanism,
+ * lifted out to be used by both.
+ */
+export async function relabelItem(
+  store: Store,
+  project: ProjectDoc,
+  slug: string,
+  change: { add?: string[]; remove?: string[] },
+): Promise<ItemDoc> {
+  const add = change.add ?? [];
+  const remove = change.remove ?? [];
+  const updated = await store.items.findOneAndUpdate(
+    { projectId: project._id, slug: normalizeSlug(slug) },
+    [
+      {
+        $set: {
+          labels: {
+            $setUnion: [
+              {
+                $filter: {
+                  input: { $ifNull: ['$labels', []] },
+                  as: 'label',
+                  cond: { $not: [{ $in: ['$$label', remove] }] },
+                },
+              },
+              add,
+            ],
+          },
+          updatedAt: new Date(),
+        },
+      },
+    ],
+    { returnDocument: 'after' },
+  );
+  if (!updated) {
+    throw new ServiceError(404, 'not_found', `No item with slug "${slug}" in this project.`);
+  }
+  return updated as ItemDoc;
+}
+
 export async function moveItem(
   store: Store,
   project: ProjectDoc,

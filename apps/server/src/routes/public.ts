@@ -4,6 +4,7 @@ import {
   BOARD_PRESETS,
   COLUMN_RENDER_LIMIT,
   boardFacets,
+  relabelItem,
   loadBoard,
   moveItem,
   parseBoardConfig,
@@ -13,10 +14,11 @@ import type { Config } from '../config.js';
 import type { Store } from '../db.js';
 import { recordView } from '../events.js';
 import { chip, escapeHtml, formatWhen, layout } from '../html.js';
+import { avatar } from '../identity.js';
 import { renderBoard, renderBoardFilters, renderBoardSettings } from './boardHtml.js';
 import { maybeSweep } from '../hygiene.js';
 import type { RateLimiter } from '../rateLimit.js';
-import { ServiceError, answerEscalation, createProject } from '../service.js';
+import { ServiceError, answerEscalation, appendNote, createProject, upsertItem } from '../service.js';
 import { readSession } from '../session.js';
 import {
   ESCALATION_STATUSES,
@@ -136,6 +138,21 @@ function noSuchProject(): string {
      <p>If you believe it is yours, <a href="/operator">sign in</a>: a project can be narrowed to
      its owner, and then the link alone no longer opens it.</p>`,
   );
+}
+
+/** The filter a write came from, on its way back into the redirect. */
+function keptParams(form: {
+  owner?: string;
+  agent?: string;
+  label?: string;
+  q?: string;
+}): Record<string, string> {
+  const kept: Record<string, string> = {};
+  if (form.owner) kept.owner = form.owner.slice(0, 48);
+  if (form.agent) kept.agent = form.agent.slice(0, 48);
+  if (form.label) kept.label = form.label.slice(0, 48);
+  if (form.q) kept.q = form.q.slice(0, 80);
+  return kept;
 }
 
 export function registerPublic(app: FastifyInstance, deps: PublicDeps): void {
@@ -660,7 +677,7 @@ ${
               (agent) =>
                 `<tr><td class="mono"><a href="/r/${escapeHtml(readToken)}/board?agent=${encodeURIComponent(
                   agent.handle,
-                )}">${escapeHtml(agent.handle)}</a></td><td>${
+                )}">${avatar(agent.handle)} ${escapeHtml(agent.handle)}</a></td><td>${
                   agent.description === ''
                     ? '<span class="empty">said nothing</span>'
                     : escapeHtml(agent.description)
@@ -711,11 +728,17 @@ ${
       landed?: string;
       owner?: string;
       agent?: string;
+      label?: string;
+      q?: string;
     };
     const [view, facets] = await Promise.all([
       loadBoard(store, project, {
         ...(query.owner ? { owner: query.owner.slice(0, 48) } : {}),
         ...(query.agent ? { agent: query.agent.slice(0, 48) } : {}),
+        ...(query.label ? { label: query.label.slice(0, 48) } : {}),
+        // Long enough for a real phrase, short enough that nobody sends a
+        // novel into a regular expression.
+        ...(query.q ? { q: query.q.slice(0, 80) } : {}),
       }),
       boardFacets(store, project),
     ]);
@@ -743,6 +766,7 @@ ${renderBoard(view, {
   filters: renderBoardFilters(view, facets, boardUrl),
   timelines: await recentTimelines(store, project._id, view),
   agents,
+  facets,
   ...(notice ? { notice } : {}),
 })}
 
@@ -816,6 +840,90 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`)}
     return reply.redirect(`/r/${readToken}/board`, 303);
   });
 
+  /**
+   * Assigning a card to somebody, from the board.
+   *
+   * An empty name unassigns, which is the honest reading of clearing a field.
+   * The write is an ordinary upsert, so it lands in the timeline signed by the
+   * operator like everything else: a board where work changes hands invisibly
+   * is a board nobody trusts.
+   */
+  app.post('/r/:readToken/board/owner', { schema: { hide: true } }, async (request, reply) => {
+    if (!limitWrites(request, reply)) return reply;
+    const { readToken } = request.params as { readToken: string };
+    const form = (request.body ?? {}) as {
+      slug?: string;
+      owner?: string;
+      agent?: string;
+      label?: string;
+      q?: string;
+    };
+    const project = await store.projects.findOne({ readToken });
+    if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
+    if (!(await readableBy(store, request, project))) {
+      throw new ServiceError(404, 'not_found', 'No such project.');
+    }
+    if (!form.slug) throw new ServiceError(400, 'bad_request', 'Which item?');
+
+    const owner = (form.owner ?? '').trim().slice(0, 48);
+    await upsertItem(store, project, {
+      slug: form.slug,
+      owner: owner === '' ? null : owner,
+      actor: 'operator',
+      note: owner === '' ? 'unassigned' : `assigned to ${owner}`,
+      mustExist: true,
+    });
+    const params = new URLSearchParams(keptParams(form));
+    return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
+  });
+
+  /**
+   * Tagging, and untagging.
+   *
+   * One field adds, the other removes, and both are separate forms rather than
+   * a single one with a mode, because a form with a hidden mode is a form that
+   * eventually does the other thing.
+   */
+  app.post('/r/:readToken/board/labels', { schema: { hide: true } }, async (request, reply) => {
+    if (!limitWrites(request, reply)) return reply;
+    const { readToken } = request.params as { readToken: string };
+    const form = (request.body ?? {}) as {
+      slug?: string;
+      add?: string;
+      remove?: string;
+      owner?: string;
+      agent?: string;
+      label?: string;
+      q?: string;
+    };
+    const project = await store.projects.findOne({ readToken });
+    if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
+    if (!(await readableBy(store, request, project))) {
+      throw new ServiceError(404, 'not_found', 'No such project.');
+    }
+    if (!form.slug) throw new ServiceError(400, 'bad_request', 'Which item?');
+
+    const add = (form.add ?? '').trim().slice(0, 48);
+    const remove = (form.remove ?? '').trim().slice(0, 48);
+    if (add !== '' || remove !== '') {
+      await relabelItem(store, project, form.slug, {
+        ...(add !== '' ? { add: [add] } : {}),
+        ...(remove !== '' ? { remove: [remove] } : {}),
+      });
+      // The change and who made it, in the record. A board where labels move
+      // by themselves is a board that argues with its own timeline.
+      await appendNote(
+        store,
+        project,
+        form.slug,
+        'operator',
+        add !== '' ? `tagged ${add}` : `untagged ${remove}`,
+      );
+    }
+    const params = new URLSearchParams(keptParams(form));
+    return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
+  });
+
   app.post('/r/:readToken/board/move', { schema: { hide: true } }, async (request, reply) => {
     if (!limitWrites(request, reply)) return reply;
     const { readToken } = request.params as { readToken: string };
@@ -824,6 +932,8 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`)}
       column?: string;
       owner?: string;
       agent?: string;
+      label?: string;
+      q?: string;
     };
     const project = await store.projects.findOne({ readToken });
     if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
@@ -846,8 +956,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`)}
     const params = new URLSearchParams({
       moved: result.item.slug,
       landed: result.landedIn ?? '',
-      ...(form.owner ? { owner: form.owner.slice(0, 48) } : {}),
-      ...(form.agent ? { agent: form.agent.slice(0, 48) } : {}),
+      ...keptParams(form),
     });
     return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
   });
