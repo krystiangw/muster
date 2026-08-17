@@ -318,6 +318,14 @@ describe('the mark', () => {
     assert.match(page.body, /<link rel="icon" href="\/favicon.ico"/);
     assert.match(page.body, /<link rel="apple-touch-icon" href="\/apple-touch-icon.png">/);
 
+    // A browser fetches a favicon under the page's own image policy, so a
+    // policy that forgets 'self' leaves every tab blank while the route below
+    // answers 200 to anything that asks directly.
+    assert.match(
+      page.headers['content-security-policy'] as string,
+      /img-src 'self' data:/,
+    );
+
     const svg = await harness.server.inject({ method: 'GET', url: '/favicon.svg' });
     assert.equal(svg.statusCode, 200);
     assert.match(svg.headers['content-type'] as string, /image\/svg\+xml/);

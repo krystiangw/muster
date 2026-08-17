@@ -44,8 +44,23 @@ const client = new MongoClient(uri, { serverSelectionTimeoutMS: 10_000 });
 await client.connect();
 const db = client.db(process.env.MONGODB_DB || 'muster');
 
-/** Everything that carries a projectId, so nothing is left orphaned. */
-const OWNED = ['items', 'agents', 'escalations', 'apiKeys', 'claimCodes', 'shares', 'events'];
+/**
+ * Everything that carries a projectId, so nothing is left orphaned.
+ *
+ * `oauthClients` is the one that is easy to forget: a project created through
+ * RFC 7591 registration has a client credential keyed to it, and leaving that
+ * behind leaves a credential for a project that no longer exists.
+ */
+const OWNED = [
+  'items',
+  'agents',
+  'escalations',
+  'apiKeys',
+  'claimCodes',
+  'shares',
+  'oauthClients',
+  'events',
+];
 
 const summarise = (project) =>
   [

@@ -85,9 +85,13 @@ Serwis nie wysyłał żadnego. Strony nie mają ani jednej linijki JavaScriptu, 
 czyni politykę nietypowo **ostrą**, a nie luźną:
 
 ```
-default-src 'none'; style-src 'unsafe-inline'; img-src data:;
+default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:;
 form-action 'self'; base-uri 'none'; frame-ancestors 'none'
 ```
+
+`img-src 'self'` doszło razem z ikoną serwisu: przeglądarka pobiera favicon
+pod polityką obrazków strony, więc polityka bez `'self'` zostawiała pustą
+kartę w każdej zakładce, mimo że trasa ikony odpowiadała 200.
 
 Dwa człony są tu nośne: `frame-ancestors 'none'`, bo strony capability niosą
 formularze jednym kliknięciem przyjmujące projekt albo przesuwające kartę,

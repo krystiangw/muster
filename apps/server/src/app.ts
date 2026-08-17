@@ -100,7 +100,10 @@ export async function buildApp(
     reply.header('cross-origin-opener-policy', 'same-origin');
     reply.header(
       'content-security-policy',
-      "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+      // `img-src 'self'` is for the favicon and nothing else. A browser fetches
+      // it under the page's image policy, so a policy of `data:` alone leaves
+      // every tab showing the blank sheet while the icon route answers 200.
+      "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
     );
     // Only meaningful over TLS, and the deploy terminates TLS at the router.
     if (request.headers['x-forwarded-proto'] === 'https') {
