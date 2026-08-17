@@ -212,6 +212,10 @@ export function layout(options: LayoutOptions, body: string): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(options.title)}</title>
 ${options.description ? `<meta name="description" content="${escapeHtml(options.description)}">` : ''}
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="theme-color" content="#0e5f59">
 <style>${CSS}</style>
 </head>
 <body>

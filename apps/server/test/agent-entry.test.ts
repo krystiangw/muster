@@ -310,3 +310,45 @@ describe('the human read view', () => {
     }
   });
 });
+
+describe('the mark', () => {
+  it('serves an icon in three shapes, and points every page at them', async () => {
+    const page = await harness.server.inject({ method: 'GET', url: '/' });
+    assert.match(page.body, /<link rel="icon" href="\/favicon.svg" type="image\/svg\+xml">/);
+    assert.match(page.body, /<link rel="icon" href="\/favicon.ico"/);
+    assert.match(page.body, /<link rel="apple-touch-icon" href="\/apple-touch-icon.png">/);
+
+    const svg = await harness.server.inject({ method: 'GET', url: '/favicon.svg' });
+    assert.equal(svg.statusCode, 200);
+    assert.match(svg.headers['content-type'] as string, /image\/svg\+xml/);
+    assert.equal(
+      svg.body.match(/<rect/g)?.length,
+      4,
+      'the tile and its three columns',
+    );
+
+    // A favicon.ico that 404s is the single most requested missing file on any
+    // site, and it is the one browsers ask for without being told to.
+    const ico = await harness.server.inject({ method: 'GET', url: '/favicon.ico' });
+    assert.equal(ico.statusCode, 200);
+    assert.match(ico.headers['content-type'] as string, /image\/x-icon/);
+    const icoBytes = ico.rawPayload;
+    assert.deepEqual([...icoBytes.subarray(0, 4)], [0, 0, 1, 0], 'an icon, not a cursor');
+    assert.equal(icoBytes.readUInt16LE(4), 3, 'three frames: 16, 32 and 48');
+    assert.deepEqual(
+      [icoBytes[6], icoBytes[22], icoBytes[38]],
+      [16, 32, 48],
+      'in that order',
+    );
+
+    const png = await harness.server.inject({ method: 'GET', url: '/apple-touch-icon.png' });
+    assert.equal(png.statusCode, 200);
+    assert.match(png.headers['content-type'] as string, /image\/png/);
+    assert.deepEqual(
+      [...png.rawPayload.subarray(0, 8)],
+      [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a],
+      'a real PNG rather than an empty body with a hopeful header',
+    );
+    assert.equal(png.rawPayload.readUInt32BE(16), 180, '180 square, which is what iOS wants');
+  });
+});

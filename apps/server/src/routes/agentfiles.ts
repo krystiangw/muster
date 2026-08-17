@@ -10,6 +10,7 @@ import {
   robotsTxt,
   skillMd,
 } from '../content.js';
+import { APPLE_TOUCH_PNG, FAVICON_ICO, FAVICON_SVG } from '../favicon.js';
 
 /**
  * The agent-facing surface. Every file here is static text generated once at
@@ -53,6 +54,26 @@ export function registerAgentFiles(app: FastifyInstance, config: Config, store: 
 
   app.get('/robots.txt', { schema: { hide: true } }, (_request, reply) =>
     reply.type('text/plain; charset=utf-8').send(robots),
+  );
+
+  // The mark. A year is the conventional cache for something whose bytes never
+  // change, and these do not: regenerating the icon changes the deploy, and a
+  // tab that keeps the old one for a while is nobody's incident.
+  const icon = (type: string, body: string | Buffer) => (_request: unknown, reply: any) =>
+    reply
+      .type(type)
+      .header('cache-control', 'public, max-age=31536000, immutable')
+      .send(body);
+
+  app.get('/favicon.svg', { schema: { hide: true } }, icon('image/svg+xml', FAVICON_SVG));
+  app.get('/favicon.ico', { schema: { hide: true } }, icon('image/x-icon', FAVICON_ICO));
+  app.get('/apple-touch-icon.png', { schema: { hide: true } }, icon('image/png', APPLE_TOUCH_PNG));
+  // iOS asks for this one by name on some versions, and a 404 there means the
+  // home screen gets a screenshot of the page instead of the mark.
+  app.get(
+    '/apple-touch-icon-precomposed.png',
+    { schema: { hide: true } },
+    icon('image/png', APPLE_TOUCH_PNG),
   );
 
   app.get('/sitemap.xml', { schema: { hide: true } }, (_request, reply) => {
