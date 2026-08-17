@@ -22,6 +22,21 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
+
       # The suite starts its own mongod through mongodb-memory-server, so there
       # is no service container here and nothing to keep in step with Heroku.
+      # It does mean the test files race each other for the binary the first
+      # time a runner sees it: node:test runs them in parallel, they all miss
+      # the cache, and the download lock breaks with "not locked by this
+      # process". So the binary is cached, and fetched once before the suite
+      # starts when the cache is cold.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/mongodb-binaries
+          key: mongod-${{ runner.os }}
+      - name: Fetch mongod once, before the suite races for it
+        working-directory: apps/server
+        run: >
+          node -e "import('mongodb-memory-server').then(async (m) => {
+          const s = await m.MongoMemoryServer.create(); await s.stop(); })"
       - run: pnpm test
