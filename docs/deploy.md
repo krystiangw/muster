@@ -60,6 +60,41 @@ required field is one a strict client throws away.
 The repo already carries `Procfile`, `app.json` and a `heroku-postbuild` script,
 and pnpm comes from the `packageManager` field, exactly like `equity-analyst-web`.
 
+## 3b. What runs beside it
+
+Two things run on the operator's machine rather than on the dyno, because both
+have to survive the dyno:
+
+```bash
+mkdir -p ~/.muster/logs
+crontab -e   # or the two lines below appended
+# 17 3 * * *    ~/.muster/backup.sh   >> ~/.muster/logs/backup.log   2>&1  # muster-backup
+# */15 * * * *  ~/.muster/watchdog.sh >> ~/.muster/logs/watchdog.log 2>&1  # muster-watchdog
+```
+
+`backup.sh` runs `apps/server/tools/backup.mjs`, which writes every collection
+as one gzipped JSON file to `~/.muster/backups` and keeps the last seven. The
+free Atlas tier takes no snapshots, so until somebody pays for one this is the
+only copy that exists. Restoring is the same tool:
+
+```bash
+MONGODB_DB=muster-scratch node apps/server/tools/backup.mjs --restore <file> --yes
+```
+
+It refuses without `--yes`, and refuses again if the target database already
+holds projects, because the realistic accident is restoring over production
+instead of into a copy. Test the restore, not the backup: an archive nobody has
+read back is a guess.
+
+`watchdog.sh` runs `apps/server/tools/watchdog.mjs` every quarter of an hour.
+It reads a real project through the API rather than `/health`, which answers
+without touching the database and therefore stays green through the failure
+that matters most. It alerts on the second consecutive miss, once per outage,
+by email through the mail provider, which shares nothing with the dyno or the
+database: an alert that travels through the thing it watches is not an alert.
+It also files an escalation on the board, best effort, because a partial outage
+is the common case and the note belongs with the work.
+
 ## 4. Domain to the dyno
 
 ```bash
