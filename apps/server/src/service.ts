@@ -1378,7 +1378,21 @@ export async function answerEscalation(
   // question at once produce one transition and one accounting entry.
   const doc = await store.escalations.findOneAndUpdate(
     { projectId, _id: id, status: before.status },
-    { $set: { status, answer, answeredAt: now, updatedAt: now } },
+    {
+      $set: {
+        status,
+        answer,
+        answeredAt: now,
+        updatedAt: now,
+        // A new answer is a new decision, so whatever an agent did about the
+        // old one no longer counts as having acted on this. Leaving it set
+        // would keep the question out of that agent's inbox and refuse its
+        // acknowledgement, and the second decision would never reach anybody.
+        acknowledgedAt: null,
+        acknowledgedBy: null,
+        acknowledgedNote: null,
+      },
+    },
     { returnDocument: 'after' },
   );
 

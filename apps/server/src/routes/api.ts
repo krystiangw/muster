@@ -9,6 +9,7 @@ import {
   BOARD_PRESETS,
   boardConfigOf,
   boardFacets,
+  boardWarnings,
   loadBoard,
   moveItem,
   parseBoardConfig,
@@ -698,7 +699,12 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         const config = parseBoardConfig(request.body);
         await store.projects.updateOne({ _id: project._id }, { $set: { board: config } });
         const updated = await store.projects.findOne({ _id: project._id });
-        return { board: boardConfigJson(boardConfigOf(updated!)) };
+        // Saved, and then told what it will do. A layout is a filter, so a legal
+        // one is never refused; the trap it can hide is worth one sentence.
+        return {
+          board: boardConfigJson(boardConfigOf(updated!)),
+          warnings: boardWarnings(config),
+        };
       },
     );
 

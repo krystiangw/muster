@@ -3,6 +3,7 @@ import type { Config } from '../config.js';
 import type { Store } from '../db.js';
 import type { Mailer } from '../email.js';
 import { chip, escapeHtml, formatWhen, layout } from '../html.js';
+import { who } from '../identity.js';
 import { hashToken, newId, newOtpCode } from '../ids.js';
 import type { RateLimiter } from '../rateLimit.js';
 import {
@@ -592,6 +593,14 @@ ${
                  <span class="who">${escapeHtml(doc.status)}</span>
                  <span>${escapeHtml(doc.question)}${
                    doc.answer ? `<br><span style="color:var(--ink-2)">${escapeHtml(doc.answer)}</span>` : ''
+                 }${
+                   // Whether it landed. This is the page most answers are
+                   // written on, so it is the page that owes the answer back.
+                   doc.acknowledgedAt
+                     ? `<br><span class="why">${who(doc.acknowledgedBy ?? 'an agent')} acted ${escapeHtml(
+                         formatWhen(doc.acknowledgedAt),
+                       )}${doc.acknowledgedNote ? `: ${escapeHtml(doc.acknowledgedNote)}` : ''}</span>`
+                     : ''
                  }</span></li>`,
             )
             .join('')}</ul>`

@@ -816,6 +816,34 @@ function parseApply(raw: unknown, columnKey: string): BoardApply {
   return apply;
 }
 
+/**
+ * What a layout is about to do that its author probably did not mean.
+ *
+ * Warnings, never refusals: a column is a filter, and refusing a legal filter
+ * because it looks odd is how a board layout turns into a second rulebook. The
+ * one that keeps happening is a column matched on a label with no status
+ * constraint, standing before the column that catches finished work. Because
+ * the board is a partition and the first match wins, closed items stay in it
+ * forever, and the author finds out weeks later when "Waiting on the operator"
+ * is full of things nobody is waiting for. It happened here on day one.
+ */
+export function boardWarnings(config: BoardConfig): string[] {
+  const warnings: string[] = [];
+  const terminalColumn = config.columns.findIndex((column) =>
+    (column.match.status ?? []).some((status) => TERMINAL_STATUSES.includes(status)),
+  );
+  config.columns.forEach((column, index) => {
+    const matchesLabel = (column.match.labels ?? []).length > 0;
+    const constrainsStatus = (column.match.status ?? []).length > 0;
+    if (matchesLabel && !constrainsStatus && terminalColumn !== -1 && index < terminalColumn) {
+      warnings.push(
+        `"${column.title}" matches a label without naming a status, and stands before "${config.columns[terminalColumn]!.title}". Finished work keeps the label, so it will stay here rather than move on. Add "status": ["open", "blocked"] to that column.`,
+      );
+    }
+  });
+  return warnings;
+}
+
 export function parseBoardConfig(raw: unknown): BoardConfig {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
     throw bad('A board is an object with "columns" and optional "rows".');

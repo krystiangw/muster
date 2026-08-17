@@ -324,6 +324,22 @@ describe('keeping the token', () => {
   });
 });
 
+describe('the map it hands out', () => {
+  it('names paths that answer, rather than only a pattern', async () => {
+    const robots = await harness.server.inject({ method: 'GET', url: '/robots.txt' });
+    const allowed = [...robots.body.matchAll(/^Allow: (\/.+)$/gm)].map((m) => m[1]!);
+    const concrete = allowed.filter((path) => path !== '/');
+    assert.ok(concrete.length >= 8, 'a map with no places on it is not a map');
+
+    // Every one of them is a claim, and a claim an agent follows into a 404 is
+    // budget it spent on our map being wrong.
+    for (const path of concrete) {
+      const answer = await harness.server.inject({ method: 'GET', url: path });
+      assert.equal(answer.statusCode, 200, `${path} is named in robots.txt`);
+    }
+  });
+});
+
 describe('the source', () => {
   it('is linked from every page, and the site can prove it is ours', async () => {
     const page = await harness.server.inject({ method: 'GET', url: '/' });

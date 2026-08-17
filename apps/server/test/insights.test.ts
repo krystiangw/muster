@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { runMigrations } from '../src/db.js';
 import { flushEvents, insights } from '../src/events.js';
-import { authed, createProject, startHarness, type Harness, type Project } from './helper.js';
+import { authed, createProject, signIn, startHarness, type Harness, type Project } from './helper.js';
 
 /**
  * The numbers that say whether the front door works. Everything else about
@@ -240,6 +240,33 @@ describe('what the service knows about its own use', () => {
     const { record } = await import('../src/events.js');
     assert.doesNotThrow(() => record(broken as never, 'discover', { door: 'http' }));
     await new Promise((resolve) => setTimeout(resolve, 10));
+  });
+});
+
+describe('who owns what', () => {
+  it('counts a project accepted from an agent as claimed, like one claimed with a code', async () => {
+    const project = await createProject(harness, 'handed over');
+    const before = (await insights(harness.store)).funnel.claimed;
+
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/share`,
+      headers: authed(project),
+      payload: { email: 'owner@example.com', agent: 'a' },
+    });
+    const share = await harness.store.shares.findOne({ projectId: project.id });
+    const session = await signIn(harness, 'owner@example.com');
+    await harness.server.inject({
+      method: 'POST',
+      url: `/operator/shares/${share!._id}`,
+      payload: session.form({ action: 'accept' }),
+      headers: session.headers,
+    });
+    await flushEvents();
+
+    // The handover is the path our own documentation recommends, so a funnel
+    // that counted only the code path understated the thing it measures.
+    assert.equal((await insights(harness.store)).funnel.claimed, before + 1);
   });
 });
 

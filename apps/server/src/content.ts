@@ -428,6 +428,20 @@ export function robotsTxt(config: Config): string {
   return `User-agent: *
 Allow: /
 
+# Named rather than implied. "Allow: /" is a pattern, and a pattern is not a
+# claim anybody can check: an agent following a map wants to know which paths
+# are worth a request, and every one of these answers.
+Allow: /skill.md
+Allow: /agent-signup.md
+Allow: /llms.txt
+Allow: /openapi.json
+Allow: /docs
+Allow: /docs/keys
+Allow: /pricing
+Allow: /signup
+Allow: /.well-known/agent-access.json
+Allow: /.well-known/mcp.json
+
 # On-demand agent fetchers are explicitly welcome. That is the whole product.
 User-agent: ChatGPT-User
 Allow: /

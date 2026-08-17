@@ -1236,3 +1236,43 @@ describe('acting on a card without a script', () => {
     assert.ok(!items.some((i: { slug: string }) => i.slug === 'never-existed'));
   });
 });
+
+describe('a layout that would trap finished work', () => {
+  it('is saved and then explained, rather than refused', async () => {
+    const project = await createProject(harness, 'trapped');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    // A label column standing before the column that catches closed work: the
+    // board is a partition, so a finished item keeps its label and stays here.
+    const saved = await put(project, '/board', {
+      rows: 'none',
+      columns: [
+        { key: 'waiting', title: 'Waiting on the operator', match: { labels: ['waiting'] } },
+        { key: 'done', title: 'Done', match: { status: ['done'] } },
+      ],
+    });
+    assert.equal(saved.statusCode, 200);
+    assert.equal(saved.json().warnings.length, 1, 'a filter is never refused, only explained');
+    assert.match(saved.json().warnings[0], /Waiting on the operator/);
+    assert.match(saved.json().warnings[0], /status/);
+
+    // And the page says it whenever somebody looks, not only after saving.
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(page.body, /Finished work keeps the label/);
+  });
+
+  it('says nothing when the same column names its statuses', async () => {
+    const project = await createProject(harness, 'careful');
+    const saved = await put(project, '/board', {
+      rows: 'none',
+      columns: [
+        {
+          key: 'waiting',
+          title: 'Waiting',
+          match: { labels: ['waiting'], status: ['open', 'blocked'] },
+        },
+        { key: 'done', title: 'Done', match: { status: ['done'] } },
+      ],
+    });
+    assert.deepEqual(saved.json().warnings, []);
+  });
+});

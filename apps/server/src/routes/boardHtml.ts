@@ -477,9 +477,17 @@ export function renderBoardFilters(view: BoardView, facets: BoardFacets, action:
 </form>`;
 }
 
-export function renderBoardSettings(project: ProjectDoc, view: BoardView, action: string): string {
+export function renderBoardSettings(
+  project: ProjectDoc,
+  view: BoardView,
+  action: string,
+  warnings: string[] = [],
+): string {
   const current = JSON.stringify(boardConfigJson(view.config), null, 2);
   return `<h2>Layout</h2>
+${warnings
+  .map((warning) => `<div class="notice warn">${escapeHtml(warning)}</div>`)
+  .join('\n')}
 <p>A column is a name and a filter over what an item already is: its status, its labels, its owner,
 whether somebody holds it, whether it went stale, where it came from. There is deliberately no way
 to invent a status here. That is what keeps a board with six columns from turning into six values

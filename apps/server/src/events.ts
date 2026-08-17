@@ -292,7 +292,11 @@ export async function insights(store: Store): Promise<Insights> {
       ])
       .toArray(),
     store.events.countDocuments({ kind: 'first_write' }),
-    store.events.countDocuments({ kind: 'claim' }),
+    // Both doors into ownership. A project handed over by an agent and accepted
+    // by a person is owned exactly as much as one claimed with a code, and the
+    // handover is the path our own documentation recommends, so counting only
+    // the code path made the funnel understate the thing it exists to measure.
+    store.events.countDocuments({ kind: { $in: ['claim', 'accept'] } }),
     store.events
       .aggregate<{ _id: string; count: number }>([
         { $match: { kind: 'signup' } },

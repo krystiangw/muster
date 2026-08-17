@@ -8,6 +8,7 @@ import {
   loadBoard,
   moveItem,
   parseBoardConfig,
+  boardWarnings,
   type BoardView,
 } from '../board.js';
 import type { Config } from '../config.js';
@@ -797,7 +798,7 @@ ${renderBoard(view, {
   ...(notice ? { notice } : {}),
 })}
 
-${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`)}
+${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardWarnings(view.config))}
 `;
     return reply
       .type('text/html; charset=utf-8')
@@ -864,6 +865,10 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`)}
     }
 
     await store.projects.updateOne({ _id: project._id }, { $set: { board: config } });
+    // No message in the URL. The board recomputes what this layout will do from
+    // the layout itself, every time it is drawn, which is both safer and more
+    // useful: the trap is visible whenever somebody looks, not only in the
+    // second after they saved.
     return reply.redirect(`/r/${readToken}/board`, 303);
   });
 

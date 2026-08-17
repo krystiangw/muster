@@ -65,7 +65,7 @@ const [
   count(events, { kind: 'signup' }),
   events.aggregate([{ $match: { kind: 'register', projectId: { $ne: null } } }, { $group: { _id: '$projectId' } }, { $count: 'n' }]).toArray(),
   count(events, { kind: 'first_write' }),
-  count(events, { kind: 'claim' }),
+  count(events, { kind: { $in: ['claim', 'accept'] } }),
   events.aggregate([{ $match: { kind: 'signup' } }, { $group: { _id: '$door', n: { $sum: 1 } } }]).toArray(),
   events.aggregate([{ $match: { kind: 'discover' } }, { $group: { _id: '$detail', n: { $sum: 1 } } }, { $sort: { n: -1 } }]).toArray(),
   count(projects),

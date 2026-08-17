@@ -610,4 +610,28 @@ describe('saying an answer was acted on', () => {
     assert.match(page.body, /acted/);
     assert.match(page.body, /bridged and verified/);
   });
+
+  it('lets a reopened question be answered and acted on again', async () => {
+    // A new answer is a new decision. Leaving the old acknowledgement in place
+    // would keep the question out of the agent's inbox and refuse the second
+    // acknowledgement, so the second decision would reach nobody.
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const answer = async (status: string, text: string) =>
+      harness.server.inject({
+        method: 'POST',
+        url: `/r/${readToken}/escalations/${id}`,
+        payload: new URLSearchParams({ status, answer: text }).toString(),
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      });
+
+    await answer('open', '');
+    await answer('answered', 'Actually, wait for the direct withdraw.');
+
+    const waiting = (await get(project, '/inbox?agent=a')).json().answers;
+    assert.ok(waiting.some((a: { id: string }) => a.id === id), 'the new decision is offered again');
+
+    const acted = await post(project, `/escalations/${id}/ack`, { agent: 'a', note: 'waited' });
+    assert.equal(acted.statusCode, 200);
+    assert.match(acted.json().escalation.acted_note, /waited/);
+  });
 });
