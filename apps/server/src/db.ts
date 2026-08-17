@@ -54,6 +54,21 @@ export interface OperatorSessionDoc {
   expiresAt: Date;
 }
 
+/**
+ * The names one person answers to in an item's `owner` field.
+ *
+ * `owner` is free text an agent wrote, usually a first name, and the operator
+ * is an email address. Nothing connects the two until somebody says so, which
+ * is what this is: a short list per address, declared once, so "everything
+ * waiting on me" can mean the work as well as the questions.
+ */
+export interface OperatorAliasDoc {
+  _id: string;
+  email: string;
+  aliases: string[];
+  updatedAt: Date;
+}
+
 /** A six digit code that lets somebody start a session with their address. */
 export interface OperatorCodeDoc {
   _id: string;
@@ -72,6 +87,7 @@ export interface Store {
   operatorTokens: Collection<OperatorTokenDoc>;
   operatorSessions: Collection<OperatorSessionDoc>;
   operatorCodes: Collection<OperatorCodeDoc>;
+  operatorAliases: Collection<OperatorAliasDoc>;
   agents: Collection<Expiring<AgentDoc>>;
   items: Collection<Expiring<ItemDoc>>;
   escalations: Collection<Expiring<EscalationDoc>>;
@@ -100,6 +116,7 @@ export async function createStore(uri: string, dbName: string): Promise<Store> {
     operatorTokens: db.collection<OperatorTokenDoc>('operatorTokens'),
     operatorSessions: db.collection<OperatorSessionDoc>('operatorSessions'),
     operatorCodes: db.collection<OperatorCodeDoc>('operatorCodes'),
+    operatorAliases: db.collection<OperatorAliasDoc>('operatorAliases'),
     agents: db.collection<Expiring<AgentDoc>>('agents'),
     items: db.collection<Expiring<ItemDoc>>('items'),
     escalations: db.collection<Expiring<EscalationDoc>>('escalations'),
@@ -199,6 +216,7 @@ export async function ensureIndexes(store: Store): Promise<void> {
       // The session ends on its own even if nobody logs out.
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
     ]),
+    store.operatorAliases.createIndexes([{ key: { email: 1 }, unique: true, name: 'email' }]),
     store.operatorCodes.createIndexes([
       // Unique, so two overlapping requests for the same address cannot leave
       // two live codes behind and make the newer email the one that fails.

@@ -408,6 +408,81 @@ describe('the operator view', () => {
     assert.equal(anonymous.statusCode, 401);
   });
 
+  it('gathers the work assigned to you from every project at once', async () => {
+    const fleet = await createProject(harness, 'fleet');
+    const sygnal = await createProject(harness, 'sygnal');
+    const theirs = await createProject(harness, 'theirs');
+    await claimFor(fleet, 'alex@example.com');
+    await claimFor(sygnal, 'alex@example.com');
+    await claimFor(theirs, 'kasia@example.com');
+
+    const item = (project: Project, payload: Record<string, unknown>) =>
+      harness.server.inject({
+        method: 'POST',
+        url: `${project.api}/items`,
+        headers: authed(project),
+        payload,
+      });
+
+    await item(fleet, { slug: 'mine-here', title: 'stuck withdraw', owner: 'alex', actor: 'a' });
+    await item(sygnal, { slug: 'mine-there', title: 'forecast drift', owner: 'alex', actor: 'a' });
+    await item(fleet, { slug: 'somebody-elses', title: 'not mine', owner: 'kasia', actor: 'a' });
+    await item(fleet, { slug: 'jammed', title: 'nobody can move this', status: 'blocked', actor: 'a' });
+    await item(theirs, { slug: 'other-project', title: 'in another board', owner: 'alex', actor: 'a' });
+
+    const session = await signIn(harness, 'alex@example.com');
+    const view = await harness.server.inject({
+      method: 'GET',
+      url: '/operator',
+      headers: { cookie: session.cookie },
+    });
+
+    assert.match(view.body, /Your work/);
+    assert.match(view.body, /stuck withdraw/, 'from one project');
+    assert.match(view.body, /forecast drift/, 'and from another');
+    assert.match(view.body, /nobody can move this/, 'blocked work is somebody’s to unblock');
+    assert.doesNotMatch(view.body, /not mine/, 'somebody else’s assignment is not mine');
+    assert.doesNotMatch(
+      view.body,
+      /in another board/,
+      'and a project I do not own is none of my business, whoever it names as owner',
+    );
+  });
+
+  it('lets somebody say which names are theirs', async () => {
+    const project = await createProject(harness, 'aliases');
+    await claimFor(project, 'k.nowak@example.com');
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'by-nickname', title: 'filed under a nickname', owner: 'kn', actor: 'a' },
+    });
+
+    const session = await signIn(harness, 'k.nowak@example.com');
+    const before = await harness.server.inject({
+      method: 'GET',
+      url: '/operator',
+      headers: { cookie: session.cookie },
+    });
+    assert.doesNotMatch(before.body, /filed under a nickname/, 'nothing connects the two yet');
+
+    const saved = await harness.server.inject({
+      method: 'POST',
+      url: '/operator/aliases',
+      payload: session.form({ aliases: 'kn, kg' }),
+      headers: session.headers,
+    });
+    assert.equal(saved.statusCode, 303);
+
+    const after = await harness.server.inject({
+      method: 'GET',
+      url: '/operator',
+      headers: { cookie: session.cookie },
+    });
+    assert.match(after.body, /filed under a nickname/);
+  });
+
   it('does not reveal whether an address owns anything', async () => {
     const unknown = await harness.server.inject({
       method: 'POST',

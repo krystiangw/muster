@@ -27,11 +27,11 @@ Watchdog czyta ten plik i podejmuje pierwszą niezaznaczoną pozycję.
   - [x] 3b. `owner` wymaga sesji z adresem równym `claimedBy` na `/r/<token>` i `/r/<token>/board`
   - [x] 3c. Przełącznik w widoku operatora i w API (`PATCH /v1/{project}`)
   - [x] 3d. Testy: obcy z linkiem dostaje 404, właściciel z sesją wchodzi, agent z tokenem nietknięty
-- [ ] 4. Przekrój "Twoja robota" ponad projektami
-  - [ ] 4a. Aliasy właściciela na koncie mailowym (na jakie nazwy w polu `owner` odpowiadasz)
-  - [ ] 4b. Sekcja w widoku operatora: otwarte itemy przypisane do Ciebie, ze wszystkich projektów
-  - [ ] 4c. Itemy zablokowane i te, których claim wygasł, też tam trafiają
-  - [ ] 4d. Testy: przekrój obejmuje wiele projektów i nie przecieka między właścicielami
+- [x] 4. Przekrój "Twoja robota" ponad projektami
+  - [x] 4a. Aliasy właściciela na koncie mailowym (na jakie nazwy w polu `owner` odpowiadasz)
+  - [x] 4b. Sekcja w widoku operatora: otwarte itemy przypisane do Ciebie, ze wszystkich projektów
+  - [x] 4c. Itemy zablokowane i te, których claim wygasł, też tam trafiają
+  - [x] 4d. Testy: przekrój obejmuje wiele projektów i nie przecieka między właścicielami
 - [ ] 5. Domknięcie
   - [ ] 5a. `/codex-review` na całości, znaleziska naprawione
   - [ ] 5b. Dokumentacja: `skill.md`, `/docs`, README, notatki projektowe

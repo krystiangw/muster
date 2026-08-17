@@ -90,6 +90,19 @@ and you can end that from the view itself.</p>
 `;
   }
 
+  /**
+   * The names in an item's `owner` field that mean this person.
+   *
+   * The local part of the address is offered for free, because "alex@" writing
+   * `owner: "alex"` is the overwhelmingly common case and asking somebody to
+   * configure that would be asking them to state the obvious.
+   */
+  async function aliasesFor(email: string): Promise<string[]> {
+    const doc = await store.operatorAliases.findOne({ email });
+    const fromAddress = email.split('@')[0] ?? '';
+    return [...new Set([email, fromAddress, ...(doc?.aliases ?? [])])].filter(Boolean);
+  }
+
   // ------------------------------------------------------------- signing in
 
   app.get('/operator', { schema: { hide: true } }, async (request, reply) => {
@@ -320,7 +333,8 @@ and you can end that from the view itself.</p>
       .toArray();
     const offeredById = new Map(offered.map((project) => [project._id, project]));
 
-    const [waiting, recent, staleItems] = await Promise.all([
+    const aliases = await aliasesFor(session.email);
+    const [waiting, recent, staleItems, mine] = await Promise.all([
       store.escalations
         .find({ projectId: { $in: ids }, status: 'open' })
         // By urgency, then by age. Sorting on the word itself would put "high"
@@ -337,6 +351,19 @@ and you can end that from the view itself.</p>
         .find({ projectId: { $in: ids }, stale: true, status: { $nin: ['done', 'dropped'] } })
         .sort({ staleSince: 1 })
         .limit(20)
+        .toArray(),
+      // Work, as opposed to questions. Assigned to one of the names this person
+      // answers to, or blocked and therefore somebody's to unblock, across
+      // every project at once. Blocked items count whoever owns them, because a
+      // board where nothing moves is the operator's problem by definition.
+      store.items
+        .find({
+          projectId: { $in: ids },
+          status: { $nin: ['done', 'dropped'] },
+          $or: [{ owner: { $in: aliases } }, { status: 'blocked' }],
+        })
+        .sort({ priority: -1, updatedAt: -1 })
+        .limit(40)
         .toArray(),
     ]);
 
@@ -403,6 +430,40 @@ ${offers
 </div>`;
   })
   .join('')}`
+    }
+
+${
+      mine.length === 0
+        ? ''
+        : `<h2>Your work</h2>
+<p style="color:var(--ink-2)">Assigned to ${escapeHtml(aliases.join(', '))}, or blocked and waiting
+for somebody to unblock it. Across every project, because the work does not care which board it
+lives on.</p>
+<div class="scroll"><table>
+<thead><tr><th>Project</th><th>Item</th><th>State</th><th>Last touched</th></tr></thead>
+<tbody>
+${mine
+  .map((item) => {
+    const held = item.claim && new Date(item.claim.expiresAt) > new Date();
+    return `<tr><td>${escapeHtml(names.get(item.projectId) ?? item.projectId)}</td>
+       <td>${escapeHtml(item.title || item.slug)}<br>
+           <span class="mono" style="color:var(--muted)">${escapeHtml(item.slug)}</span></td>
+       <td>${item.status === 'blocked' ? chip('blocked', 'blocked') : ''}
+           ${held ? chip(item.claim!.agent, 'claim') : ''}
+           ${item.stale ? chip('stale', 'stale') : ''}
+           ${item.owner ? chip(item.owner, 'dropped') : ''}</td>
+       <td class="mono">${escapeHtml(formatWhen(item.updatedAt))}</td></tr>`;
+  })
+  .join('\n')}
+</tbody></table></div>
+<p style="color:var(--muted);font-size:14px">Nothing here that should be? Tell it which names are
+yours.</p>
+<form class="row" method="post" action="/operator/aliases">
+  ${csrfField(session)}
+  <label>Names you answer to<input name="aliases" value="${escapeHtml(aliases.join(', '))}"
+    placeholder="alex, ak, alex.k"></label>
+  <button class="ghost" type="submit">Save</button>
+</form>`
     }
 
 <h2>Projects</h2>
@@ -569,6 +630,29 @@ curl -sX DELETE ${escapeHtml(config.baseUrl)}/v1/${escapeHtml(project._id)}/keys
     await updateProject(store, project._id, {
       visibility: form.visibility === 'owner' ? 'owner' : 'link',
     });
+    return reply.redirect('/operator', 303);
+  });
+
+  app.post('/operator/aliases', { schema: { hide: true } }, async (request, reply) => {
+    const session = await requireSession(request, reply);
+    if (!session) return reply;
+    checkCsrf(session, request.body);
+
+    const form = (request.body ?? {}) as { aliases?: string };
+    const aliases = [
+      ...new Set(
+        (form.aliases ?? '')
+          .split(',')
+          .map((alias) => alias.trim().slice(0, 48))
+          .filter(Boolean),
+      ),
+    ].slice(0, 12);
+
+    await store.operatorAliases.updateOne(
+      { email: session.email },
+      { $set: { aliases, updatedAt: new Date() }, $setOnInsert: { _id: newId('al'), email: session.email } },
+      { upsert: true },
+    );
     return reply.redirect('/operator', 303);
   });
 
