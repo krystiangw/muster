@@ -53,8 +53,13 @@ const MAX_CODE_ATTEMPTS = 5;
 export function registerOperator(app: FastifyInstance, deps: OperatorDeps): void {
   const { store, config, limiter, mailer } = deps;
 
-  const html = (reply: FastifyReply, title: string, body: string, code = 200) =>
-    reply.code(code).type('text/html; charset=utf-8').send(layout({ title }, body));
+  const html = (
+    reply: FastifyReply,
+    title: string,
+    body: string,
+    code = 200,
+    signedIn = false,
+  ) => reply.code(code).type('text/html; charset=utf-8').send(layout({ title, signedIn }, body));
 
   /** Every action below belongs to whoever is signed in, and to nobody else. */
   async function requireSession(
@@ -76,10 +81,10 @@ export function registerOperator(app: FastifyInstance, deps: OperatorDeps): void
 
   function signInForm(message?: string): string {
     return `
-<h1>Everything waiting on you</h1>
-<p class="lead">One page for every project you claimed, and every question your
-agents parked for a human. No account: your address is the identity, and a code
-proves it for this browser.</p>
+<h1>Sign in</h1>
+<p class="lead">One page for every project you claimed, and everything waiting on
+you across all of them. There is no account and no password: your address is the
+identity, and a code sent to it proves this browser is yours.</p>
 ${message ? `<p class="notice">${escapeHtml(message)}</p>` : ''}
 <form method="post" action="/operator">
   <label>Email
@@ -110,8 +115,8 @@ and you can end that from the view itself.</p>
 
   app.get('/operator', { schema: { hide: true } }, async (request, reply) => {
     const session = await readSession(store, request);
-    if (!session) return html(reply, 'Muster operator view', signInForm());
-    return html(reply, 'Muster operator view', await renderView(session));
+    if (!session) return html(reply, 'Sign in to Muster', signInForm());
+    return html(reply, 'Your Muster projects', await renderView(session), 200, true);
   });
 
   app.post('/operator', { schema: { hide: true } }, async (request, reply) => {

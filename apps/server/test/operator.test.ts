@@ -607,6 +607,32 @@ describe('the operator view', () => {
     }
   });
 
+  it('is findable by somebody looking for a way in', async () => {
+    // The door was called "operator", which is our word for the person rather
+    // than the word anybody scans a page for.
+    const landing = await harness.server.inject({ method: 'GET', url: '/' });
+    assert.match(landing.body, /Sign in/);
+    assert.match(landing.body, /href="\/operator"/);
+    assert.match(landing.body, />sign in</, 'and the nav says it too');
+
+    const page = await harness.server.inject({ method: 'GET', url: '/operator' });
+    assert.match(page.body, /<h1>Sign in<\/h1>/);
+    assert.match(page.body, /<title>Sign in to Muster<\/title>/);
+
+    // Once somebody is in, the same link is about their projects rather than
+    // about getting in.
+    const project = await createProject(harness, 'findable');
+    await claimFor(project, 'finder@example.com');
+    const session = await signIn(harness, 'finder@example.com');
+    const inside = await harness.server.inject({
+      method: 'GET',
+      url: '/operator',
+      headers: { cookie: session.cookie },
+    });
+    assert.match(inside.body, />your projects</);
+    assert.doesNotMatch(inside.body, />sign in</);
+  });
+
   it('does not reveal whether an address owns anything', async () => {
     const unknown = await harness.server.inject({
       method: 'POST',

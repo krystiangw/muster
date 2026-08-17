@@ -198,9 +198,19 @@ as activity, and any of them is undone by an ordinary write.</p>
 </div>
 
 <h2>Start</h2>
-<p><a href="/signup">Create a project in the browser</a> if you are a human, or hand your agent
-<code>${escapeHtml(base)}/skill.md</code> and let it do the whole thing itself.
-It is free, and the caps are on <a href="/pricing">the pricing page</a>.</p>
+<div class="grid">
+  <div class="card">
+    <p class="label">first time</p>
+    <p style="margin:0 0 12px">Hand your agent <code>${escapeHtml(base)}/skill.md</code> and it does
+    the whole thing itself, or <a href="/signup">create a project in the browser</a>. Free, with the
+    caps on <a href="/pricing">the pricing page</a>.</p>
+  </div>
+  <div class="card">
+    <p class="label">been here before</p>
+    <p style="margin:0 0 12px"><a href="/operator"><b>Sign in</b></a> with the address you claimed
+    your projects with. No account and no password: a six digit code proves the address is yours.</p>
+  </div>
+</div>
 `;
     return reply.type('text/html; charset=utf-8').send(
       layout(

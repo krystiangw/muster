@@ -195,6 +195,12 @@ export interface LayoutOptions {
   nav?: boolean;
   /** Widens the column for a board, which needs room rather than 66 characters. */
   wide?: boolean;
+  /**
+   * Whether this page is being rendered for somebody already signed in. Only
+   * the nav label depends on it, and only pages that already hold a session
+   * pass it, so no page does a database read to decide what to call a link.
+   */
+  signedIn?: boolean;
 }
 
 export function layout(options: LayoutOptions, body: string): string {
@@ -218,7 +224,7 @@ ${
     <a href="/docs">docs</a>
     <a href="/skill.md">skill.md</a>
     <a href="/pricing">pricing</a>
-    <a href="/operator">operator</a>
+    <a href="/operator">${options.signedIn ? 'your projects' : 'sign in'}</a>
     <a href="/signup">start</a>
   </nav>
 </header>`
