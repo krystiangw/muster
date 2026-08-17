@@ -515,6 +515,35 @@ describe('moving an item into a column', () => {
     });
   });
 
+  it('rate limits writes through a read link, which is a shareable capability', async () => {
+    const isolated = await startHarness({ LIMIT_WRITES_PER_MINUTE: '2' });
+    try {
+      const project = await createProject(isolated, 'leaky');
+      await isolated.server.inject({
+        method: 'POST',
+        url: `${project.api}/items`,
+        headers: authed(project),
+        payload: { slug: 'card', title: 'card', actor: 'a' },
+      });
+      const readToken = project.readUrl.split('/r/')[1]!;
+      const move = () =>
+        isolated.server.inject({
+          method: 'POST',
+          url: `/r/${readToken}/board/move`,
+          payload: 'slug=card&column=doing',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        });
+
+      assert.equal((await move()).statusCode, 303);
+      assert.equal((await move()).statusCode, 303);
+      const third = await move();
+      assert.equal(third.statusCode, 429);
+      assert.ok(third.headers['retry-after'], 'and it says when to come back');
+    } finally {
+      await isolated.stop();
+    }
+  });
+
   it('moves a card from the board page without JavaScript', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'card', title: 'card', actor: 'a' });

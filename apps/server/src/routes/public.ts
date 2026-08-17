@@ -1,4 +1,4 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply } from 'fastify';
 import { BOARD_PRESETS, loadBoard, moveItem, parseBoardConfig } from '../board.js';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
@@ -564,7 +564,31 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`)}
       );
   });
 
+  /**
+   * The read link is a capability: whoever holds it lays the board out, answers
+   * questions and moves cards. That is deliberate, and it is also why these
+   * routes take the ordinary write limit. A leaked link should cost the project
+   * its privacy, not let somebody rewrite its timelines in a loop.
+   */
+  const limitWrites = (request: { params: unknown }, reply: FastifyReply): boolean => {
+    const { readToken } = request.params as { readToken: string };
+    const verdict = limiter.check(`rl:${readToken}`, config.rateLimits.write);
+    if (verdict.ok) return true;
+    void reply
+      .code(429)
+      .header('retry-after', String(verdict.retryAfterSeconds))
+      .type('text/html; charset=utf-8')
+      .send(
+        layout(
+          { title: 'Slow down' },
+          `<h1>Too many changes at once</h1><p>Try again in ${verdict.retryAfterSeconds} seconds.</p>`,
+        ),
+      );
+    return false;
+  };
+
   app.post('/r/:readToken/board', { schema: { hide: true } }, async (request, reply) => {
+    if (!limitWrites(request, reply)) return reply;
     const { readToken } = request.params as { readToken: string };
     const form = (request.body ?? {}) as { board?: string; preset?: string };
     const project = await store.projects.findOne({ readToken });
@@ -594,6 +618,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`)}
   });
 
   app.post('/r/:readToken/board/move', { schema: { hide: true } }, async (request, reply) => {
+    if (!limitWrites(request, reply)) return reply;
     const { readToken } = request.params as { readToken: string };
     const form = (request.body ?? {}) as { slug?: string; column?: string };
     const project = await store.projects.findOne({ readToken });
@@ -615,6 +640,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`)}
   });
 
   app.post('/r/:readToken/escalations/:id', { schema: { hide: true } }, async (request, reply) => {
+    if (!limitWrites(request, reply)) return reply;
     const { readToken, id } = request.params as { readToken: string; id: string };
     const form = (request.body ?? {}) as { status?: string; answer?: string };
     const project = await store.projects.findOne({ readToken });
