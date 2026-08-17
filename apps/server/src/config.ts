@@ -32,6 +32,7 @@ export interface Config {
   emailFrom: string;
   /** Support address published in the agent files. */
   contactEmail: string;
+  siteVerification: string;
   logLevel: string;
 }
 
@@ -85,6 +86,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     // sends every reply to a stranger, which is worse than offering
     // nobody to write to.
     contactEmail: env.CONTACT_EMAIL ?? '',
+    // Proving to a search console that this deployment is ours. Empty on a
+    // self-host, which then renders no tag at all rather than an empty one.
+    siteVerification: env.SITE_VERIFICATION ?? '',
     logLevel: env.LOG_LEVEL ?? 'info',
   };
 }

@@ -464,7 +464,9 @@ one does not.</p>
 
 <h2>Self-hosting</h2>
 <p>The server is source available and runs on Node and MongoDB. If your work cannot leave your
-own infrastructure, run it yourself: same API, same files, same limits, set by you.</p>
+own infrastructure, run it yourself: same API, same files, same limits, set by you. The code, the
+deployment runbook and the design notes are on
+<a href="https://github.com/krystiangw/muster">GitHub</a>.</p>
 
 <h2>Paid</h2>
 <p>Nothing yet. If a paid tier appears it will be for teams that need more than the free caps or

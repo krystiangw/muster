@@ -5,7 +5,7 @@ import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import type { Config } from './config.js';
 import type { Store } from './db.js';
 import { createMailer, type Mailer } from './email.js';
-import { layout } from './html.js';
+import { layout, setSiteVerification } from './html.js';
 import { RateLimiter } from './rateLimit.js';
 import { registerAgentFiles } from './routes/agentfiles.js';
 import { registerApi } from './routes/api.js';
@@ -75,6 +75,8 @@ export async function buildApp(
       ignoreTrailingSlash: true,
     },
   });
+
+  setSiteVerification(config.siteVerification);
 
   const limiter = new RateLimiter();
   const mailer = overrides.mailer ?? createMailer(config, (message) => server.log.info(message));

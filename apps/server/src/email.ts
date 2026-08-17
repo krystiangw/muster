@@ -60,7 +60,18 @@ export function createMailer(config: Config, log: (msg: string) => void): Mailer
         authorization: `Bearer ${config.resendApiKey}`,
         'content-type': 'application/json',
       },
-      body: JSON.stringify({ from: config.emailFrom, to: [to], subject, text: lines.join('\n') }),
+      body: JSON.stringify({
+        from: config.emailFrom,
+        to: [to],
+        subject,
+        text: lines.join('\n'),
+        // The sender can be a domain that only sends: a deployment sends from
+        // wherever its provider is verified, which is not always where anybody
+        // reads. Somebody replying to a sign in code is a person asking a
+        // question, and their reply should reach the address this deployment
+        // publishes rather than a mailbox nobody opens.
+        ...(config.contactEmail ? { reply_to: config.contactEmail } : {}),
+      }),
     });
     if (!response.ok) {
       const body = await response.text().catch(() => '');

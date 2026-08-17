@@ -311,6 +311,27 @@ describe('the human read view', () => {
   });
 });
 
+describe('the source', () => {
+  it('is linked from every page, and the site can prove it is ours', async () => {
+    const page = await harness.server.inject({ method: 'GET', url: '/' });
+    assert.match(page.body, /<a href="https:\/\/github\.com\/krystiangw\/muster">source on GitHub<\/a>/);
+    // A board page renders the same footer, so the link is not a landing-page
+    // decoration.
+    assert.doesNotMatch(page.body, /<meta name="google-site-verification"/);
+
+    const owned = await startHarness({ SITE_VERIFICATION: 'token-from-the-console' });
+    try {
+      const verified = await owned.server.inject({ method: 'GET', url: '/' });
+      assert.match(
+        verified.body,
+        /<meta name="google-site-verification" content="token-from-the-console">/,
+      );
+    } finally {
+      await owned.stop();
+    }
+  });
+});
+
 describe('the plugin manifest', () => {
   it('is published whole or not at all', async () => {
     // Its schema requires a contact and a logo. A manifest missing a required

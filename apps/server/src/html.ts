@@ -190,6 +190,19 @@ footer.bot { margin-top:56px; border-top:1px solid var(--rule); padding-top:16px
 @media (max-width:560px) { .timeline li { grid-template-columns:1fr; gap:2px; } }
 `;
 
+/**
+ * A search console's ownership token, set once at boot.
+ *
+ * It lives here rather than travelling through every layout call because it is
+ * a property of the deployment and not of any page: threading a constant
+ * through forty call sites is how a constant becomes a parameter nobody passes.
+ */
+let siteVerification = '';
+
+export function setSiteVerification(token: string): void {
+  siteVerification = token;
+}
+
 export interface LayoutOptions {
   title: string;
   description?: string;
@@ -202,6 +215,12 @@ export interface LayoutOptions {
    * pass it, so no page does a database read to decide what to call a link.
    */
   signedIn?: boolean;
+  /**
+   * A search console's ownership token, when the deployment has one. It is a
+   * meta tag rather than a DNS record because a self-host controls its own
+   * pages and may not control the zone.
+   */
+  verification?: string;
 }
 
 export function layout(options: LayoutOptions, body: string): string {
@@ -212,7 +231,7 @@ export function layout(options: LayoutOptions, body: string): string {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(options.title)}</title>
 ${options.description ? `<meta name="description" content="${escapeHtml(options.description)}">` : ''}
-<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+${(options.verification ?? siteVerification) ? `<meta name="google-site-verification" content="${escapeHtml(options.verification ?? siteVerification)}">\n` : ''}<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon.ico" sizes="48x48">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#0e5f59">
@@ -237,6 +256,7 @@ ${
 ${body}
 <footer class="bot">
   <span>Muster</span>
+  <a href="https://github.com/krystiangw/muster">source on GitHub</a>
   <a href="/llms.txt">llms.txt</a>
   <a href="/openapi.json">openapi.json</a>
   <a href="/.well-known/agent-access.json">agent-access.json</a>
