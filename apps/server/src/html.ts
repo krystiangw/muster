@@ -112,10 +112,16 @@ td .face { vertical-align:-3px; margin-right:4px; }
    sits in a frame that says "this is a picture of the product", and it never
    grows past the reading column the way a real board is allowed to. */
 .demo { border:1px solid var(--rule); border-radius:4px; background:var(--surface);
-  padding:14px 14px 4px; margin:0 0 14px; overflow:hidden; }
-.demo .cols { grid-auto-columns:236px; }
-.demo .col { max-height:none; }
+  padding:14px 14px 4px; margin:0 0 14px; }
+/* Sized so all four columns fit the reading column: a demonstration that has to
+   be scrolled sideways to be seen whole has demonstrated the wrong thing. */
+.demo .cols { grid-auto-columns:minmax(0,1fr); width:auto; gap:10px; }
+.demo .lane { width:auto; }
+.demo .col { max-height:none; min-width:0; padding:8px; }
 .demo .card { cursor:default; }
+.demo .card .t { font-size:13px; }
+.demo .who-chip { font-size:10.5px; padding:1px 6px 1px 2px; }
+@media (max-width:640px) { .demo .cols { grid-auto-flow:row; } }
 form { display:flex; flex-direction:column; gap:12px; max-width:440px; }
 form.row { flex-direction:row; align-items:flex-end; gap:10px; max-width:none; flex-wrap:wrap; }
 label { display:flex; flex-direction:column; gap:5px; font-size:14px; color:var(--ink-2); }
