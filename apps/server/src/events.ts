@@ -65,12 +65,23 @@ export const ANSWER_SAMPLE = 500;
 const inFlight = new Set<Promise<unknown>>();
 
 /**
- * Waits for everything started so far. Loops, because one of these writes can
- * start another: the activation guard reads the project, then records.
+ * Waits for everything started so far, but not forever.
+ *
+ * Loops, because one of these writes can start another: the activation guard
+ * reads the project, then records. Bounded, because shutdown awaits this and
+ * the driver has no socket timeout, so a write the database accepted and never
+ * finished would hold a dyno open until the platform killed it. Losing a
+ * telemetry record is the cheapest thing in this system.
  */
-export async function flushEvents(): Promise<void> {
+export async function flushEvents(timeoutMs = 2_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
   for (let round = 0; round < 5 && inFlight.size > 0; round += 1) {
-    await Promise.allSettled([...inFlight]);
+    const left = deadline - Date.now();
+    if (left <= 0) return;
+    await Promise.race([
+      Promise.allSettled([...inFlight]),
+      new Promise((resolve) => setTimeout(resolve, left).unref?.()),
+    ]);
   }
 }
 

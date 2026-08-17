@@ -172,14 +172,37 @@ export async function runMigrations(store: Store): Promise<void> {
    * Cheap after the first run: only projects still missing the marker are
    * considered, which by then is the ones created since boot with no items yet.
    */
-  const unmarked = await store.projects.distinct('_id', { firstWriteAt: { $exists: false } });
-  if (unmarked.length > 0) {
-    const written = await store.items.distinct('projectId', { projectId: { $in: unmarked } });
+  const BATCH = 500;
+  // Paged by id rather than by re-reading the filter. A project with no items
+  // never gets a marker, so it stays in the filter forever: without a cursor
+  // the same first page would come back every time and the loop would never
+  // reach the ones behind it. Collecting every id into a single $in is the
+  // other way to get this wrong, because past the command size limit it throws,
+  // and this runs before the server finishes booting.
+  let after: string | null = null;
+  for (;;) {
+    const page = await store.projects
+      .find(
+        {
+          firstWriteAt: { $exists: false },
+          ...(after === null ? {} : { _id: { $gt: after } }),
+        },
+        { projection: { _id: 1 } },
+      )
+      .sort({ _id: 1 })
+      .limit(BATCH)
+      .toArray();
+    if (page.length === 0) break;
+
+    const ids = page.map((project) => project._id);
+    const written = await store.items.distinct('projectId', { projectId: { $in: ids } });
     if (written.length > 0) {
       await store.projects.updateMany({ _id: { $in: written } }, [
         { $set: { firstWriteAt: '$createdAt' } },
       ]);
     }
+    after = ids[ids.length - 1]!;
+    if (page.length < BATCH) break;
   }
 }
 

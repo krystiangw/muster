@@ -166,6 +166,9 @@ describe('what the service knows about its own use', () => {
   it('does not count a project that predates the marker as newly activated', async () => {
     const project = await createProject(harness, 'from before');
     await post(project, '/items', { slug: 'old', title: 'written long ago', actor: 'x' });
+    // The seed's own activation is still in flight, and erasing the state it is
+    // about to write is how a regression test starts passing by accident.
+    await flushEvents();
 
     // The state a project deployed before this field was in: it has work, and
     // no marker. Without a backfill its next item records a second activation.
@@ -184,6 +187,29 @@ describe('what the service knows about its own use', () => {
     );
     const doc = await harness.store.projects.findOne({ _id: project.id });
     assert.ok(doc?.firstWriteAt, 'and it carries the marker afterwards');
+  });
+
+  it('backfills past projects that have no work at all', async () => {
+    // The page that never advances: projects with no items never get a marker,
+    // so a loop that re-reads the same filter sees them again every pass and
+    // never reaches the ones behind them.
+    const empty = [];
+    for (let index = 0; index < 3; index += 1) {
+      empty.push(await createProject(harness, `empty ${index}`));
+    }
+    const withWork = await createProject(harness, 'has work');
+    await post(withWork, '/items', { slug: 'something', title: 'something', actor: 'x' });
+    await flushEvents();
+
+    await harness.store.projects.updateMany({}, { $unset: { firstWriteAt: '' } });
+    await runMigrations(harness.store);
+
+    const marked = await harness.store.projects.findOne({ _id: withWork.id });
+    assert.ok(marked?.firstWriteAt, 'a project with work is marked');
+    for (const project of empty) {
+      const doc = await harness.store.projects.findOne({ _id: project.id });
+      assert.equal(doc?.firstWriteAt, undefined, 'and one without work is left alone');
+    }
   });
 
   it('holds nothing about a person', async () => {
