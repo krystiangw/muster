@@ -1,4 +1,4 @@
-import type { BoardFilter, BoardView } from '../board.js';
+import type { AgentFacet, BoardFacets, BoardFilter, BoardView } from '../board.js';
 import { BOARD_PRESETS, COLUMN_RENDER_LIMIT, applyForColumn } from '../board.js';
 import { boardConfigJson } from '../serialize.js';
 import { chip, escapeHtml, formatWhen } from '../html.js';
@@ -263,37 +263,95 @@ ${shown
  * The narrowing controls. A GET form, so the result is a URL somebody can keep:
  * an agent's own board is a bookmark, not a session.
  */
-export function renderBoardFilters(
-  view: BoardView,
-  facets: { owners: string[]; agents: string[] },
-  action: string,
-): string {
+/** How much of an agent's own description an option can carry before it wraps. */
+const FACET_DESCRIPTION = 44;
+
+function option(value: string, label: string, selected: string | undefined): string {
+  return `<option value="${escapeHtml(value)}"${value === selected ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+}
+
+/**
+ * Every name this board can be narrowed to, including the one already chosen.
+ *
+ * A filter that silently forgets the name it is currently applying is worse
+ * than no filter: the page says it is showing one agent's work, and pressing
+ * Show quietly means everybody. A name can arrive from the URL, or be pushed
+ * past the ceiling by a busy project, so the current value is put back in
+ * whenever the lists do not already have it.
+ */
+function agentOptions(agents: AgentFacet[], selected: string | undefined): string {
+  const describe = (agent: AgentFacet): string =>
+    agent.description === ''
+      ? agent.handle
+      : `${agent.handle} - ${
+          agent.description.length > FACET_DESCRIPTION
+            ? `${agent.description.slice(0, FACET_DESCRIPTION - 1).trimEnd()}...`
+            : agent.description
+        }`;
+
+  const group = (title: string, members: AgentFacet[]): string =>
+    members.length === 0
+      ? ''
+      : `<optgroup label="${escapeHtml(title)}">
+        ${members.map((agent) => option(agent.handle, describe(agent), selected)).join('\n        ')}
+      </optgroup>`;
+
+  const missing =
+    selected && !agents.some((agent) => agent.handle === selected)
+      ? option(selected, selected, selected)
+      : '';
+
+  return [
+    `<option value="">any agent</option>`,
+    missing,
+    group(
+      'Registered here',
+      agents.filter((agent) => agent.registered),
+    ),
+    group(
+      'Seen on items',
+      agents.filter((agent) => !agent.registered),
+    ),
+  ]
+    .filter((part) => part !== '')
+    .join('\n      ');
+}
+
+export function renderBoardFilters(view: BoardView, facets: BoardFacets, action: string): string {
   if (facets.owners.length === 0 && facets.agents.length === 0) return '';
-  const options = (values: string[], selected: string | undefined, anything: string): string =>
-    [`<option value="">${escapeHtml(anything)}</option>`]
-      .concat(
-        values.map(
-          (value) =>
-            `<option value="${escapeHtml(value)}"${value === selected ? ' selected' : ''}>${escapeHtml(value)}</option>`,
-        ),
-      )
-      .join('\n      ');
+  const owners = [`<option value="">anyone</option>`]
+    .concat(
+      facets.owners.includes(view.filter.owner ?? '')
+        ? []
+        : view.filter.owner
+          ? [option(view.filter.owner, view.filter.owner, view.filter.owner)]
+          : [],
+    )
+    .concat(facets.owners.map((value) => option(value, value, view.filter.owner)))
+    .join('\n      ');
+
+  const omitted = facets.omitted.owners + facets.omitted.agents;
 
   return `<form class="row filters" method="get" action="${escapeHtml(action)}">
   <label>Owner
     <select name="owner">
-      ${options(facets.owners, view.filter.owner, 'anyone')}
+      ${owners}
     </select>
   </label>
   <label>Agent
     <select name="agent">
-      ${options(facets.agents, view.filter.agent, 'any agent')}
+      ${agentOptions(facets.agents, view.filter.agent)}
     </select>
   </label>
   <button type="submit">Show</button>
   ${
     view.filter.owner || view.filter.agent
       ? `<a class="ghost-link" href="${escapeHtml(action)}">whole board</a>`
+      : ''
+  }
+  ${
+    omitted > 0
+      ? `<span class="hint">${omitted} more name${omitted === 1 ? '' : 's'} exist; add <code>?agent=</code> to the URL to use one.</span>`
       : ''
   }
 </form>`;

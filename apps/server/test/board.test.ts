@@ -908,6 +908,62 @@ describe('a board many agents write to', () => {
     assert.ok(facets.agents.includes('idle-loop'), 'a registered agent counts even before it writes');
   });
 
+  it('offers every agent by its own name, described, in the browser too', async () => {
+    const project = await createProject(harness, 'many hands');
+    await post(project, '/agents', {
+      handle: 'errors-loop',
+      scope: [],
+      description: 'watches the exchange error feed',
+    });
+    await post(project, '/agents', { handle: 'idle-loop', scope: [], description: '' });
+    await post(project, '/items', { slug: 'one', title: 'one', actor: 'errors-loop' });
+    // Never registered, only ever wrote. Still a name the board can be narrowed to.
+    await post(project, '/items', { slug: 'two', title: 'two', actor: 'passer-by' });
+
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+
+    assert.match(page.body, /<optgroup label="Registered here">/);
+    assert.match(
+      page.body,
+      /<option value="errors-loop">errors-loop - watches the exchange error feed<\/option>/,
+      'a handle is a line number; what it is for is the name',
+    );
+    assert.match(
+      page.body,
+      /<option value="idle-loop">idle-loop<\/option>/,
+      'registered and silent still gets offered',
+    );
+    assert.match(page.body, /<optgroup label="Seen on items">/);
+    assert.match(page.body, /<option value="passer-by">passer-by<\/option>/);
+
+    const described = (
+      await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/board/facets`,
+        headers: authed(project),
+      })
+    ).json();
+    assert.deepEqual(described.agentsDescribed, [
+      { handle: 'errors-loop', description: 'watches the exchange error feed', registered: true },
+    ]);
+    assert.equal(described.omitted.agents, 0);
+  });
+
+  it('keeps the agent it is already filtered by in the list', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'one', title: 'one', actor: 'errors-loop' });
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    // A name that no longer has anything behind it, arriving from a kept URL.
+    // Without it in the list, pressing Show silently means everybody.
+    const page = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?agent=gone-loop`,
+    });
+    assert.match(page.body, /<option value="gone-loop" selected>gone-loop<\/option>/);
+  });
+
   it('stops offering an agent whose only trace is a lapsed claim', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'passed-on', title: 'passed on', actor: 'first-loop' });

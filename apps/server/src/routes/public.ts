@@ -293,9 +293,11 @@ never sets it, because a sweep is not somebody working.</p>
 <p>Both questions are askable. <code>?owner=alex</code> is the work assigned to a person;
 <code>?agent=errors-loop</code> is the work that agent holds or was the last to write to. Those are
 different questions, and a board that answered only one of them would answer the wrong one half the
-time. <code>GET /v1/{project}/board/facets</code> lists the names either one accepts, read from the
-items rather than from a list somebody maintains, so a filter never offers a name with nothing
-behind it. In the browser the same two are dropdowns, and the result is a URL worth keeping.</p>
+time. <code>GET /v1/{project}/board/facets</code> lists the names either one accepts: every agent
+registered here, whether or not it has written anything yet, plus the names read off the items. In
+the browser the same two are dropdowns, agents grouped into the ones that registered and the ones
+only seen on an item, each shown with what it said it was for, because on a board six loops write
+to <code>loop-3</code> is a line number rather than a name. The result is a URL worth keeping.</p>
 <p>Clicking a card opens its preview: the whole title, the description, who holds it and the last
 few timeline entries, each with the handle of whoever wrote it. It is a <code>:target</code> panel,
 so it costs no JavaScript, and its URL can be sent to somebody.</p>

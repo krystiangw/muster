@@ -622,12 +622,21 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           tags: ['board'],
           summary: 'The owners and agents this board can be narrowed to',
           description:
-            'Read from the items themselves, so every name offered has work behind it. Pass one to GET /board as owner= or agent=.',
+            'Every agent registered in the project, plus the names read off the items themselves. Pass one to GET /board as owner= or agent=. `agentsDescribed` says what each agent is for, in its own words.',
         },
       },
       async (request) => {
         const { project } = auth(request);
-        return boardFacets(store, project);
+        const facets = await boardFacets(store, project);
+        // The two lists stay plain strings: they are the values that go back in
+        // as `agent=`, and an agent reading this should not have to reach into
+        // an object to find one. What each name is for is a second field.
+        return {
+          owners: facets.owners,
+          agents: facets.agents.map((agent) => agent.handle),
+          agentsDescribed: facets.agents.filter((agent) => agent.description !== ''),
+          omitted: facets.omitted,
+        };
       },
     );
 

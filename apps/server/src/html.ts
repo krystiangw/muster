@@ -169,8 +169,9 @@ button.ghost { background:transparent; color:var(--accent); }
 .filters { align-items:flex-end; margin-bottom:16px; }
 .filters label { font-family:var(--mono); font-size:11px; letter-spacing:.09em;
   text-transform:uppercase; color:var(--muted); }
-.filters select { font-size:14px; padding:6px 9px; min-width:150px; }
+.filters select { font-size:14px; padding:6px 9px; min-width:150px; max-width:320px; }
 .filters button { padding:7px 14px; }
+.filters .hint { align-self:center; font-size:12.5px; color:var(--muted); }
 .ghost-link { align-self:center; font-size:13.5px; }
 .col .more { font-family:var(--mono); font-size:11px; color:var(--muted); }
 .col .none { font-size:12.5px; color:var(--muted); font-style:italic; }

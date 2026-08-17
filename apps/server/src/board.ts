@@ -250,6 +250,32 @@ export async function loadBoard(
   return buildBoard(items, config, new Date(), narrowed);
 }
 
+export interface AgentFacet {
+  handle: string;
+  /** What it says it is for. Empty when it never registered, or said nothing. */
+  description: string;
+  /** Registered in this project, rather than only seen on an item. */
+  registered: boolean;
+}
+
+export interface BoardFacets {
+  owners: string[];
+  agents: AgentFacet[];
+  /** Names left out for length. Zero on every project anybody actually has. */
+  omitted: { owners: number; agents: number };
+}
+
+/**
+ * How many names of one kind a page will offer.
+ *
+ * Every agent a project registered fits under this by construction: the largest
+ * plan caps a project at two hundred of them, so "all the agents" is always all
+ * of them. What the ceiling is really for is the other list, the names read off
+ * the items, which is bounded by nothing but the item count and can hold every
+ * handle that ever wrote here, including the ones that are gone.
+ */
+export const FACET_LIMIT = 400;
+
 /**
  * The people and agents a board could be narrowed to.
  *
@@ -258,11 +284,15 @@ export async function loadBoard(
  * offered even before it writes anything, while a claim that expired is a
  * leftover and its holder is not. Offering a name whose board comes back empty
  * is how a filter teaches people not to trust it.
+ *
+ * An agent is offered with what it said it was for. On a board six loops write
+ * to, `loop-3` and `loop-7` are not names, they are line numbers, and a filter
+ * nobody can read is a filter nobody uses.
+ *
+ * Registered agents are kept ahead of the rest when the ceiling bites, because
+ * a name that is only a leftover on an old item is the one worth losing first.
  */
-export async function boardFacets(
-  store: Store,
-  project: ProjectDoc,
-): Promise<{ owners: string[]; agents: string[] }> {
+export async function boardFacets(store: Store, project: ProjectDoc): Promise<BoardFacets> {
   const [owners, actors, holders, registered] = await Promise.all([
     store.items.distinct('owner', { projectId: project._id }),
     store.items.distinct('lastActor', { projectId: project._id }),
@@ -270,13 +300,47 @@ export async function boardFacets(
       projectId: project._id,
       'claim.expiresAt': { $gt: new Date() },
     }),
-    store.agents.distinct('handle', { projectId: project._id }),
+    store.agents
+      .find(
+        { projectId: project._id },
+        { projection: { handle: 1, description: 1 }, sort: { handle: 1 } },
+      )
+      .toArray(),
   ]);
-  const clean = (values: unknown[]): string[] =>
-    [...new Set(values.filter((value): value is string => typeof value === 'string' && value !== ''))]
-      .sort()
-      .slice(0, 50);
-  return { owners: clean(owners), agents: clean([...actors, ...holders, ...registered]) };
+
+  const names = (values: unknown[]): string[] =>
+    [
+      ...new Set(
+        values.filter((value): value is string => typeof value === 'string' && value !== ''),
+      ),
+    ].sort();
+
+  const known = new Map<string, AgentFacet>();
+  for (const agent of registered) {
+    if (agent.handle === '') continue;
+    known.set(agent.handle, {
+      handle: agent.handle,
+      description: agent.description ?? '',
+      registered: true,
+    });
+  }
+  const seen = names([...actors, ...holders]).filter((handle) => !known.has(handle));
+
+  const ownerNames = names(owners);
+  const agents = [...known.values(), ...seen.map((handle) => ({
+    handle,
+    description: '',
+    registered: false,
+  }))];
+
+  return {
+    owners: ownerNames.slice(0, FACET_LIMIT),
+    agents: agents.slice(0, FACET_LIMIT),
+    omitted: {
+      owners: Math.max(0, ownerNames.length - FACET_LIMIT),
+      agents: Math.max(0, agents.length - FACET_LIMIT),
+    },
+  };
 }
 
 /**

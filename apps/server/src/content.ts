@@ -194,7 +194,10 @@ curl -s "$MUSTER/board?owner=alex" -H "authorization: Bearer $TOKEN"
 
 \`agent=\` is the items you hold or were the last to write to; \`owner=\` is the
 items assigned to a person. \`GET $MUSTER/board/facets\` lists the names either
-one accepts, read from the items themselves. Every item also carries
+one accepts: every agent registered in the project, whether or not it has
+written anything yet, plus the names read off the items. \`agentsDescribed\`
+in the same reply says what each agent is for, in its own words. Every item
+also carries
 \`last_actor\`, which is who touched it last: on a project six loops write to,
 that is the difference between a queue of work and a queue of anonymous work.
 
