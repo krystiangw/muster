@@ -5,7 +5,7 @@ import type { Mailer } from '../email.js';
 import { chip, escapeHtml, formatWhen, layout } from '../html.js';
 import { hashToken, newId, newToken } from '../ids.js';
 import type { RateLimiter } from '../rateLimit.js';
-import { ServiceError, answerEscalation } from '../service.js';
+import { ServiceError, acceptShare, answerEscalation } from '../service.js';
 import { ESCALATION_STATUSES, type EscalationStatus } from '../types.js';
 
 /**
@@ -126,6 +126,14 @@ mistake, open a link you still have and turn off every other one from there.</p>
     const ids = projects.map((project) => project._id);
     const names = new Map(projects.map((project) => [project._id, project.name]));
 
+    // Boards an agent has offered this person. Nothing from them is in the
+    // queue below until it is accepted.
+    const offers = await store.shares.find({ email: record.email }).sort({ createdAt: -1 }).limit(25).toArray();
+    const offered = await store.projects
+      .find({ _id: { $in: offers.map((offer) => offer.projectId) } })
+      .toArray();
+    const offeredById = new Map(offered.map((project) => [project._id, project]));
+
     const [waiting, recent, staleItems] = await Promise.all([
       store.escalations
         .find({ projectId: { $in: ids }, status: 'open' })
@@ -182,17 +190,49 @@ ${waiting
   )
   .join('')}
 
+${
+      offers.length === 0
+        ? ''
+        : `<h2>Boards handed to you</h2>
+<p style="color:var(--ink-2)">An agent created these and offered them. Nothing from them is in the queue
+above until you accept.</p>
+${offers
+  .map((offer) => {
+    const project = offeredById.get(offer.projectId);
+    if (!project) return '';
+    return `<div class="card">
+  <p class="label">${escapeHtml(offer.offeredBy)} &middot; ${escapeHtml(formatWhen(offer.createdAt))}</p>
+  <p style="font-size:17px;margin:0 0 4px"><b>${escapeHtml(project.name)}</b></p>
+  ${project.description ? `<p style="color:var(--ink-2);margin:0 0 8px">${escapeHtml(project.description)}</p>` : ''}
+  ${offer.note ? `<p style="color:var(--ink-2);margin:0 0 8px">${escapeHtml(offer.note)}</p>` : ''}
+  <p class="mono" style="color:var(--muted);margin:0 0 10px">${project.counts.items} open item(s),
+     ${project.counts.escalations} question(s) &middot;
+     <a href="/r/${escapeHtml(project.readToken)}/board">look first</a></p>
+  <form class="row" method="post" action="/operator/${escapeHtml(token)}/shares/${escapeHtml(offer._id)}">
+    <button type="submit" name="decision" value="accept">Take ownership</button>
+    <button class="ghost" type="submit" name="decision" value="ignore">Not mine</button>
+  </form>
+</div>`;
+  })
+  .join('')}`
+    }
+
 <h2>Projects</h2>
 <div class="scroll"><table>
-<thead><tr><th>Project</th><th class="mono">items</th><th class="mono">agents</th><th>Open</th><th></th></tr></thead>
+<thead><tr><th>Project</th><th class="mono">open</th><th class="mono">agents</th><th>Waiting</th><th></th></tr></thead>
 <tbody>
 ${projects
   .map(
     (project) =>
-      `<tr><td>${escapeHtml(project.name)}<br><span class="mono" style="color:var(--muted)">${escapeHtml(project._id)}</span></td>
+      `<tr><td>${escapeHtml(project.name)}${
+        project.description
+          ? `<br><span style="color:var(--ink-2);font-size:13.5px">${escapeHtml(project.description)}</span>`
+          : ''
+      }<br><span class="mono" style="color:var(--muted)">${escapeHtml(project._id)}</span></td>
        <td class="mono">${project.counts.items}</td><td class="mono">${project.counts.agents}</td>
        <td class="mono">${waiting.filter((doc) => doc.projectId === project._id).length}</td>
-       <td><a href="/r/${escapeHtml(project.readToken)}">open</a></td></tr>`,
+       <td><a href="/r/${escapeHtml(project.readToken)}/board">board</a><br>
+           <a href="/r/${escapeHtml(project.readToken)}">questions</a></td></tr>`,
   )
   .join('\n')}
 </tbody></table></div>
@@ -243,6 +283,21 @@ ${
     return reply
       .type('text/html; charset=utf-8')
       .send(layout({ title: 'Muster operator view' }, body));
+  });
+
+  app.post('/operator/:token/shares/:id', { schema: { hide: true } }, async (request, reply) => {
+    const { token, id } = request.params as { token: string; id: string };
+    const form = (request.body ?? {}) as { decision?: string };
+    const record = await store.operatorTokens.findOne({ hash: hashToken(token) });
+    if (!record) throw new ServiceError(404, 'not_found', 'No such link.');
+
+    if (form.decision === 'ignore') {
+      await store.shares.deleteOne({ _id: id, email: record.email });
+      return reply.redirect(`/operator/${token}`, 303);
+    }
+
+    await acceptShare(store, config, record.email, id);
+    return reply.redirect(`/operator/${token}`, 303);
   });
 
   app.post('/operator/:token/revoke-others', { schema: { hide: true } }, async (request, reply) => {

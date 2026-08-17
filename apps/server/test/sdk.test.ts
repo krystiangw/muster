@@ -181,6 +181,47 @@ describe('the typed SDK', () => {
     await assert.rejects(client.item('from-elsewhere'));
   });
 
+  it('reads and lays out the board, and hands the project to a person', async () => {
+    const { client, created } = await Muster.start({
+      name: 'sdk-board',
+      description: 'what this board is for',
+      actor: 'errors-loop',
+      baseUrl,
+    });
+    assert.equal(created.description, 'what this board is for');
+
+    await client.upsert({ slug: 'watch', title: 'watching', labels: ['monitoring'] });
+    await client.upsert({ slug: 'busy', title: 'busy' });
+    await client.claim('busy', 'errors-loop', 30);
+
+    const before = await client.board();
+    assert.equal(before.rows[0]?.columns.find((cell) => cell.key === 'doing')?.count, 1);
+
+    await client.setBoard({
+      rows: 'none',
+      columns: [
+        { title: 'Monitoring', match: { labels: ['monitoring'], status: ['open'] } },
+        { title: 'Rest', match: {} },
+      ],
+    });
+    const after = await client.board();
+    assert.deepEqual(
+      after.board.columns.map((column) => column.title),
+      ['Monitoring', 'Rest'],
+    );
+    assert.equal(after.rows[0]?.columns[0]?.items?.[0]?.slug, 'watch');
+
+    const presets = await client.boardPresets();
+    assert.ok(presets.presets.length >= 3);
+
+    const shared = await client.share({ email: 'nobody@example.com', note: 'yours now' });
+    assert.equal(shared.ok, true);
+    assert.equal(shared.operator_has_an_inbox, false);
+
+    const described = await client.describe({ description: 'renamed from the SDK' });
+    assert.equal(described.description, 'renamed from the SDK');
+  });
+
   it('raises a typed error with the server’s own message', async () => {
     const { client } = await Muster.start({ name: 'errors', actor: 'a', baseUrl });
     await assert.rejects(client.item('nothing-here'), (error: unknown) => {

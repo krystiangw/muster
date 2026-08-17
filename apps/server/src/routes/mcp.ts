@@ -3,7 +3,8 @@ import type { Config } from '../config.js';
 import type { Store } from '../db.js';
 import { maybeSweep } from '../hygiene.js';
 import type { RateLimiter } from '../rateLimit.js';
-import { escalationJson, itemJson } from '../serialize.js';
+import { loadBoard } from '../board.js';
+import { boardJson, escalationJson, itemJson } from '../serialize.js';
 import {
   ServiceError,
   authenticate,
@@ -16,6 +17,7 @@ import {
   nextItem,
   observe,
   registerAgent,
+  shareProject,
   upsertItem,
 } from '../service.js';
 import {
@@ -30,9 +32,9 @@ import {
  *
  * Deliberately small. The market audit found a hosted competitor advertising
  * 125 MCP tools, which is a way of saying the model has to read a 125 item menu
- * before it can do anything. Muster exposes the same nine calls its curl
- * surface has, named the same way, so an agent that read skill.md already knows
- * this API.
+ * before it can do anything. Muster exposes the same calls its curl surface
+ * has, named the same way, so an agent that read skill.md already knows this
+ * API.
  */
 
 const DEFAULT_PROTOCOL_VERSION = '2025-06-18';
@@ -70,7 +72,13 @@ const TOOLS: ToolDefinition[] = [
       'Create a Muster project and receive a token. This is the whole signup: no account, no human. Only needed once per repository or product.',
     inputSchema: {
       type: 'object',
-      properties: { name: { type: 'string', description: 'Human readable project name' } },
+      properties: {
+        name: { type: 'string', description: 'Human readable project name' },
+        description: {
+          type: 'string',
+          description: 'What this board is for, so an operator running several can tell them apart',
+        },
+      },
     },
     requiresProject: false,
   },
@@ -201,6 +209,35 @@ const TOOLS: ToolDefinition[] = [
         context: { type: 'string' },
         priority: { type: 'string', enum: [...ESCALATION_PRIORITIES] },
         item_slug: { type: 'string' },
+        agent: { type: 'string' },
+      },
+    },
+    requiresProject: true,
+  },
+  {
+    name: 'board',
+    title: 'See the board',
+    description:
+      'The project’s columns as its operator laid them out, with the items in each. Columns are a view over status, labels, owner and claim state, so reading the board tells you how this project wants work described.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        items: { type: 'boolean', description: 'false for counts only' },
+      },
+    },
+    requiresProject: true,
+  },
+  {
+    name: 'share_project',
+    title: 'Hand this board to a human',
+    description:
+      'Offers the project to an operator by email. It appears in their view where one click makes them the owner, which also lifts the limits and stops the project expiring.',
+    inputSchema: {
+      type: 'object',
+      required: ['email'],
+      properties: {
+        email: { type: 'string' },
+        note: { type: 'string', description: 'Why you are handing it over' },
         agent: { type: 'string' },
       },
     },
@@ -374,9 +411,12 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
       }
       const { project, adminToken } = await createProject(store, config, {
         name: str(args.name, 'Untitled project'),
+        description: str(args.description),
       });
       return {
         project: project._id,
+        name: project.name,
+        description: project.description,
         token: adminToken,
         api: `${config.baseUrl}/v1/${project._id}`,
         read_url: `${config.baseUrl}/r/${project.readToken}`,
@@ -485,6 +525,25 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           escalation: escalationJson(doc),
           read_url: `${config.baseUrl}/r/${project.readToken}`,
         };
+      }
+      case 'board': {
+        void maybeSweep(store, project).catch(() => undefined);
+        const view = await loadBoard(store, project);
+        return boardJson(view, args.items !== false);
+      }
+      case 'share_project': {
+        const { alreadyOwned } = await shareProject(store, project, {
+          email: str(args.email),
+          note: str(args.note),
+          offeredBy: actor,
+        });
+        return alreadyOwned
+          ? { ok: true, already_owned: true }
+          : {
+              ok: true,
+              pending: true,
+              hint: 'It is waiting in their operator view at /operator; one click makes them the owner.',
+            };
       }
       case 'inbox': {
         const docs = await listEscalations(store, project._id, {

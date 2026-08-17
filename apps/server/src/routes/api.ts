@@ -4,7 +4,15 @@ import type { Store } from '../db.js';
 import { maybeSweep, sweepProject } from '../hygiene.js';
 import { hashToken, isValidHandle, newOtpCode, newId } from '../ids.js';
 import { RateLimiter } from '../rateLimit.js';
-import { agentJson, escalationJson, itemJson, projectJson } from '../serialize.js';
+import { BOARD_PRESETS, boardConfigOf, loadBoard, parseBoardConfig } from '../board.js';
+import {
+  agentJson,
+  boardConfigJson,
+  boardJson,
+  escalationJson,
+  itemJson,
+  projectJson,
+} from '../serialize.js';
 import {
   ServiceError,
   answerEscalation,
@@ -15,6 +23,8 @@ import {
   createEscalation,
   createProject,
   deleteItem,
+  shareProject,
+  updateProject,
   getItem,
   heartbeatClaim,
   itemInScope,
@@ -36,6 +46,7 @@ import {
   ESCALATION_PRIORITIES,
   ESCALATION_STATUSES,
   ITEM_STATUSES,
+  MAX_BOARD_COLUMNS,
   type EscalationPriority,
   type EscalationStatus,
   type ItemStatus,
@@ -99,7 +110,15 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         tags: ['projects'],
         body: {
           type: 'object',
-          properties: { name: { type: 'string', maxLength: 120 } },
+          properties: {
+            name: { type: 'string', maxLength: 120 },
+            description: {
+              type: 'string',
+              maxLength: 500,
+              description:
+                'What this board is for. An operator running several needs to tell them apart, and the next agent needs to know what belongs here.',
+            },
+          },
           additionalProperties: false,
         },
       },
@@ -111,18 +130,22 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       );
       if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds);
 
-      const body = (request.body ?? {}) as { name?: string };
+      const body = (request.body ?? {}) as { name?: string; description?: string };
       const { project, adminToken } = await createProject(store, config, body);
       return reply.code(201).send({
         project: project._id,
+        name: project.name,
+        description: project.description,
         token: adminToken,
         api: `${config.baseUrl}/v1/${project._id}`,
         read_url: `${config.baseUrl}/r/${project.readToken}`,
+        board_url: `${config.baseUrl}/r/${project.readToken}/board`,
         expires_at: project.expiresAt,
         limits: project.limits,
         next: {
           instructions: `${config.baseUrl}/skill.md`,
           claim_to_keep: `${config.baseUrl}/v1/${project._id}/claim`,
+          hand_to_a_human: `${config.baseUrl}/v1/${project._id}/share`,
         },
       });
     },
@@ -492,6 +515,86 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
     );
 
     scoped.get(
+      '/v1/:project/board',
+      {
+        schema: {
+          tags: ['board'],
+          summary: 'The board as its columns are configured',
+          description:
+            'Columns are a view, not a state: each one is a name and a filter over what an item already is. An item lands in the first column that matches, so the board is a partition.',
+          querystring: {
+            type: 'object',
+            properties: {
+              include_closed: { type: 'boolean' },
+              items: { type: 'boolean', description: 'Set false for counts only.' },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request) => {
+        const { project } = auth(request);
+        const query = request.query as { include_closed?: boolean; items?: boolean };
+        void maybeSweep(store, project).catch(() => undefined);
+        const view = await loadBoard(
+          store,
+          project,
+          query.include_closed === undefined ? {} : { includeClosed: query.include_closed },
+        );
+        return boardJson(view, query.items !== false);
+      },
+    );
+
+    scoped.put(
+      '/v1/:project/board',
+      {
+        schema: {
+          tags: ['board'],
+          summary: 'Lay the board out for this project',
+          description:
+            'Columns are filters over status, labels, owner, claim state, staleness, source, priority and migrated fields. There is deliberately no way to invent a status here: a column called Investigating is a filter, so no agent has to learn a new value.',
+          body: {
+            type: 'object',
+            required: ['columns'],
+            properties: {
+              rows: { type: 'string', enum: ['none', 'owner', 'label'] },
+              columns: {
+                type: 'array',
+                minItems: 1,
+                maxItems: MAX_BOARD_COLUMNS,
+                items: { type: 'object', additionalProperties: true },
+              },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request) => {
+        const { project } = requireAdmin(request);
+        const config = parseBoardConfig(request.body);
+        await store.projects.updateOne({ _id: project._id }, { $set: { board: config } });
+        const updated = await store.projects.findOne({ _id: project._id });
+        return { board: boardConfigJson(boardConfigOf(updated!)) };
+      },
+    );
+
+    scoped.get(
+      '/v1/:project/board/presets',
+      { schema: { tags: ['board'], summary: 'Layouts to start from' } },
+      async (request) => {
+        auth(request);
+        return {
+          presets: Object.entries(BOARD_PRESETS).map(([key, preset]) => ({
+            key,
+            title: preset.title,
+            description: preset.description,
+            board: boardConfigJson(preset.config),
+          })),
+        };
+      },
+    );
+
+    scoped.get(
       '/v1/:project/next',
       {
         schema: {
@@ -818,6 +921,88 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
     );
 
     // -------------------------------------------------------- human claim
+
+    scoped.patch(
+      '/v1/:project',
+      {
+        schema: {
+          tags: ['projects'],
+          summary: 'Rename this board or say what it is for',
+          body: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', maxLength: 120 },
+              description: { type: 'string', maxLength: 500 },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request) => {
+        const { project } = requireAdmin(request);
+        const body = request.body as { name?: string; description?: string };
+        const updated = await updateProject(store, project._id, body);
+        return projectJson(updated, config);
+      },
+    );
+
+    scoped.post(
+      '/v1/:project/share',
+      {
+        schema: {
+          tags: ['projects'],
+          summary: 'Offer this board to a human',
+          description:
+            'Puts an offer in that person’s operator view, where one click accepts it and makes them the owner. Nothing reaches their queue until they accept, so this cannot post a board into somebody’s inbox. If they have never used Muster, they get the read link and the ordinary email claim instead.',
+          body: {
+            type: 'object',
+            required: ['email'],
+            properties: {
+              email: { type: 'string', maxLength: 200 },
+              note: { type: 'string', maxLength: 500 },
+              agent: { type: 'string', maxLength: 48 },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request, reply) => {
+        const { project } = auth(request);
+        const body = request.body as { email: string; note?: string; agent?: string };
+        const verdict = limiter.check(`share:${project._id}`, config.rateLimits.claimEmail);
+        if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds);
+
+        const { alreadyOwned } = await shareProject(store, project, {
+          email: body.email,
+          note: body.note,
+          offeredBy: body.agent,
+        });
+        if (alreadyOwned) {
+          return reply.send({
+            ok: true,
+            already_owned: true,
+            operator_view: `${config.baseUrl}/operator`,
+          });
+        }
+
+        const known = await store.projects.countDocuments({
+          claimedBy: body.email.trim().toLowerCase(),
+        });
+        return reply.code(201).send({
+          ok: true,
+          pending: true,
+          // Somebody who has never claimed a project has no operator view to
+          // see the offer in, so tell the agent to hand over the link instead
+          // of leaving the offer sitting where nobody will look.
+          operator_has_an_inbox: known > 0,
+          tell_them: known > 0 ? `${config.baseUrl}/operator` : `${config.baseUrl}/r/${project.readToken}`,
+          hint:
+            known > 0
+              ? 'It is waiting in their operator view; they accept it with one click.'
+              : 'They have no operator view yet. Send them the read link, or use /claim to have them confirm an email.',
+        });
+      },
+    );
 
     scoped.post(
       '/v1/:project/claim',

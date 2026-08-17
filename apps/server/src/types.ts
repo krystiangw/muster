@@ -166,6 +166,76 @@ export const DEFAULT_RULES: HygieneRules = {
   scopeWarnings: true,
 };
 
+/**
+ * Board layout.
+ *
+ * A column is a view, never a state. The four statuses stay four; a column is a
+ * name and a filter over what an item already is, so a project can lay its board
+ * out however it likes without adding a status that routing, hygiene and every
+ * agent would then have to learn. That separation is the whole reason the enum
+ * cannot drift: there is nothing to drift into.
+ *
+ * An item lands in the first column whose filter matches, so the board is a
+ * partition and no card appears twice.
+ */
+export interface BoardMatch {
+  /** Any of these statuses. Empty or absent means any status. */
+  status?: ItemStatus[];
+  /** Item carries at least one of these labels. */
+  labels?: string[];
+  /** Item carries none of these labels. */
+  notLabels?: string[];
+  owner?: string[];
+  /** true: only claimed items. false: only unclaimed ones. */
+  claimed?: boolean;
+  stale?: boolean;
+  source?: string[];
+  priorityMin?: number;
+  /** Values of `fields`, for boards migrated from a richer schema. */
+  fields?: Record<string, Array<string | number | boolean>>;
+}
+
+export interface BoardColumn {
+  key: string;
+  title: string;
+  match: BoardMatch;
+  /** Shown under the title. Useful for saying what belongs here and what does not. */
+  hint?: string;
+}
+
+export interface BoardConfig {
+  columns: BoardColumn[];
+  /** Swimlanes. `none` is one lane; `owner` groups by owner; `label` by the labels present. */
+  rows: 'none' | 'owner' | 'label';
+}
+
+export const MAX_BOARD_COLUMNS = 12;
+
+/**
+ * What a project starts with. It mirrors the four statuses plus the one
+ * distinction the statuses deliberately do not carry: whether somebody is
+ * holding the item right now.
+ */
+export const DEFAULT_BOARD: BoardConfig = {
+  rows: 'none',
+  columns: [
+    {
+      key: 'todo',
+      title: 'To do',
+      hint: 'open, nobody on it',
+      match: { status: ['open'], claimed: false },
+    },
+    {
+      key: 'doing',
+      title: 'In progress',
+      hint: 'someone holds a live claim',
+      match: { status: ['open'], claimed: true },
+    },
+    { key: 'blocked', title: 'Blocked', match: { status: ['blocked'] } },
+    { key: 'done', title: 'Done', match: { status: ['done'] } },
+  ],
+};
+
 export type ProjectTier = 'demo' | 'free' | 'pro';
 
 export interface ProjectLimits {
@@ -177,9 +247,17 @@ export interface ProjectLimits {
 export interface ProjectDoc {
   _id: string;
   name: string;
+  /**
+   * What this board is for, in the words of whoever created it. An operator
+   * running nine of them needs to tell them apart at a glance, and an agent
+   * arriving at one needs to know what belongs on it.
+   */
+  description: string;
   tier: ProjectTier;
   limits: ProjectLimits;
   rules: HygieneRules;
+  /** Absent on projects created before boards existed; DEFAULT_BOARD applies. */
+  board?: BoardConfig;
   readToken: string;
   claimedBy: string | null;
   claimedAt: Date | null;
@@ -202,6 +280,26 @@ export interface ApiKeyDoc {
   createdAt: Date;
   lastUsedAt: Date | null;
   revokedAt: Date | null;
+}
+
+/**
+ * An agent offering a project to an operator.
+ *
+ * The operator owns every board in their inbox, but the agent is usually the
+ * one that creates them, and making a person confirm an emailed code once per
+ * project does not scale past about two. A share is an offer: it appears in the
+ * operator's view, and one click accepts it. Nothing reaches their queue until
+ * they say so, which is what keeps this from being a way to post junk into
+ * somebody's inbox.
+ */
+export interface ShareDoc {
+  _id: string;
+  projectId: string;
+  email: string;
+  offeredBy: string;
+  note: string;
+  createdAt: Date;
+  expiresAt: Date;
 }
 
 /** A pending email claim of a demo project. */

@@ -37,6 +37,9 @@ const CSS = `
 body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans);
   font-size:16.5px; line-height:1.6; -webkit-font-smoothing:antialiased; }
 .wrap { max-width:900px; margin:0 auto; padding:32px 20px 80px; }
+/* A board page widens the column; the prose inside it stays readable. */
+.wrap.wide { max-width:1500px; }
+.wrap.wide > h1, .wrap.wide > p, .wrap.wide > .lead, .wrap.wide > form { max-width:66ch; }
 .prose { max-width:66ch; }
 header.top { display:flex; align-items:baseline; gap:16px; flex-wrap:wrap;
   border-bottom:1px solid var(--rule); padding-bottom:14px; margin-bottom:32px; }
@@ -88,6 +91,38 @@ textarea { min-height:80px; font-family:var(--mono); font-size:13.5px; }
 button { font:inherit; font-size:14.5px; font-weight:560; padding:9px 16px; cursor:pointer;
   background:var(--accent); color:var(--bg); border:1px solid var(--accent); border-radius:3px; }
 button.ghost { background:transparent; color:var(--accent); }
+/* board */
+/* Prose wants 66 characters, a board wants room, so a board page widens the
+   whole column (see .wrap.wide) rather than escaping it with viewport-width
+   tricks: 100vw counts the scrollbar, which pushes the page itself sideways by
+   exactly that much. The scrolling belongs to this element, never to the page. */
+.board { overflow-x:auto; overscroll-behavior-x:contain; padding-bottom:10px; margin-bottom:10px; }
+.lane { margin-bottom:22px; width:max-content; min-width:100%; }
+.lane > .lane-title { font-family:var(--mono); font-size:11px; letter-spacing:.09em; text-transform:uppercase;
+  color:var(--muted); padding:0 0 8px; border-bottom:1px solid var(--rule); margin-bottom:12px; }
+.cols { display:grid; grid-auto-flow:column; grid-auto-columns:270px; gap:12px; align-items:start;
+  width:max-content; }
+/* A column scrolls inside itself. Twenty-five cards in one lane otherwise push
+   everything below the board a screen and a half down the page. */
+.col { background:var(--surface-2); border:1px solid var(--rule); border-radius:3px; padding:10px;
+  display:flex; flex-direction:column; gap:8px; min-width:230px;
+  max-height:min(70vh,720px); overflow-y:auto; }
+.col > header { position:sticky; top:-10px; background:var(--surface-2); padding:2px 0 4px; z-index:1; }
+.col > header { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+.col h3 { margin:0; font-size:14px; font-weight:640; }
+.col .n { font-family:var(--mono); font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; }
+.col .why { font-family:var(--mono); font-size:10.5px; color:var(--muted); line-height:1.35; margin:-4px 0 0; }
+/* Scoped to a column on purpose: an unscoped .card here would win over the page
+   card above it and quietly restyle every card on every other page. */
+.col .card { background:var(--surface); border:1px solid var(--rule); border-radius:2px;
+  padding:9px 10px; margin:0; display:flex; flex-direction:column; gap:5px; }
+.col .card .slug { font-family:var(--mono); font-size:11px; color:var(--muted); word-break:break-all; }
+.col .card .t { font-size:13.5px; line-height:1.35; }
+.col .card .meta { display:flex; flex-wrap:wrap; gap:5px; align-items:center; }
+.col .card.is-stale { border-left:2px solid var(--warn); }
+.col .card.is-claimed { border-left:2px solid var(--accent); }
+.col .more { font-family:var(--mono); font-size:11px; color:var(--muted); }
+.col .none { font-size:12.5px; color:var(--muted); font-style:italic; }
 .timeline { list-style:none; padding:0; margin:0; font-size:14px; }
 .timeline li { display:grid; grid-template-columns:auto auto 1fr; gap:10px; padding:7px 0;
   border-top:1px solid var(--rule); align-items:baseline; }
@@ -107,6 +142,8 @@ export interface LayoutOptions {
   title: string;
   description?: string;
   nav?: boolean;
+  /** Widens the column for a board, which needs room rather than 66 characters. */
+  wide?: boolean;
 }
 
 export function layout(options: LayoutOptions, body: string): string {
@@ -120,7 +157,7 @@ ${options.description ? `<meta name="description" content="${escapeHtml(options.
 <style>${CSS}</style>
 </head>
 <body>
-<div class="wrap">
+<div class="wrap${options.wide ? ' wide' : ''}">
 ${
     options.nav === false
       ? ''

@@ -147,6 +147,53 @@ curl -sX POST $MUSTER/observe -H "authorization: Bearer $TOKEN" \\
   -d '{"source":"market-errors","present":["errors:a","errors:b"]}'
 \`\`\`
 
+## The board
+
+Each project has its own columns, laid out by whoever runs it:
+
+\`\`\`bash
+curl -s $MUSTER/board -H "authorization: Bearer $TOKEN"
+\`\`\`
+
+Read it once when you join a project. A column is a **view**, never a state: it
+is a name and a filter over what an item already is, so a project can have
+"Investigating", "Monitoring" and "Waiting on the operator" without inventing a
+status. The four statuses stay four. If a project has a column matching
+\`labels: ["monitoring"]\`, then putting an item there means adding that label,
+and the board tells you so.
+
+An item lands in the first column that matches. Anything matching nothing is
+reported as \`unplaced\` rather than hidden, because a board that quietly drops
+work is worse than no board.
+
+The layout itself is set with \`PUT $MUSTER/board\` (admin token) and edited by
+the operator in the browser at the project's read link.
+
+## Handing the project to a human
+
+A project belongs to whoever created it until a person takes it over. Taking it
+over lifts the limits and stops it expiring, so do this early:
+
+\`\`\`bash
+curl -sX POST $MUSTER/share -H "authorization: Bearer $TOKEN" \\
+  -H 'content-type: application/json' \\
+  -d '{"email":"human@example.com","note":"board for the arbitrage loops","agent":"errors-loop"}'
+\`\`\`
+
+If that person already uses Muster, the offer appears in their operator view and
+one click makes them the owner. If they do not, the response says so and you
+should send them the read link instead.
+
+One project is one board with one identity: its own id, name, description,
+token, items, agents and questions. Nothing crosses between them, and a token
+for one is refused by another. Give each real thing you work on its own, and
+say what it is for in the description:
+
+\`\`\`bash
+curl -sX POST ${base}/p -H 'content-type: application/json' \\
+  -d '{"name":"arbitrage-fleet","description":"Six long-running loops on the arbitrage fleet: errors, trades, pm, system, scoring, dashboard."}'
+\`\`\`
+
 ## Picking up work
 
 \`\`\`bash
@@ -266,6 +313,8 @@ export function llmsTxt(config: Config): string {
 
 ## Concepts
 
+- **project**: one board with one identity, its own token and its own data. Nothing crosses between projects; a token for one is refused by another
+- **board**: the columns a project is laid out in. A column is a filter over items, never a new status
 - **agent**: a handle with a declared scope and a heartbeat
 - **item**: a unit of work or an observation, identified by a stable slug that acts as the idempotency key
 - **claim**: a lease on an item with a TTL, so two agents cannot silently do the same work
@@ -397,6 +446,28 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
         method: 'GET',
         url: `${base}/v1/{project}/inbox?agent={handle}`,
         notes: 'Answers from the human. Four statuses: answered, resolved, wont_do, in_progress.',
+      },
+      {
+        name: 'board',
+        method: 'GET',
+        url: `${base}/v1/{project}/board`,
+        notes:
+          'The project’s columns and what is in them. A column is a filter over status, labels, owner, claim state, staleness, source and migrated fields, never a new status.',
+      },
+      {
+        name: 'set_board',
+        method: 'PUT',
+        url: `${base}/v1/{project}/board`,
+        auth: 'admin token',
+        request: { rows: 'owner', columns: [{ title: 'Investigating', match: { claimed: true } }] },
+      },
+      {
+        name: 'share_project',
+        method: 'POST',
+        url: `${base}/v1/{project}/share`,
+        request: { email: 'human@example.com', note: 'why you are handing it over' },
+        notes:
+          'Offers the board to a person. It waits in their operator view until they accept, so it cannot post a project into somebody’s queue.',
       },
       {
         name: 'answer_escalation',

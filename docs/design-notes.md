@@ -19,6 +19,45 @@ Keeping ownership in the claim rather than in a status is what stops the two
 from disagreeing. A status that says "in progress" while nobody holds the item
 is the most common lie a board tells.
 
+## A column is a view, not a status
+
+Every project lays its board out for itself: "Investigating", "Monitoring",
+"Waiting on the operator", swimlanes per owner. None of that adds a status. A
+column is a name and a filter over what an item already is, and an item lands in
+the first column that matches, so the board is a partition and no card appears
+twice.
+
+This is the same decision as the four statuses, defended one level up. The board
+that died had eleven statuses because somebody needed a column called
+"verification_pending", and every agent, every filter and every sweep then had
+to learn it. A filter costs nobody anything: an agent that never reads the board
+keeps working exactly as before.
+
+Two consequences worth keeping:
+
+- **Nothing hides.** Items matching no column are counted and reported above the
+  board. A layout that quietly drops work is worse than no layout.
+- **An expired claim is not a claim.** The "in progress" column asks for a live
+  claim, so a crashed session's work goes back to the first column by itself,
+  the same way it does everywhere else in the system.
+
+## One project is one instance
+
+A project is the unit of separation: its own id, name, description, token,
+items, agents, questions and board. Nothing crosses between them and a token for
+one is refused by another, so an agent working on the arbitrage fleet cannot see
+or touch the equity project by accident.
+
+Making them cheap is the point. An agent creates one with a single POST, says
+what it is for, and hands it to a person; the person ends up owning all of them
+in one view. What makes that safe is that the handover is an offer: it waits in
+the operator's view until they accept it, so an agent can create a board for
+somebody without being able to put anything into their queue.
+
+The alternative, one big shared board with a project field, was tempting and
+wrong: every query would have needed a filter nobody can be trusted to apply,
+and one leaked token would have exposed everything.
+
 ## A slug is an identity, not a name
 
 The slug is the idempotency key. Posting the same slug twice updates one item

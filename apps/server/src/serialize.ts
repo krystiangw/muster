@@ -1,5 +1,13 @@
+import type { BoardView } from './board.js';
 import type { Config } from './config.js';
-import type { AgentDoc, EscalationDoc, ItemDoc, ProjectDoc } from './types.js';
+import {
+  DEFAULT_BOARD,
+  type AgentDoc,
+  type BoardConfig,
+  type EscalationDoc,
+  type ItemDoc,
+  type ProjectDoc,
+} from './types.js';
 
 /**
  * The wire format is snake_case and flat. Agents copy these keys straight out
@@ -69,13 +77,60 @@ export function escalationJson(doc: EscalationDoc): Record<string, unknown> {
   };
 }
 
+export function boardConfigJson(config: BoardConfig): Record<string, unknown> {
+  return {
+    rows: config.rows,
+    columns: config.columns.map((column) => ({
+      key: column.key,
+      title: column.title,
+      ...(column.hint ? { hint: column.hint } : {}),
+      match: {
+        ...(column.match.status ? { status: column.match.status } : {}),
+        ...(column.match.labels ? { labels: column.match.labels } : {}),
+        ...(column.match.notLabels ? { not_labels: column.match.notLabels } : {}),
+        ...(column.match.owner ? { owner: column.match.owner } : {}),
+        ...(column.match.claimed === undefined ? {} : { claimed: column.match.claimed }),
+        ...(column.match.stale === undefined ? {} : { stale: column.match.stale }),
+        ...(column.match.source ? { source: column.match.source } : {}),
+        ...(column.match.priorityMin === undefined
+          ? {}
+          : { priority_min: column.match.priorityMin }),
+        ...(column.match.fields ? { fields: column.match.fields } : {}),
+      },
+    })),
+  };
+}
+
+export function boardJson(view: BoardView, includeItems = true): Record<string, unknown> {
+  return {
+    board: boardConfigJson(view.config),
+    totals: view.totals,
+    unplaced: view.unplaced,
+    partial: view.partial,
+    rows: view.rows.map((row) => ({
+      key: row.key,
+      title: row.title,
+      columns: row.columns.map((cell) => ({
+        key: cell.key,
+        title: cell.title,
+        ...(cell.hint ? { hint: cell.hint } : {}),
+        count: cell.count,
+        truncated: cell.truncated,
+        ...(includeItems ? { items: cell.items.map((item) => itemJson(item)) } : {}),
+      })),
+    })),
+  };
+}
+
 export function projectJson(project: ProjectDoc, config: Config): Record<string, unknown> {
   return {
     project: project._id,
     name: project.name,
+    description: project.description ?? '',
     tier: project.tier,
     api: `${config.baseUrl}/v1/${project._id}`,
     read_url: `${config.baseUrl}/r/${project.readToken}`,
+    board: boardConfigJson(project.board ?? DEFAULT_BOARD),
     claimed: project.claimedBy !== null,
     expires_at: project.expiresAt,
     limits: project.limits,

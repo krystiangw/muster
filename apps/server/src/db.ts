@@ -6,6 +6,7 @@ import type {
   EscalationDoc,
   ItemDoc,
   ProjectDoc,
+  ShareDoc,
 } from './types.js';
 
 /**
@@ -49,6 +50,7 @@ export interface Store {
   escalations: Collection<Expiring<EscalationDoc>>;
   keys: Collection<Expiring<ApiKeyDoc>>;
   claimCodes: Collection<ClaimCodeDoc>;
+  shares: Collection<ShareDoc>;
   close(): Promise<void>;
 }
 
@@ -74,6 +76,7 @@ export async function createStore(uri: string, dbName: string): Promise<Store> {
     escalations: db.collection<Expiring<EscalationDoc>>('escalations'),
     keys: db.collection<Expiring<ApiKeyDoc>>('apiKeys'),
     claimCodes: db.collection<ClaimCodeDoc>('claimCodes'),
+    shares: db.collection<ShareDoc>('shares'),
     close: () => client.close(),
   };
 
@@ -150,6 +153,11 @@ export async function ensureIndexes(store: Store): Promise<void> {
     ]),
     store.oauthClients.createIndexes([
       { key: { projectId: 1 }, name: 'project' },
+      { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
+    ]),
+    store.shares.createIndexes([
+      { key: { email: 1, createdAt: -1 }, name: 'inbox' },
+      { key: { projectId: 1, email: 1 }, unique: true, name: 'once' },
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
     ]),
     store.operatorTokens.createIndexes([

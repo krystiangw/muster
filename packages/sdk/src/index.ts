@@ -99,10 +99,58 @@ export interface NextResult {
 
 export interface CreatedProject {
   project: string;
+  name: string;
+  description: string;
   token: string;
   api: string;
   read_url: string;
+  board_url: string;
   expires_at: string | null;
+}
+
+/**
+ * A board column: a name and a filter over what an item already is. There is
+ * deliberately no way to express a new status here, which is what stops a board
+ * layout from becoming a vocabulary every agent has to learn.
+ */
+export interface BoardColumn {
+  key?: string;
+  title: string;
+  hint?: string;
+  match: {
+    status?: ItemStatus[];
+    labels?: string[];
+    not_labels?: string[];
+    owner?: string[];
+    claimed?: boolean;
+    stale?: boolean;
+    source?: string[];
+    priority_min?: number;
+    fields?: Record<string, Array<string | number | boolean>>;
+  };
+}
+
+export interface BoardConfig {
+  rows: 'none' | 'owner' | 'label';
+  columns: BoardColumn[];
+}
+
+export interface BoardCell {
+  key: string;
+  title: string;
+  hint?: string;
+  count: number;
+  truncated: boolean;
+  items?: Item[];
+}
+
+export interface BoardView {
+  board: BoardConfig;
+  totals: Array<{ key: string; title: string; count: number }>;
+  /** Items no column matched. A board that hides work is worse than no board. */
+  unplaced: number;
+  partial: boolean;
+  rows: Array<{ key: string; title: string; columns: BoardCell[] }>;
 }
 
 export interface MusterOptions {
@@ -146,14 +194,14 @@ export class Muster {
    * shown once.
    */
   static async createProject(
-    input: { name?: string; baseUrl?: string; fetch?: typeof fetch } = {},
+    input: { name?: string; description?: string; baseUrl?: string; fetch?: typeof fetch } = {},
   ): Promise<CreatedProject> {
     const baseUrl = (input.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
     const doFetch = input.fetch ?? globalThis.fetch;
     const response = await doFetch(`${baseUrl}/p`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ name: input.name }),
+      body: JSON.stringify({ name: input.name, description: input.description }),
     });
     const body = (await response.json()) as CreatedProject & { error?: string; message?: string };
     if (!response.ok) {
@@ -164,7 +212,13 @@ export class Muster {
 
   /** Convenience: create a project and return a client already pointed at it. */
   static async start(
-    input: { name?: string; actor?: string; baseUrl?: string; fetch?: typeof fetch } = {},
+    input: {
+      name?: string;
+      description?: string;
+      actor?: string;
+      baseUrl?: string;
+      fetch?: typeof fetch;
+    } = {},
   ): Promise<{ client: Muster; created: CreatedProject }> {
     const created = await Muster.createProject(input);
     return {
@@ -395,10 +449,62 @@ export class Muster {
     return this.request('PATCH', `/escalations/${encodeURIComponent(id)}`, { status, answer });
   }
 
+  // -------------------------------------------------------------- board
+
+  /**
+   * The project's columns as its operator laid them out. Worth reading once
+   * when you join a project: a column is a filter over status, labels, owner
+   * and claim state, so the board tells you how this project wants work
+   * described. It never introduces a fifth status.
+   */
+  async board(options: { items?: boolean; includeClosed?: boolean } = {}): Promise<BoardView> {
+    return this.request('GET', '/board', undefined, {
+      items: options.items === undefined ? undefined : String(options.items),
+      include_closed: options.includeClosed === undefined ? undefined : String(options.includeClosed),
+    });
+  }
+
+  /** Lays the board out. Needs an admin token. */
+  async setBoard(config: BoardConfig): Promise<{ board: BoardConfig }> {
+    return this.request('PUT', '/board', config);
+  }
+
+  async boardPresets(): Promise<{
+    presets: Array<{ key: string; title: string; description: string; board: BoardConfig }>;
+  }> {
+    return this.request('GET', '/board/presets');
+  }
+
   // ------------------------------------------------------------ project
 
   async summary(): Promise<Record<string, unknown>> {
     return this.request('GET', '');
+  }
+
+  /** Renames the board or says what it is for. Needs an admin token. */
+  async describe(input: { name?: string; description?: string }): Promise<Record<string, unknown>> {
+    return this.request('PATCH', '', input);
+  }
+
+  /**
+   * Offers this board to a person. It waits in their operator view until they
+   * accept, which makes them the owner, lifts the limits and stops the project
+   * expiring. If they have never used Muster, `operator_has_an_inbox` is false
+   * and you should send them `tell_them` instead.
+   */
+  async share(input: { email: string; note?: string; agent?: string }): Promise<{
+    ok: boolean;
+    pending?: boolean;
+    already_owned?: boolean;
+    operator_has_an_inbox?: boolean;
+    tell_them?: string;
+    hint?: string;
+  }> {
+    return this.request('POST', '/share', {
+      email: input.email,
+      note: input.note,
+      agent: input.agent ?? this.actor,
+    });
   }
 
   async sweep(): Promise<{ swept: Record<string, number> }> {

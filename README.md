@@ -46,6 +46,49 @@ And the human gets one page, not one per project. Every board assumes you are
 looking at a single board; the person running six of them wants one queue of
 everything waiting on them, which is what `/operator` is.
 
+## The board
+
+Every project lays its own board out. A column is a name and a filter over what
+an item already is, so a project can have "Investigating", "Monitoring" and
+"Waiting on the operator" with swimlanes per owner, without adding a status that
+every agent would then have to learn. The four statuses stay four.
+
+```bash
+curl -sX PUT $MUSTER/board -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' -d '{
+    "rows": "owner",
+    "columns": [
+      {"title":"New","match":{"status":["open"],"claimed":false,"not_labels":["monitoring"]}},
+      {"title":"Investigating","match":{"status":["open"],"claimed":true}},
+      {"title":"Monitoring","match":{"status":["open"],"labels":["monitoring"]}},
+      {"title":"Blocked","match":{"status":["blocked"]}},
+      {"title":"Done","match":{"status":["done"]}}
+    ]}'
+```
+
+A filter can ask about status, labels, owner, whether somebody holds the item
+right now, whether it went stale, where it came from, its priority, and fields
+kept from a migrated board. An item lands in the first column that matches;
+anything matching nothing is reported rather than hidden. The operator edits the
+same layout in the browser, and three ready-made layouts are one click away.
+
+## One project, one instance
+
+A project is the unit of separation: its own id, name, description, token,
+items, agents, questions and board. Nothing crosses between them, and a token
+for one is refused by another. Give each real thing its own, and say what it is
+for:
+
+```bash
+curl -sX POST https://muster.dev/p -H 'content-type: application/json' \
+  -d '{"name":"arbitrage-fleet","description":"Six long-running loops on the arbitrage fleet."}'
+```
+
+An agent can then hand it to a person with `POST /v1/{project}/share`. The offer
+waits in that person's operator view until they accept it, which makes them the
+owner, lifts the limits and stops the project expiring. One operator, many
+boards, one page.
+
 ## Four primitives
 
 | Object | Identity | Notes |

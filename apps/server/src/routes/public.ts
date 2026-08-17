@@ -1,7 +1,9 @@
 import type { FastifyInstance } from 'fastify';
+import { BOARD_PRESETS, loadBoard, parseBoardConfig } from '../board.js';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
 import { chip, escapeHtml, formatWhen, layout } from '../html.js';
+import { renderBoard, renderBoardSettings } from './boardHtml.js';
 import { maybeSweep } from '../hygiene.js';
 import type { RateLimiter } from '../rateLimit.js';
 import { ServiceError, answerEscalation, createProject } from '../service.js';
@@ -396,7 +398,10 @@ address. Claiming is free and raises the limits:</p>
 
     const body = `
 <h1>${escapeHtml(project.name)}</h1>
-<p class="lead">${items.length} item(s), ${agents.length} agent(s), ${open.length} question(s)
+${project.description ? `<p class="lead">${escapeHtml(project.description)}</p>` : ''}
+<p class="mono" style="color:var(--muted)">${escapeHtml(project._id)} &middot;
+  <a href="/r/${escapeHtml(readToken)}/board">open the board</a></p>
+<p>${items.length} item(s), ${agents.length} agent(s), ${open.length} question(s)
 waiting for you.${project.expiresAt ? ` This project is unclaimed and will be deleted on ${escapeHtml(formatWhen(project.expiresAt))}.` : ''}</p>
 
 ${
@@ -460,6 +465,72 @@ ${
     return reply
       .type('text/html; charset=utf-8')
       .send(layout({ title: `${project.name} on Muster`, nav: true }, body));
+  });
+
+  app.get('/r/:readToken/board', { schema: { hide: true } }, async (request, reply) => {
+    const { readToken } = request.params as { readToken: string };
+    const project = await store.projects.findOne({ readToken });
+    if (!project) {
+      return reply
+        .code(404)
+        .type('text/html; charset=utf-8')
+        .send(
+          layout(
+            { title: 'No such project' },
+            '<h1>No such project</h1><p>That link is wrong, or the project expired and was deleted.</p>',
+          ),
+        );
+    }
+    void maybeSweep(store, project).catch(() => undefined);
+    const view = await loadBoard(store, project);
+
+    const body = `
+<h1>${escapeHtml(project.name)}</h1>
+${project.description ? `<p class="lead">${escapeHtml(project.description)}</p>` : ''}
+<p class="mono" style="color:var(--muted)">${escapeHtml(project._id)} &middot;
+  <a href="/r/${escapeHtml(readToken)}">questions and timeline</a></p>
+
+${renderBoard(view)}
+
+${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`)}
+`;
+    return reply
+      .type('text/html; charset=utf-8')
+      .send(
+        layout(
+          { title: `${project.name} board`, description: project.description, wide: true },
+          body,
+        ),
+      );
+  });
+
+  app.post('/r/:readToken/board', { schema: { hide: true } }, async (request, reply) => {
+    const { readToken } = request.params as { readToken: string };
+    const form = (request.body ?? {}) as { board?: string; preset?: string };
+    const project = await store.projects.findOne({ readToken });
+    if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
+
+    let config;
+    if (form.preset) {
+      const preset = BOARD_PRESETS[form.preset];
+      if (!preset) throw new ServiceError(400, 'bad_preset', 'No such layout.');
+      config = preset.config;
+    } else {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(form.board ?? '');
+      } catch {
+        throw new ServiceError(
+          400,
+          'bad_json',
+          'That is not valid JSON. Nothing was changed; go back and fix the layout.',
+        );
+      }
+      config = parseBoardConfig(parsed);
+    }
+
+    await store.projects.updateOne({ _id: project._id }, { $set: { board: config } });
+    return reply.redirect(`/r/${readToken}/board`, 303);
   });
 
   app.post('/r/:readToken/escalations/:id', { schema: { hide: true } }, async (request, reply) => {

@@ -22,7 +22,11 @@ MONGOD="$(ls node_modules/.cache/mongodb-memory-server/mongod-* 2>/dev/null | he
 
 stop() {
   pkill -f "mongod --dbpath $DATA/mongo" 2>/dev/null || true
-  pkill -f "muster/apps/server/dist/index.js" 2>/dev/null || true
+  # Kill by port, not by command line. The server is started with a relative
+  # path, so a pattern written against the absolute one silently matches
+  # nothing, the old process keeps the port, and the new one dies on bind while
+  # the stale build carries on answering. That cost half an hour once.
+  lsof -ti "tcp:$PORT" 2>/dev/null | xargs kill -9 2>/dev/null || true
   echo "stopped"
 }
 
@@ -41,7 +45,7 @@ mkdir -p "$DATA/mongo" "$DATA/log"
 nohup "$MONGOD" --dbpath "$DATA/mongo" --port "$MONGO_PORT" --bind_ip 127.0.0.1 \
   > "$DATA/log/mongod.log" 2>&1 &
 
-pnpm --filter @muster/server build > /dev/null
+pnpm --filter @muster/server build
 
 sleep 2
 MONGODB_URI="mongodb://127.0.0.1:$MONGO_PORT" \

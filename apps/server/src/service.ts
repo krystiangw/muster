@@ -16,6 +16,7 @@ import {
   type ItemDoc,
   type ItemStatus,
   type ProjectDoc,
+  type ShareDoc,
   type TimelineEntry,
   type TimelineKind,
 } from './types.js';
@@ -120,13 +121,14 @@ export interface CreatedProject {
 export async function createProject(
   store: Store,
   config: Config,
-  input: { name?: string },
+  input: { name?: string; description?: string },
 ): Promise<CreatedProject> {
   const now = new Date();
   const id = newId('p');
   const project: ProjectDoc = {
     _id: id,
     name: (input.name ?? 'Untitled project').slice(0, 120),
+    description: (input.description ?? '').slice(0, 500),
     tier: 'demo',
     limits: config.tiers.demo,
     rules: { ...DEFAULT_RULES },
@@ -173,6 +175,97 @@ export async function authenticate(store: Store, token: string): Promise<AuthCon
   // Best effort, and deliberately not awaited on the request path.
   void store.keys.updateOne({ _id: key._id }, { $set: { lastUsedAt: new Date() } });
   return { project, key };
+}
+
+export async function updateProject(
+  store: Store,
+  projectId: string,
+  input: { name?: string; description?: string },
+): Promise<ProjectDoc> {
+  const set: Record<string, unknown> = {};
+  if (input.name !== undefined) {
+    const name = input.name.trim();
+    if (!name) throw badRequest('bad_name', 'A project needs a name.');
+    set.name = name.slice(0, 120);
+  }
+  if (input.description !== undefined) set.description = input.description.slice(0, 500);
+
+  const project = await store.projects.findOneAndUpdate(
+    { _id: projectId },
+    { $set: set },
+    { returnDocument: 'after' },
+  );
+  if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
+  return project as ProjectDoc;
+}
+
+/**
+ * Offers a project to an operator. Nothing changes for them until they accept
+ * it from a view they already hold a link to, so this cannot be used to push a
+ * board into somebody's queue.
+ */
+export async function shareProject(
+  store: Store,
+  project: ProjectDoc,
+  input: { email: string; offeredBy?: string; note?: string },
+): Promise<{ share: ShareDoc; alreadyOwned: boolean }> {
+  const email = input.email.trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(email)) {
+    throw badRequest('bad_email', 'That does not look like an email address.');
+  }
+  if (project.claimedBy === email) {
+    const existing: ShareDoc = {
+      _id: newId('s'),
+      projectId: project._id,
+      email,
+      offeredBy: (input.offeredBy ?? 'unknown-agent').slice(0, 48),
+      note: (input.note ?? '').slice(0, 500),
+      createdAt: new Date(),
+      expiresAt: new Date(),
+    };
+    return { share: existing, alreadyOwned: true };
+  }
+
+  const now = new Date();
+  const share: ShareDoc = {
+    _id: newId('s'),
+    projectId: project._id,
+    email,
+    offeredBy: (input.offeredBy ?? 'unknown-agent').slice(0, 48),
+    note: (input.note ?? '').slice(0, 500),
+    createdAt: now,
+    // An offer nobody accepted is not worth keeping around for ever.
+    expiresAt: new Date(now.getTime() + 30 * 86_400_000),
+  };
+  await store.shares.updateOne(
+    { projectId: project._id, email },
+    { $set: share },
+    { upsert: true },
+  );
+  return { share, alreadyOwned: false };
+}
+
+export async function acceptShare(
+  store: Store,
+  config: Config,
+  email: string,
+  shareId: string,
+): Promise<ProjectDoc> {
+  const share = await store.shares.findOne({ _id: shareId, email });
+  if (!share) throw new ServiceError(404, 'not_found', 'No such offer.');
+  const project = await store.projects.findOne({ _id: share.projectId });
+  if (!project) {
+    await store.shares.deleteOne({ _id: shareId });
+    throw new ServiceError(404, 'project_gone', 'That project no longer exists.');
+  }
+  if (project.claimedBy && project.claimedBy !== email) {
+    await store.shares.deleteOne({ _id: shareId });
+    throw new ServiceError(409, 'already_owned', 'Somebody else already owns that project.');
+  }
+
+  await claimProjectWithEmail(store, project, email, config);
+  await store.shares.deleteMany({ projectId: project._id });
+  return (await store.projects.findOne({ _id: project._id })) as ProjectDoc;
 }
 
 export async function claimProjectWithEmail(
