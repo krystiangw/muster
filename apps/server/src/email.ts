@@ -9,10 +9,27 @@ export interface Mailer {
   sendOperatorLink(to: string, url: string, projectCount: number): Promise<'sent' | 'logged'>;
 }
 
+/** Enough of an address to match it to a report, not enough to be a mailing list. */
+function redactAddress(address: string): string {
+  const [name = '', domain = ''] = address.split('@');
+  return `${name.slice(0, 2)}***@${domain}`;
+}
+
 export function createMailer(config: Config, log: (msg: string) => void): Mailer {
   async function send(to: string, subject: string, lines: string[]): Promise<'sent' | 'logged'> {
     if (!config.resendApiKey) {
-      log(`email to ${to} [${subject}]: ${lines.join(' | ')}`);
+      // The fallback exists so a local run and a self-host with no outbound
+      // mail can still finish a claim. What it prints is a live credential
+      // though: a six digit code, or an operator link that anybody holding can
+      // answer somebody's agents with. On production that goes nowhere near the
+      // log, and the missing key is reported as the operational fault it is.
+      if (config.logUnsentEmails) {
+        log(`email to ${to} [${subject}]: ${lines.join(' | ')}`);
+      } else {
+        log(
+          `email to ${redactAddress(to)} was not sent: RESEND_API_KEY is not configured. The message is discarded rather than logged, because it carries a credential.`,
+        );
+      }
       return 'logged';
     }
     const response = await fetch('https://api.resend.com/emails', {

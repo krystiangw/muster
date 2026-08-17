@@ -1,3 +1,5 @@
+import { hashToken } from '../ids.js';
+import { clientIp } from './api.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
@@ -38,6 +40,9 @@ import {
  */
 
 const DEFAULT_PROTOCOL_VERSION = '2025-06-18';
+
+/** How many JSON-RPC requests one batch may carry. */
+const MAX_BATCH = 25;
 
 interface JsonRpcRequest {
   jsonrpc: '2.0';
@@ -299,6 +304,20 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
   app.post('/mcp', { schema: { hide: true } }, async (request, reply) => {
     const body = request.body as JsonRpcRequest | JsonRpcRequest[] | undefined;
     if (Array.isArray(body)) {
+      // A JSON-RPC batch is one HTTP request and as many pieces of work as it
+      // has members. Left uncapped, a megabyte of body is several thousand
+      // tool calls that the per-request limiter counts once, so one client
+      // turns a rate limit into a suggestion. Real clients batch a handful.
+      if (body.length > MAX_BATCH) {
+        return reply.code(400).send({
+          jsonrpc: '2.0',
+          id: null,
+          error: {
+            code: -32600,
+            message: `A batch holds at most ${MAX_BATCH} requests; this one had ${body.length}. Send them in smaller batches.`,
+          },
+        });
+      }
       const results = [];
       for (const entry of body) {
         const result = await handle(entry, request, reply);
@@ -419,10 +438,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
     if (!tool.requiresProject) {
       // The same published limit as POST /p. A tool call is a cheaper way to
       // ask for a project, not a way around the cap.
-      const ip =
-        (typeof request.headers['x-forwarded-for'] === 'string'
-          ? request.headers['x-forwarded-for'].split(',')[0]!.trim()
-          : request.ip) || 'unknown';
+      const ip = clientIp(request);
       const verdict = limiter.check(`create:${ip}`, config.rateLimits.createProject);
       if (!verdict.ok) {
         throw new ServiceError(
@@ -460,6 +476,36 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         'Send your project token as "authorization: Bearer <token>". Call create_project first if you do not have one.',
       );
     }
+
+    // Charged per tool call, on the same buckets the REST surface uses. The
+    // REST side limits in a preHandler, which counts one HTTP request; a batch
+    // is many calls inside one request, so the count has to happen here or the
+    // two doors publish the same limit and enforce different things. Charged
+    // before the lookup, so an invalid token cannot spend a database query per
+    // batch member either.
+    const writes = new Set([
+      'register_agent',
+      'upsert_item',
+      'claim_item',
+      'append_note',
+      'observe',
+      'escalate',
+      'move',
+      'share_project',
+    ]);
+    const kind = writes.has(tool.name) ? 'w' : 'r';
+    const verdict = limiter.check(
+      `tok:${hashToken(token).slice(0, 16)}:${kind}`,
+      kind === 'w' ? config.rateLimits.write : config.rateLimits.read,
+    );
+    if (!verdict.ok) {
+      throw new ServiceError(
+        429,
+        'rate_limited',
+        `Too many calls. Retry in ${verdict.retryAfterSeconds}s. Published limits live at ${config.baseUrl}/.well-known/agent-access.json.`,
+      );
+    }
+
     const { project } = await authenticate(store, token);
     const actor = str(args.actor) || str(args.agent) || 'unknown-agent';
 
@@ -580,23 +626,14 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         });
         if (alreadyOwned) return { ok: true, already_owned: true };
 
-        // Same answer the HTTP endpoint gives. Somebody who has never claimed a
-        // project has no operator view for the offer to appear in, and an agent
-        // told otherwise leaves the board somewhere nobody will look until it
-        // expires.
-        const known = await store.projects.countDocuments({
-          claimedBy: email.trim().toLowerCase(),
-        });
+        // The same answer for every address, for the reason the HTTP endpoint
+        // gives: whether somebody is already a user is not this caller's
+        // business, and a project token costs nothing to obtain.
         return {
           ok: true,
           pending: true,
-          operator_has_an_inbox: known > 0,
-          tell_them:
-            known > 0 ? `${config.baseUrl}/operator` : `${config.baseUrl}/r/${project.readToken}`,
-          hint:
-            known > 0
-              ? 'It is waiting in their operator view; one click makes them the owner.'
-              : 'They have no operator view yet. Send them the read link, or use the claim endpoint to have them confirm an email.',
+          tell_them: `${config.baseUrl}/r/${project.readToken}`,
+          hint: 'Send them that link. If they already use Muster, the offer is also waiting in their operator view, where one click makes them the owner.',
         };
       }
       case 'inbox': {

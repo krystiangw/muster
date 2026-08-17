@@ -314,8 +314,12 @@ export async function claimProjectWithEmail(
   config: Config,
 ): Promise<void> {
   const now = new Date();
-  await store.projects.updateOne(
-    { _id: project._id },
+  // Guarded, because ownership is not a field anybody may overwrite. An
+  // unguarded $set let a second claim move a live project to another address,
+  // and the previous owner simply stopped seeing it in their operator view.
+  // Unowned, or already this person's: everything else is a conflict.
+  const taken = await store.projects.updateOne(
+    { _id: project._id, $or: [{ claimedBy: null }, { claimedBy: email }] },
     {
       $set: {
         claimedBy: email,
@@ -326,6 +330,13 @@ export async function claimProjectWithEmail(
       },
     },
   );
+  if (taken.matchedCount === 0) {
+    throw new ServiceError(
+      409,
+      'already_owned',
+      'Somebody else already owns this project. Ask them to hand it over rather than claiming it again.',
+    );
+  }
   // Children carry their own TTL so the sweep needs no orphan pass; clearing it
   // here is the one bulk write a project ever needs.
   const clear = { $set: { expiresAt: null } };

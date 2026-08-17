@@ -95,12 +95,18 @@ function requireAdmin(request: FastifyRequest): AuthContext {
   return ctx;
 }
 
-function clientIp(request: FastifyRequest): string {
-  const forwarded = request.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string' && forwarded.length > 0) {
-    return forwarded.split(',')[0]!.trim();
-  }
-  return request.ip;
+/**
+ * The address a rate limit counts against.
+ *
+ * Never the raw x-forwarded-for header. Heroku's router *appends* the real
+ * client to whatever the client already sent, so reading the first entry lets
+ * anybody open a fresh bucket per request by inventing an address, which was
+ * measured: nine project creations in a row against a published limit of five
+ * an hour. Fastify resolves this correctly from the socket and the number of
+ * proxies we say we are behind (see trustProxy in app.ts), so ask Fastify.
+ */
+export function clientIp(request: FastifyRequest): string {
+  return request.ip || 'unknown';
 }
 
 export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
@@ -1023,6 +1029,29 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
     );
 
     scoped.post(
+      '/v1/:project/read-link/rotate',
+      {
+        schema: {
+          tags: ['projects'],
+          summary: 'Replace the read link',
+          description:
+            'The read link is a capability: whoever holds it reads the board, lays it out, moves cards and answers questions. That is what makes it useful to hand to a person, and it is also why a leaked one has to be revocable. Rotating mints a new link and stops the old one dead.',
+        },
+      },
+      async (request) => {
+        const { project } = requireAdmin(request);
+        const readToken = newId('r', 16);
+        await store.projects.updateOne({ _id: project._id }, { $set: { readToken } });
+        return {
+          ok: true,
+          read_url: `${config.baseUrl}/r/${readToken}`,
+          board_url: `${config.baseUrl}/r/${readToken}/board`,
+          note: 'The previous link stops working immediately. Anyone who had it needs the new one.',
+        };
+      },
+    );
+
+    scoped.post(
       '/v1/:project/share',
       {
         schema: {
@@ -1061,21 +1090,19 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           });
         }
 
-        const known = await store.projects.countDocuments({
-          claimedBy: body.email.trim().toLowerCase(),
-        });
         return reply.code(201).send({
           ok: true,
           pending: true,
-          // Somebody who has never claimed a project has no operator view to
-          // see the offer in, so tell the agent to hand over the link instead
-          // of leaving the offer sitting where nobody will look.
-          operator_has_an_inbox: known > 0,
-          tell_them: known > 0 ? `${config.baseUrl}/operator` : `${config.baseUrl}/r/${project.readToken}`,
-          hint:
-            known > 0
-              ? 'It is waiting in their operator view; they accept it with one click.'
-              : 'They have no operator view yet. Send them the read link, or use /claim to have them confirm an email.',
+          // Deliberately the same answer for an address that owns projects and
+          // one that has never been seen. The earlier version returned whether
+          // the person already had an operator view, which was a useful hint
+          // and also an oracle: a project token costs nothing, so anybody could
+          // ask this service whether a given address is one of its users. The
+          // agent's next move does not depend on the answer anyway. Send them
+          // the link; if they already have an operator view, the offer is
+          // waiting there too.
+          tell_them: `${config.baseUrl}/r/${project.readToken}`,
+          hint: 'Send them that link. If they already use Muster, the offer is also waiting in their operator view, where one click makes them the owner.',
         });
       },
     );
@@ -1097,7 +1124,10 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         },
       },
       async (request, reply) => {
-        const { project } = auth(request);
+        // Admin, not write. Ownership decides who receives the operator link
+        // for this project, so a worker key handed to one agent must not be
+        // able to bind the whole tenant to an address of its choosing.
+        const { project } = requireAdmin(request);
         const { email } = request.body as { email: string };
         if (!/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(email)) {
           throw new ServiceError(400, 'bad_email', 'That does not look like an email address.');
@@ -1148,7 +1178,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         },
       },
       async (request) => {
-        const { project } = auth(request);
+        const { project } = requireAdmin(request);
         const { email, code } = request.body as { email: string; code: string };
         const pending = await store.claimCodes.findOne({
           projectId: project._id,

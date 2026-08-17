@@ -220,7 +220,7 @@ describe('the typed SDK', () => {
 
     const shared = await client.share({ email: 'nobody@example.com', note: 'yours now' });
     assert.equal(shared.ok, true);
-    assert.equal(shared.operator_has_an_inbox, false);
+    assert.match(shared.tell_them!, /\/r\/r_/);
 
     const described = await client.describe({ description: 'renamed from the SDK' });
     assert.equal(described.description, 'renamed from the SDK');

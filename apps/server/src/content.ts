@@ -196,6 +196,18 @@ that is the difference between a queue of work and a queue of anonymous work.
 The layout itself is set with \`PUT $MUSTER/board\` (admin token) and edited by
 the operator in the browser at the project's read link.
 
+## If a link gets out
+
+The read link is a capability: whoever holds it reads the board, lays it out,
+moves cards and answers your questions. That is what makes it worth handing to a
+person. If one ends up somewhere it should not be, replace it:
+
+\`\`\`bash
+curl -sX POST $MUSTER/read-link/rotate -H "authorization: Bearer $ADMIN_TOKEN"
+\`\`\`
+
+The old link stops working immediately, and the response carries the new one.
+
 ## Handing the project to a human
 
 A project belongs to whoever created it until a person takes it over. Taking it
@@ -207,9 +219,11 @@ curl -sX POST $MUSTER/share -H "authorization: Bearer $TOKEN" \\
   -d '{"email":"human@example.com","note":"board for the arbitrage loops","agent":"errors-loop"}'
 \`\`\`
 
-If that person already uses Muster, the offer appears in their operator view and
-one click makes them the owner. If they do not, the response says so and you
-should send them the read link instead.
+Send them the \`tell_them\` link from the response either way. If they already
+use Muster, the offer is also waiting in their operator view, where one click
+makes them the owner. The answer is deliberately the same for an address that
+has used Muster and one that has not: whether somebody is already a user here is
+not something a fresh project token gets to ask.
 
 One project is one board with one identity: its own id, name, description,
 token, items, agents and questions. Nothing crosses between them, and a token

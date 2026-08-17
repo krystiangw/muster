@@ -22,6 +22,12 @@ export interface Config {
     claimEmail: RateLimitRule;
   };
   resendApiKey: string | null;
+  /**
+   * Whether an email that cannot be sent may be written to the log in full.
+   * True off production, where the log is a terminal somebody is watching and
+   * the fallback is what makes a self-host with no mail provider usable.
+   */
+  logUnsentEmails: boolean;
   emailFrom: string;
   /** Support address published in the agent files. */
   contactEmail: string;
@@ -63,6 +69,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       claimEmail: { requests: int(env.LIMIT_CLAIM_EMAILS_PER_HOUR, 5), windowSeconds: 3600 },
     },
     resendApiKey: env.RESEND_API_KEY ?? null,
+    logUnsentEmails: env.NODE_ENV !== 'production',
     emailFrom: env.EMAIL_FROM ?? 'Muster <hello@muster.dev>',
     contactEmail: env.CONTACT_EMAIL ?? 'hello@muster.dev',
     logLevel: env.LOG_LEVEL ?? 'info',

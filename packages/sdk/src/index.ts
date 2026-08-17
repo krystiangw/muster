@@ -539,14 +539,14 @@ export class Muster {
   /**
    * Offers this board to a person. It waits in their operator view until they
    * accept, which makes them the owner, lifts the limits and stops the project
-   * expiring. If they have never used Muster, `operator_has_an_inbox` is false
-   * and you should send them `tell_them` instead.
+   * expiring. Send them `tell_them` either way: the answer is deliberately the
+   * same whether or not that address already uses Muster, because whether it
+   * does is not the caller's business.
    */
   async share(input: { email: string; note?: string; agent?: string }): Promise<{
     ok: boolean;
     pending?: boolean;
     already_owned?: boolean;
-    operator_has_an_inbox?: boolean;
     tell_them?: string;
     hint?: string;
   }> {

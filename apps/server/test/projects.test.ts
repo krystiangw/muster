@@ -141,7 +141,7 @@ describe('handing a project to its operator', () => {
       agent: 'night-loop',
     });
     assert.equal(shared.statusCode, 201);
-    assert.equal(shared.json().operator_has_an_inbox, true);
+    assert.match(shared.json().tell_them, /\/r\/r_/);
 
     // Offered, not yet theirs.
     const before = await harness.store.projects.findOne({ _id: project.id });
@@ -195,12 +195,25 @@ describe('handing a project to its operator', () => {
     assert.equal(after!.claimedBy, null, 'declining changes nothing about the project');
   });
 
-  it('tells the agent when the person has no inbox to receive it', async () => {
-    const project = await createProject(harness, 'orphan');
-    const shared = await post(project, '/share', { email: 'stranger@example.com', agent: 'a' });
-    assert.equal(shared.statusCode, 201);
-    assert.equal(shared.json().operator_has_an_inbox, false);
-    assert.match(shared.json().tell_them, /\/r\/r_/);
+  it('answers the same for a known address and a stranger', async () => {
+    const anchor = await createProject(harness, 'anchor');
+    await claimFor(anchor, 'known@example.com');
+
+    const toKnown = await post(await createProject(harness, 'one'), '/share', {
+      email: 'known@example.com',
+      agent: 'a',
+    });
+    const toStranger = await post(await createProject(harness, 'two'), '/share', {
+      email: 'stranger@example.com',
+      agent: 'a',
+    });
+
+    // A project token costs nothing, so any difference here would answer
+    // "is this person a user of yours" for anybody who cares to ask.
+    assert.equal(toKnown.statusCode, toStranger.statusCode);
+    assert.equal(toKnown.json().hint, toStranger.json().hint);
+    assert.deepEqual(Object.keys(toKnown.json()).sort(), Object.keys(toStranger.json()).sort());
+    assert.ok(!('operator_has_an_inbox' in toKnown.json()));
   });
 
   it('refuses an offer for a project somebody else already owns', async () => {
@@ -290,15 +303,14 @@ describe('handing a project to its operator', () => {
     };
 
     const toKnown = await call(await createProject(harness, 'for known'), 'known@example.com');
-    assert.equal(toKnown.operator_has_an_inbox, true);
-    assert.match(toKnown.tell_them, /\/operator$/);
-
     const toStranger = await call(await createProject(harness, 'for stranger'), 'nobody@example.com');
-    // Without this the agent is told the board is waiting for somebody who has
-    // no view to wait in, and it expires unseen.
-    assert.equal(toStranger.operator_has_an_inbox, false);
+
+    // The same shape and the same words through this door too, or the oracle
+    // just moves to whichever door is quieter.
+    assert.match(toKnown.tell_them, /\/r\/r_/);
     assert.match(toStranger.tell_them, /\/r\/r_/);
-    assert.match(toStranger.hint, /read link/);
+    assert.equal(toKnown.hint, toStranger.hint);
+    assert.ok(!('operator_has_an_inbox' in toKnown));
   });
 
   it('gives a contested project to exactly one accepter', async () => {

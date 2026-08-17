@@ -7,6 +7,7 @@ import { hashToken, newId, newToken } from '../ids.js';
 import type { RateLimiter } from '../rateLimit.js';
 import { ServiceError, acceptShare, answerEscalation } from '../service.js';
 import { ESCALATION_STATUSES, type EscalationStatus } from '../types.js';
+import { clientIp } from './api.js';
 
 /**
  * The operator view: every project one person owns, and every question waiting
@@ -53,10 +54,7 @@ mistake, open a link you still have and turn off every other one from there.</p>
   app.post('/operator', { schema: { hide: true } }, async (request, reply) => {
     const form = (request.body ?? {}) as { email?: string };
     const email = (form.email ?? '').trim().toLowerCase();
-    const ip =
-      typeof request.headers['x-forwarded-for'] === 'string'
-        ? request.headers['x-forwarded-for'].split(',')[0]!.trim()
-        : request.ip;
+    const ip = clientIp(request);
     const verdict = limiter.check(`operator:${ip}`, config.rateLimits.claimEmail);
     if (!verdict.ok) {
       return reply

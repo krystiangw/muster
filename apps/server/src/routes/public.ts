@@ -1,3 +1,4 @@
+import { clientIp } from './api.js';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import {
   BOARD_PRESETS,
@@ -430,10 +431,7 @@ curl -sX POST ${escapeHtml(base)}/p -H 'content-type: application/json' -d '{"na
   });
 
   app.post('/signup', { schema: { hide: true } }, async (request, reply) => {
-    const ip =
-      typeof request.headers['x-forwarded-for'] === 'string'
-        ? request.headers['x-forwarded-for'].split(',')[0]!.trim()
-        : request.ip;
+    const ip = clientIp(request);
     const verdict = limiter.check(`create:${ip}`, config.rateLimits.createProject);
     if (!verdict.ok) {
       return reply

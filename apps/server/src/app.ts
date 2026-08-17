@@ -1,3 +1,4 @@
+import type { FastifyRequest } from 'fastify';
 import formbody from '@fastify/formbody';
 import swagger from '@fastify/swagger';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
@@ -19,12 +20,40 @@ export interface App {
   limiter: RateLimiter;
 }
 
+/**
+ * Capability links are credentials in a URL. Anything that writes a URL
+ * somewhere it will be kept has to drop the token first.
+ */
+export function redactCapabilities(url: string): string {
+  return url
+    .replace(/\/r\/[^/?#]+/g, '/r/[redacted]')
+    .replace(/\/operator\/[^/?#]+/g, '/operator/[redacted]');
+}
+
 export async function buildApp(config: Config, store: Store): Promise<App> {
   const server = Fastify({
-    logger: { level: config.logLevel },
-    // Heroku terminates TLS at the router, so the client address arrives in
-    // x-forwarded-for. Rate limits key on it.
-    trustProxy: true,
+    logger: {
+      level: config.logLevel,
+      serializers: {
+        /**
+         * A read link and an operator link are the credential, and they live in
+         * the path. Logging the URL as it arrived wrote working capabilities
+         * into the platform log, where they outlive the session and reach
+         * anybody who can run `heroku logs`. The path still tells you which
+         * route was hit, which is what the log is for.
+         */
+        req: (request: FastifyRequest) => ({
+          method: request.method,
+          url: redactCapabilities(request.url),
+          host: request.headers.host,
+          remoteAddress: request.ip,
+        }),
+      },
+    },
+    // Exactly one proxy: Heroku's router. It *appends* the client to whatever
+    // x-forwarded-for arrived, so trusting every hop would take the attacker's
+    // own first entry and hand out a fresh rate limit bucket per request.
+    trustProxy: 1,
     bodyLimit: 1_048_576,
     routerOptions: {
       // An agent that writes to /items/ instead of /items should get its item
@@ -35,6 +64,40 @@ export async function buildApp(config: Config, store: Store): Promise<App> {
 
   const limiter = new RateLimiter();
   const mailer = createMailer(config, (message) => server.log.info(message));
+
+  /**
+   * Security headers.
+   *
+   * These pages ship no JavaScript at all, which makes the policy unusually
+   * strict rather than unusually loose: nothing may be fetched, nothing may be
+   * executed, and the only thing allowed is the stylesheet the page carries
+   * inline. Two of these are load bearing for this particular product:
+   *
+   *  - `Referrer-Policy: no-referrer`, because a read link and an operator link
+   *    are credentials that live in the path, and a Referer header hands them
+   *    to whatever a person clicks through to next.
+   *  - `frame-ancestors 'none'`, because those same pages carry one click
+   *    forms that accept a board or move a card, which is exactly what a
+   *    clickjacking frame is for.
+   */
+  server.addHook('onSend', async (request, reply, payload) => {
+    reply.header('x-content-type-options', 'nosniff');
+    reply.header('referrer-policy', 'no-referrer');
+    reply.header('cross-origin-opener-policy', 'same-origin');
+    reply.header(
+      'content-security-policy',
+      "default-src 'none'; style-src 'unsafe-inline'; img-src data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+    );
+    // Only meaningful over TLS, and the deploy terminates TLS at the router.
+    if (request.headers['x-forwarded-proto'] === 'https') {
+      reply.header('strict-transport-security', 'max-age=31536000; includeSubDomains');
+    }
+    // A capability URL response is nobody else's to cache.
+    if (request.url.startsWith('/r/') || request.url.startsWith('/operator/')) {
+      reply.header('cache-control', 'private, no-store');
+    }
+    return payload;
+  });
 
   await server.register(formbody);
   await server.register(swagger, {

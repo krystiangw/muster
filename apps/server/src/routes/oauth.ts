@@ -4,6 +4,7 @@ import type { Store } from '../db.js';
 import { hashToken, newId, newToken } from '../ids.js';
 import type { RateLimiter } from '../rateLimit.js';
 import { createApiKey, createProject } from '../service.js';
+import { clientIp } from './api.js';
 
 /**
  * OAuth 2.1 dynamic client registration, RFC 7591.
@@ -75,10 +76,7 @@ export function registerOAuth(app: FastifyInstance, deps: OAuthDeps): void {
       },
     },
     async (request, reply) => {
-      const ip =
-        (typeof request.headers['x-forwarded-for'] === 'string'
-          ? request.headers['x-forwarded-for'].split(',')[0]!.trim()
-          : request.ip) || 'unknown';
+      const ip = clientIp(request);
       const verdict = limiter.check(`create:${ip}`, config.rateLimits.createProject);
       if (!verdict.ok) {
         return reply
