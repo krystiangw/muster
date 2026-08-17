@@ -311,6 +311,45 @@ describe('the human read view', () => {
   });
 });
 
+describe('the plugin manifest', () => {
+  it('is published whole or not at all', async () => {
+    // Its schema requires a contact and a logo. A manifest missing a required
+    // field is one a strict client throws away, so a deployment with nobody to
+    // write to says so with a 404 instead of publishing a broken file.
+    const without = await harness.server.inject({ method: 'GET', url: '/.well-known/ai-plugin.json' });
+    assert.equal(without.statusCode, 404);
+    assert.equal(without.json().error, 'not_configured');
+
+    const reachable = await startHarness({ CONTACT_EMAIL: 'hello@example.com' });
+    try {
+      const page = await reachable.server.inject({
+        method: 'GET',
+        url: '/.well-known/ai-plugin.json',
+      });
+      assert.equal(page.statusCode, 200);
+      const manifest = page.json();
+      for (const field of [
+        'schema_version',
+        'name_for_human',
+        'name_for_model',
+        'description_for_human',
+        'description_for_model',
+        'auth',
+        'api',
+        'logo_url',
+        'contact_email',
+        'legal_info_url',
+      ]) {
+        assert.ok(manifest[field], `${field} is required by the manifest schema`);
+      }
+      assert.equal(manifest.contact_email, 'hello@example.com');
+      assert.match(manifest.logo_url, /\/apple-touch-icon\.png$/);
+    } finally {
+      await reachable.stop();
+    }
+  });
+});
+
 describe('the mark', () => {
   it('serves an icon in three shapes, and points every page at them', async () => {
     const page = await harness.server.inject({ method: 'GET', url: '/' });

@@ -24,7 +24,20 @@ function redactAddress(address: string): string {
   return `${name.slice(0, 2)}***@${domain}`;
 }
 
+/** The shared sender Resend hands out before a domain is verified. */
+const SHARED_SENDER = 'resend.dev';
+
 export function createMailer(config: Config, log: (msg: string) => void): Mailer {
+  // Resend accepts this sender from anybody and delivers it to one mailbox:
+  // the one that owns the key. A deployment serving other people cannot sign
+  // any of them in, and the failure looks like "the code never arrived", which
+  // is the hardest kind to attribute. Say it at boot instead.
+  if (config.resendApiKey && config.emailFrom.includes(SHARED_SENDER)) {
+    log(
+      `EMAIL_FROM uses ${SHARED_SENDER}, which Resend delivers only to the address that owns the API key. Codes for everybody else will be accepted and never arrive. Set EMAIL_FROM to an address on a verified domain.`,
+    );
+  }
+
   async function send(to: string, subject: string, lines: string[]): Promise<Delivery> {
     if (!config.resendApiKey) {
       // The fallback exists so a local run and a self-host with no outbound

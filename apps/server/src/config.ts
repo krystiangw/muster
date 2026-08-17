@@ -75,6 +75,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     },
     resendApiKey: env.RESEND_API_KEY ?? null,
     logUnsentEmails: env.NODE_ENV !== 'production',
+    // The shared Resend sender is a development convenience and nothing more:
+    // it only delivers to the address that owns the API key, so a production
+    // deployment that keeps it silently fails every sign in but the operator's
+    // own. `createMailer` says so out loud at boot rather than at the first
+    // person who cannot get in.
     emailFrom: env.EMAIL_FROM ?? 'Muster <onboarding@resend.dev>',
     // No default. An address on a domain this deployment does not own
     // sends every reply to a stranger, which is worse than offering

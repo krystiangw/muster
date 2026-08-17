@@ -10,7 +10,7 @@ takes a domain, which is the operator's call. The commands are ready to paste.
 | Heroku dyno, EU, **Basic** | 7 USD/mies. | Eco sleeps after 30 minutes of silence. A cold start of 5-10 seconds is a timeout for an agent, and the whole product promise is that an agent can rely on this mid-loop. |
 | MongoDB Atlas **M0**, EU | 0 USD | 512 MB. Our documents are a few kilobytes; this is a year of headroom at our own scale. |
 | `musterboard.dev` at Porkbun | 8.75 USD first year, 12.87 to renew | `.dev` is HSTS-preloaded, so HTTPS is not optional. `muster.dev` itself has been registered to somebody else since 2021, and every short variant of the name went in 2026. |
-| Resend | 0 USD | Free tier covers the claim codes. Domain already verified for our other sends. |
+| Resend | 0 USD | Free tier covers the claim codes, and one verified domain. That one is already spent, so Muster sends from it until a second domain is worth paying for: the shared `onboarding@resend.dev` sender delivers only to the account owner, which would leave every other person unable to sign in. |
 
 Total to run it: **about 8 USD a month.**
 
@@ -54,7 +54,17 @@ heroku domains:add www.musterboard.dev -a muster-web
 heroku certs:auto:enable -a muster-web
 ```
 
-Then point the Porkbun records at the DNS targets Heroku prints. `.dev` requires
+Then point the Porkbun records at the DNS targets Heroku prints. Once
+`heroku certs:auto` reports the certificate as issued, move the public origin
+across, because every generated link, the sitemap, the OAuth metadata and every
+agent-facing file are built from it:
+
+```bash
+heroku config:set BASE_URL=https://musterboard.dev -a muster-web
+```
+
+Running the acceptance scan before that switch measures a host the app does not
+believe it is served from, which is the mismatch this runbook exists to avoid. `.dev` requires
 HTTPS from the first request, so do not announce the domain before
 `heroku certs:auto` reports `OK`.
 

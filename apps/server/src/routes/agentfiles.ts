@@ -94,16 +94,31 @@ export function registerAgentFiles(app: FastifyInstance, config: Config, store: 
     seen('mcp.json');
     return mcpCard;
   });
-  app.get('/.well-known/ai-plugin.json', { schema: { hide: true } }, async () => ({
-    schema_version: 'v1',
-    name_for_model: 'muster',
-    name_for_human: 'Muster',
-    description_for_model:
-      'Shared operational memory for long-lived agents: items with stable slugs, claims with TTL, timelines and escalations to a human.',
-    description_for_human: 'Shared operational memory for long-lived agents.',
-    auth: { type: 'bearer' },
-    api: { type: 'openapi', url: `${config.baseUrl}/openapi.json` },
-    ...(config.contactEmail ? { contact_email: config.contactEmail } : {}),
-    legal_info_url: `${config.baseUrl}/docs`,
-  }));
+  // The legacy plugin manifest, kept for clients that still look for it. Its
+  // schema requires a contact address and a logo, and a manifest missing a
+  // required field is one a strict client throws away: publishing an invalid
+  // one is worse than publishing none, so a deployment with nobody to write to
+  // does not publish it at all.
+  app.get('/.well-known/ai-plugin.json', { schema: { hide: true } }, async (_request, reply) => {
+    if (!config.contactEmail) {
+      return reply.code(404).send({
+        error: 'not_configured',
+        message: 'This deployment publishes no plugin manifest: it has no contact address set.',
+      });
+    }
+    seen('ai-plugin.json');
+    return {
+      schema_version: 'v1',
+      name_for_model: 'muster',
+      name_for_human: 'Muster',
+      description_for_model:
+        'Shared operational memory for long-lived agents: items with stable slugs, claims with TTL, timelines and escalations to a human.',
+      description_for_human: 'Shared operational memory for long-lived agents.',
+      auth: { type: 'bearer' },
+      api: { type: 'openapi', url: `${config.baseUrl}/openapi.json` },
+      logo_url: `${config.baseUrl}/apple-touch-icon.png`,
+      contact_email: config.contactEmail,
+      legal_info_url: `${config.baseUrl}/docs`,
+    };
+  });
 }
