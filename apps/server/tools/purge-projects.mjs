@@ -58,6 +58,7 @@ const OWNED = [
   'apiKeys',
   'claimCodes',
   'shares',
+  'handoverRequests',
   'oauthClients',
   'events',
 ];

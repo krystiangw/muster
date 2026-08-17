@@ -96,12 +96,11 @@ describe('ownership is not something a worker key can take', () => {
 
     const doc = await harness.store.projects.findOne({ _id: project.id });
     assert.ok(['first@example.com', 'attacker@example.com'].includes(doc!.claimedBy!));
-    assert.equal(
-      (won[0]!.json() as { project: { claimed_by?: string } }).project.claimed_by ??
-        doc!.claimedBy,
-      doc!.claimedBy,
-      'and the answer matches what was stored',
-    );
+    // The response names the owner in the redacted form the API always uses:
+    // an agent needs to know whether the board has one and whether that
+    // changed, and has no business holding somebody's address.
+    const said = (won[0]!.json() as { project: { claimed_by?: string } }).project.claimed_by;
+    assert.equal(said, `${doc!.claimedBy!.slice(0, 2)}***@example.com`);
   });
 
   it('refuses to start a claim on a project that already has an owner', async () => {
