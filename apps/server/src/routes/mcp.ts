@@ -17,7 +17,7 @@ import {
   createProject,
   appendNote,
   listEscalations,
-  listHandoverRequests,
+  readInbox,
   listItems,
   nextItem,
   observe,
@@ -656,19 +656,16 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         };
       }
       case 'inbox': {
-        const docs = await listEscalations(store, project._id, {
-          agent: str(args.agent) || undefined,
+        // The same function the HTTP route uses. This case used to page one
+        // list of escalations and split it in memory, which meant an open
+        // question fell off the end once a project had fifty answered ones,
+        // and an answer already acted on kept coming back for ever.
+        const { answers, waiting, handovers } = await readInbox(store, project, {
+          ...(str(args.agent) ? { agent: str(args.agent) } : {}),
         });
-        // Somebody standing at the read link asking to be made the owner is
-        // the other thing an agent has to notice here, and an interface that
-        // hides it is an interface through which the handover cannot be
-        // completed at all.
-        const handovers = project.claimedBy
-          ? []
-          : await listHandoverRequests(store, project._id);
         return {
-          answers: docs.filter((doc) => doc.status !== 'open').map(escalationJson),
-          waiting: docs.filter((doc) => doc.status === 'open').map(escalationJson),
+          answers: answers.map(escalationJson),
+          waiting: waiting.map(escalationJson),
           ...(handovers.length > 0
             ? {
                 handover_requests: handovers.map((doc) => ({

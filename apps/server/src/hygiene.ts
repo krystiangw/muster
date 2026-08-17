@@ -206,6 +206,12 @@ export async function resolveAbsent(
           ),
           status: 'done',
           closedAt: now,
+          // The second way an item gets closed, and it used to leave the claim
+          // behind. An agent then held a lease on finished work until it timed
+          // out, and any column asking for `claimed: true` showed a done card
+          // as in progress. The ordinary close has released it since the
+          // audits; this one is the same act by a different hand.
+          claim: null,
         },
       },
     ],

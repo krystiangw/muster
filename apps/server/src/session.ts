@@ -144,7 +144,7 @@ export function checkCsrf(session: OperatorSession, body: unknown): void {
     throw new ServiceError(
       403,
       'bad_csrf',
-      'That form did not come from this page, or the session behind it has ended. Open the operator view again and retry.',
+      'That form did not come from this page, or the session behind it has ended. Reload the page you were on, sign in again if it asks, and retry.',
     );
   }
 }

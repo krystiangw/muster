@@ -71,6 +71,12 @@ export function createMailer(config: Config, log: (msg: string) => void): Mailer
     }
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
+      // Node's fetch waits for ever by default, and this call is awaited on
+      // the request path: an escalation is filed and then the agent sits there
+      // while a provider having a bad minute holds the socket open. Eight
+      // seconds, then the notifier treats it as a failure and gives the hour
+      // back, which is the behaviour it already has for every other failure.
+      signal: AbortSignal.timeout(8000),
       headers: {
         authorization: `Bearer ${config.resendApiKey}`,
         'content-type': 'application/json',

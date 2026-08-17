@@ -30,6 +30,7 @@ import {
   answerEscalation,
   authenticate,
   claimItem,
+  startEmailClaim,
   verifyClaimCode,
   createApiKey,
   createEscalation,
@@ -44,7 +45,7 @@ import {
   escalationCursor,
   itemCursor,
   listEscalations,
-  listHandoverRequests,
+  readInbox,
   listItems,
   nextItem,
   observe,
@@ -79,8 +80,6 @@ export interface ApiDeps {
   mailer: Mailer;
   notifier: Notifier;
 }
-
-const CLAIM_CODE_TTL_MS = 15 * 60_000;
 
 function auth(request: FastifyRequest): AuthContext {
   if (!request.auth) {
@@ -242,10 +241,12 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       // from touching any item that is not a report.
       const slug = `feedback:${normalizeSlug(body.title).slice(0, 80)}`;
       // A second report of the same title lands as a note on the first, and
-      // touches nothing else. Writing the fields again would let any passer-by
-      // blank the triage somebody wrote into an existing report's body and
-      // labels, simply by sending its title back with different words. It is
-      // also what the receipt below has always claimed happens.
+      // changes nothing else about it: not the body, not the labels, and not
+      // the staleness or the last writer either, which is what `guest` is for.
+      // Writing the fields again would let any passer-by blank the triage
+      // somebody wrote into an existing report, simply by sending its title
+      // back with different words. It is also what the receipt below has
+      // always claimed happens.
       const existing = await store.items.findOne(
         { projectId: project._id, slug },
         { projection: { _id: 1 } },
@@ -256,6 +257,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
             slug,
             mustExist: true,
             actor: from,
+            guest: true,
             // A timeline entry, so the length that belongs in a report body
             // does not belong here.
             note: words
@@ -273,6 +275,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
             // the same instant both pass it. This makes the write decide: the
             // one that loses lands as a note and changes nothing else.
             insertOnly: true,
+            guest: true,
             note: words || 'reported',
           });
       record(store, 'feedback', { door: 'http', projectId: project._id });
@@ -1104,36 +1107,16 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           agent?: string;
           include_acted?: boolean;
         };
-        const filter: Record<string, unknown> = {
-          projectId: project._id,
-          status: { $ne: 'open' },
-          ...(includeActed ? {} : { acknowledgedAt: null }),
-        };
-        if (agent) filter.agent = agent;
-        const docs = await store.escalations
-          .find(filter)
-          .sort({ answeredAt: -1 })
-          .limit(50)
-          .toArray();
-        // An agent that read an empty inbox could not tell "the human has not
-        // answered yet" from "my question was never filed", and the second is a
-        // bug it should not paper over by asking again. So the still open ones
-        // come back too, oldest first, because the oldest is the one that has
-        // been holding work up the longest.
-        const waiting = await store.escalations
-          .find({ projectId: project._id, status: 'open', ...(agent ? { agent } : {}) })
-          .sort({ createdAt: 1 })
-          .limit(50)
-          .toArray();
-        // Somebody asking for the board is not an answer, but it is the other
-        // thing an agent has to notice and would otherwise never see: nothing
-        // in the API told it that a person is standing at the read link asking
-        // to be made the owner.
-        const handovers = project.claimedBy
-          ? []
-          : await listHandoverRequests(store, project._id);
+        // One function behind both doors. An agent that read an empty inbox
+        // could not tell "the human has not answered yet" from "my question
+        // was never filed", and somebody asking for the board is the other
+        // thing it would otherwise never see.
+        const { answers, waiting, handovers } = await readInbox(store, project, {
+          ...(agent ? { agent } : {}),
+          ...(includeActed ? { includeActed: true } : {}),
+        });
         return {
-          answers: docs.map((doc) => escalationJson(doc)),
+          answers: answers.map((doc) => escalationJson(doc)),
           waiting: waiting.map((doc) => escalationJson(doc)),
           ...(handovers.length > 0
             ? {
@@ -1265,6 +1248,10 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           created_at: key.createdAt,
           last_used_at: key.lastUsedAt,
           revoked_at: key.revokedAt,
+          // The whole reason the OAuth endpoint was changed was that nobody
+          // could tell sixty two live admin keys apart. A list that does not
+          // say which of them dies in an hour has the same problem.
+          expires_at: (key as { expiresAt?: Date | null }).expiresAt ?? null,
         })),
       };
     });
@@ -1421,43 +1408,17 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         // able to bind the whole tenant to an address of its choosing.
         const { project } = requireAdmin(request);
         const { email } = request.body as { email: string };
-        if (!/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(email)) {
-          throw new ServiceError(400, 'bad_email', 'That does not look like an email address.');
-        }
-        if (project.claimedBy) {
-          return reply.send({ ok: true, already_claimed_by: project.claimedBy });
-        }
         const verdict = limiter.check(`claim:${project._id}`, config.rateLimits.claimEmail);
         if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds);
 
-        const code = newOtpCode();
-        const now = new Date();
-        await store.claimCodes.deleteMany({ projectId: project._id });
-        await store.claimCodes.insertOne({
-          _id: newId('c'),
-          projectId: project._id,
-          email: email.toLowerCase(),
-          codeHash: hashToken(code),
-          attempts: 0,
-          createdAt: now,
-          expiresAt: new Date(now.getTime() + CLAIM_CODE_TTL_MS),
-        });
-        const delivery = await mailer.sendClaimCode(email, code, project.name);
-        if (delivery === 'discarded') {
-          // The code exists and reached nobody. Answering ok here tells an
-          // agent to wait for something that is never coming, so the
-          // misconfiguration is reported as the fault it is.
-          await store.claimCodes.deleteMany({ projectId: project._id, email: email.toLowerCase() });
-          throw new ServiceError(
-            503,
-            'mail_not_configured',
-            'This deployment cannot send email, so the code could not be delivered. Nothing is pending. Tell whoever runs it to set RESEND_API_KEY, or hand the project over with /share instead.',
-          );
+        const started = await startEmailClaim(store, project, email, config, mailer);
+        if (started.alreadyClaimedBy) {
+          return reply.send({ ok: true, already_claimed_by: started.alreadyClaimedBy });
         }
         return reply.send({
           ok: true,
-          delivery,
-          expires_in_seconds: CLAIM_CODE_TTL_MS / 1000,
+          delivery: started.delivery,
+          expires_in_seconds: started.expiresInSeconds,
           verify: `${config.baseUrl}/v1/${project._id}/claim/verify`,
         });
       },

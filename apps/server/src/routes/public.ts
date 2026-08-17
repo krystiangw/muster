@@ -13,7 +13,7 @@ import {
 } from '../board.js';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
-import { redactAddress } from '../email.js';
+import { redactAddress, type Mailer } from '../email.js';
 import { record, recordView } from '../events.js';
 import { ago, chip, escapeHtml, layout, when } from '../html.js';
 import { avatar, who } from '../identity.js';
@@ -25,8 +25,10 @@ import {
   ServiceError,
   answerEscalation,
   appendNote,
+  authenticate,
   createProject,
   requestHandover,
+  startEmailClaim,
   upsertItem,
   verifyClaimCode,
 } from '../service.js';
@@ -44,6 +46,8 @@ export interface PublicDeps {
   store: Store;
   config: Config;
   limiter: RateLimiter;
+  /** For the one page here that starts a claim: the code goes out by email. */
+  mailer: Mailer;
 }
 
 /**
@@ -187,7 +191,7 @@ function keptParams(form: KeptFilter): Record<string, string> {
 }
 
 export function registerPublic(app: FastifyInstance, deps: PublicDeps): void {
-  const { store, config, limiter } = deps;
+  const { store, config, limiter, mailer } = deps;
   const base = config.baseUrl;
 
   app.get('/health', { schema: { hide: true } }, async () => ({ ok: true }));
@@ -952,13 +956,17 @@ ${
     // Assign and tag redirect the same way a move does. They used to redirect
     // silently, so the only evidence was a chip on a card the person then had
     // to find again by eye.
+    // Plain text, like the notice above it: renderBoard escapes the whole
+    // string, so escaping here as well printed an owner called O'Brien as
+    // "O&#39;Brien". The rule for this pair of lines is that they are words,
+    // and the renderer is the only thing that turns words into HTML.
     const doneNotice =
       query.done && touched
         ? query.what === 'label'
           ? `"${touched.slug}" is now tagged ${
-              touched.labels.length > 0 ? touched.labels.map((label) => escapeHtml(label)).join(', ') : 'nothing'
+              touched.labels.length > 0 ? touched.labels.join(', ') : 'nothing'
             }.`
-          : `"${touched.slug}" is ${touched.owner ? `owned by ${escapeHtml(touched.owner)}` : 'unassigned'}.`
+          : `"${touched.slug}" is ${touched.owner ? `owned by ${touched.owner}` : 'unassigned'}.`
         : undefined;
     const notice = movedNotice ?? doneNotice;
 
@@ -1223,10 +1231,33 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
         ),
       );
     }
-    checkCsrf(session, request.body);
+    // Every refusal on this route is a page, not JSON. The rest of `/r/` is
+    // for somebody holding a capability link, who can read a status code; this
+    // one is advertised to an ordinary person as a button, and the three ways
+    // it says no are all ordinary: the agents offered it a minute ago, five
+    // people are already waiting, or the tab has been open since last week.
+    const explain = (error: unknown) => {
+      const failure = error instanceof ServiceError ? error : null;
+      return reply
+        .code(failure?.statusCode ?? 500)
+        .type('text/html; charset=utf-8')
+        .send(
+          layout(
+            { title: 'That did not go through' },
+            `<h1>That did not go through</h1>
+             <p>${escapeHtml(failure?.message ?? 'Something went wrong asking for this board.')}</p>
+             <p><a href="/r/${escapeHtml(readToken)}">Back to the project</a></p>`,
+          ),
+        );
+    };
 
-    const form = (request.body ?? {}) as { note?: string };
-    await requestHandover(store, project, session.email, one(form.note));
+    try {
+      checkCsrf(session, request.body);
+      const form = (request.body ?? {}) as { note?: string };
+      await requestHandover(store, project, session.email, one(form.note));
+    } catch (error) {
+      return explain(error);
+    }
     record(store, 'handover_request', { door: 'browser', projectId: project._id });
     return reply.redirect(`/r/${readToken}`, 303);
   });
@@ -1247,16 +1278,27 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     }
 
     // The read link is shareable, so the claim itself is gated on the project
-    // token: whoever can write to the project decides who owns it.
-    const response = await fetch(`${config.baseUrl}/v1/${project._id}/claim`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${form.token ?? ''}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({ email: form.email ?? '' }),
-    });
-    const ok = response.ok;
+    // token: whoever can write to the project decides who owns it, and an
+    // admin token is what proves that.
+    //
+    // In process, not a request to our own public URL. That loopback was one
+    // more thing to go wrong in production and, worse, made the route
+    // untestable: the suite's base URL does not resolve, so the check this
+    // page exists to enforce was never once exercised by a test.
+    let ok = false;
+    try {
+      const { key } = await authenticate(store, form.token ?? '');
+      if (key.projectId === project._id && key.role === 'admin') {
+        const started = await startEmailClaim(store, project, form.email ?? '', config, mailer);
+        ok = started.alreadyClaimedBy === null;
+      }
+    } catch {
+      // Every refusal reads the same to whoever is at the form: a wrong token,
+      // a token for another project, a worker key and a bad address are all
+      // "that did not work", because telling them apart is telling a stranger
+      // which of their guesses was close.
+      ok = false;
+    }
     return reply.type('text/html; charset=utf-8').send(
       layout(
         { title: ok ? 'Check your email' : 'Claim failed' },

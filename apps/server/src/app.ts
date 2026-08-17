@@ -175,7 +175,7 @@ export async function buildApp(
   registerMcp(server, { store, config, limiter, notifier });
   registerApi(server, { store, config, limiter, mailer, notifier });
   registerOperator(server, { store, config, limiter, mailer });
-  registerPublic(server, { store, config, limiter });
+  registerPublic(server, { store, config, limiter, mailer });
 
   server.setErrorHandler((error: FastifyError, request, reply) => {
     if (error instanceof ServiceError) {

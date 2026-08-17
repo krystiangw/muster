@@ -643,3 +643,159 @@ describe('what the audits of the live service found', () => {
     assert.equal(projectKey?.expiresAt ?? null, null);
   });
 });
+
+/**
+ * The verification pass over the audit fixes themselves, 2026-08-18. Every one
+ * of these is a place where a fix landed on one path and not on its twin.
+ */
+describe('what the verification pass found in the fixes', () => {
+  it('releases the claim when hygiene closes an item too, not only when an agent does', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', {
+      slug: 'mirror:one',
+      title: 'mirrored from a scanner',
+      source: 'scanner',
+      actor: 'loop',
+    });
+    await post(project, '/items/mirror:one/claim', { agent: 'loop' });
+    await harness.store.projects.updateOne(
+      { _id: project.id },
+      { $set: { 'rules.absenceResolve': { observations: 1, minHours: 0 } } },
+    );
+
+    // The source stops reporting it, twice, which is what the rule counts.
+    await post(project, '/observe', { source: 'scanner', present: [] });
+    await harness.store.items.updateOne(
+      { projectId: project.id, slug: 'mirror:one' },
+      { $set: { 'absence.since': new Date(Date.now() - 86_400_000) } },
+    );
+    await post(project, '/observe', { source: 'scanner', present: [] });
+
+    const closed = await harness.store.items.findOne({ projectId: project.id, slug: 'mirror:one' });
+    assert.equal(closed!.status, 'done');
+    assert.equal(closed!.claim, null, 'an item closed by hygiene is not work in progress either');
+  });
+
+  it('gives the same inbox through both doors', async () => {
+    // The MCP case used to page one list of escalations and split it in
+    // memory, so an open question fell off the end once a project had fifty
+    // answered ones, and an answer already acted on came back for ever.
+    const project = await createProject(harness);
+    await post(project, '/escalations', { agent: 'a', question: 'the oldest one' });
+    const oldest = (
+      await harness.store.escalations.findOne({ projectId: project.id, status: 'open' })
+    )!;
+    for (let n = 0; n < 55; n += 1) {
+      const filed = await post(project, '/escalations', { agent: 'a', question: `q${n}` });
+      await harness.server.inject({
+        method: 'PATCH',
+        url: `${project.api}/escalations/${filed.json().escalation.id}`,
+        headers: authed(project),
+        payload: { status: 'answered', answer: 'yes' },
+      });
+    }
+
+    const overHttp = (
+      await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/inbox?agent=a`,
+        headers: authed(project),
+      })
+    ).json();
+    const overMcp = (
+      await harness.server.inject({
+        method: 'POST',
+        url: '/mcp',
+        headers: authed(project),
+        payload: {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'inbox', arguments: { agent: 'a' } },
+        },
+      })
+    ).json().result.structuredContent;
+
+    assert.equal(overHttp.waiting.length, 1);
+    assert.equal(overMcp.waiting.length, 1, 'the open one is not paged out over MCP either');
+    assert.equal(overMcp.waiting[0].id, oldest._id);
+
+    // And an answer already acted on leaves both inboxes.
+    const acted = overHttp.answers[0].id;
+    await post(project, `/escalations/${acted}/ack`, { agent: 'a', note: 'did it' });
+    const mcpAfter = (
+      await harness.server.inject({
+        method: 'POST',
+        url: '/mcp',
+        headers: authed(project),
+        payload: {
+          jsonrpc: '2.0',
+          id: 2,
+          method: 'tools/call',
+          params: { name: 'inbox', arguments: { agent: 'a' } },
+        },
+      })
+    ).json().result.structuredContent;
+    assert.ok(
+      !mcpAfter.answers.some((doc: { id: string }) => doc.id === acted),
+      'an acknowledged answer does not come back over MCP',
+    );
+  });
+
+  it('keeps the OAuth client alive when the project is claimed', async () => {
+    // Everything else that expires because the project expires gets cleared on
+    // a claim. The client registration was the one child left behind, so an
+    // agent that came in through RFC 7591 lost its client_id a week after
+    // somebody made the project permanent.
+    const registered = await harness.server.inject({
+      method: 'POST',
+      url: '/oauth/register',
+      payload: { client_name: 'a client whose project gets claimed' },
+    });
+    const projectId = registered.json().project;
+    const doc = (await harness.store.projects.findOne({ _id: projectId }))!;
+    await claimProjectWithEmail(harness.store, doc, 'owner@example.com', harness.config);
+
+    const client = await harness.store.oauthClients.findOne({ projectId });
+    assert.equal(client?.expiresAt ?? null, null, 'the client outlives the demo window');
+  });
+
+  it('does not let a passer-by keep a report looking fresh', async () => {
+    const seeded = await startHarness();
+    const host = await createProject(seeded, 'reports');
+    await seeded.stop();
+    const open = await startHarness({
+      MONGODB_DB: seeded.config.mongoDb,
+      FEEDBACK_PROJECT: host.id,
+    });
+    try {
+      const filed = await open.server.inject({
+        method: 'POST',
+        url: '/feedback',
+        payload: { title: 'Something rotted', body: 'first' },
+      });
+      const slug = filed.json().slug;
+      const stamp = new Date(Date.now() - 5 * 86_400_000);
+      await open.store.items.updateOne(
+        { projectId: host.id, slug },
+        { $set: { stale: true, staleSince: stamp, touchedAt: stamp } },
+      );
+
+      await open.server.inject({
+        method: 'POST',
+        url: '/feedback',
+        payload: { title: 'Something rotted', body: 'still here', from: 'nobody' },
+      });
+
+      const item = (await open.store.items.findOne({ projectId: host.id, slug }))!;
+      assert.equal(item.stale, true, 'a stranger repeating themselves is not proof of life');
+      assert.equal(item.touchedAt.getTime(), stamp.getTime());
+      assert.ok(
+        item.timeline.some((entry) => entry.message.includes('still here')),
+        'and the words still land on the timeline',
+      );
+    } finally {
+      await open.stop();
+    }
+  });
+});

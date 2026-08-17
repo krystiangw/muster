@@ -432,18 +432,47 @@ describe('a read link can ask for a project and never take one', () => {
     const project = await createProject(harness);
     const readToken = project.readUrl.split('/r/')[1]!;
 
-    const attempt = await harness.server.inject({
-      method: 'POST',
-      url: `/r/${readToken}/claim`,
-      payload: 'email=passerby@example.com',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    });
-    // Whatever the page says back, the only thing that matters is here: no
-    // owner, and no code minted that could produce one.
-    void attempt;
-    const after = await harness.store.projects.findOne({ _id: project.id });
-    assert.equal(after?.claimedBy ?? null, null, 'a link alone never moves ownership');
+    const ask = (payload: string) =>
+      harness.server.inject({
+        method: 'POST',
+        url: `/r/${readToken}/claim`,
+        payload,
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      });
+
+    // No token at all, a wrong one, and a real token for another project. The
+    // page answers each of them identically, and none of them mints a code.
+    const other = await createProject(harness, 'somebody else');
+    for (const payload of [
+      'email=passerby@example.com',
+      'email=passerby@example.com&token=mk_not_a_real_token',
+      `email=passerby@example.com&token=${other.token}`,
+    ]) {
+      const attempt = await ask(payload);
+      assert.equal(attempt.statusCode, 200, payload);
+      assert.match(attempt.body, /Claim failed/, payload);
+      assert.equal(
+        await harness.store.claimCodes.countDocuments({ projectId: project.id }),
+        0,
+        `no code was minted for: ${payload}`,
+      );
+    }
+
+    // A worker key for this project is refused too: it can write to the board,
+    // and ownership is not a write.
+    const worker = (await post(project, '/keys', { name: 'worker', role: 'write' })).json().token;
+    const withWorker = await ask(`email=passerby@example.com&token=${worker}`);
+    assert.match(withWorker.body, /Claim failed/);
     assert.equal(await harness.store.claimCodes.countDocuments({ projectId: project.id }), 0);
+
+    // And the admin token does work, so the test above is measuring the guard
+    // rather than a route that is broken for everybody.
+    const withAdmin = await ask(`email=passerby@example.com&token=${project.token}`);
+    assert.match(withAdmin.body, /Check your email/);
+    assert.equal(await harness.store.claimCodes.countDocuments({ projectId: project.id }), 1);
+
+    const after = await harness.store.projects.findOne({ _id: project.id });
+    assert.equal(after?.claimedBy ?? null, null, 'and a code is not ownership either');
   });
 
   it('records the ask, and only the ask, for somebody signed in', async () => {

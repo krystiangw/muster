@@ -745,10 +745,11 @@ describe('a report from somebody with no account', () => {
       assert.deepEqual(item.labels, ['feedback']);
       assert.equal(item.source, 'arbitrage-fleet');
       assert.equal(item.status, 'open');
-      // The second report said nothing about who sent it, so the last writer is
-      // the anonymous one. That is the truth about who touched it last, which
-      // is what the field means everywhere else in this system.
-      assert.equal(item.last_actor, 'guest:anonymous');
+      // The last writer is still the reporter who filed it. A stranger saying
+      // the same thing a second time is not somebody working on this board,
+      // and letting it move `last_actor` let anybody keep a report signed by
+      // themselves for ever by resending its title.
+      assert.equal(item.last_actor, 'guest:kanga-arbitrage');
       // And a name given by a stranger can never be an agent handle, which is
       // `[a-z0-9._-]`. Otherwise anybody could sign a report `errors-loop`.
       assert.ok(
@@ -862,8 +863,10 @@ describe('a report from somebody with no account', () => {
       assert.ok(
         item.timeline.some((entry: { message: string }) => entry.message.includes('OWNED')),
       );
-      // And a stranger claiming an existing handle is still a stranger.
-      assert.equal(item.last_actor, 'guest:errors-loop');
+      // And the last writer is the operator who triaged it, not the stranger
+      // who sent the title back. A repeat report is a note, and a note by
+      // somebody outside the project is not proof that the item is alive.
+      assert.equal(item.last_actor, 'operator');
     } finally {
       await open.stop();
     }

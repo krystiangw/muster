@@ -1,7 +1,7 @@
 import type { Config } from './config.js';
 import type { Store } from './db.js';
 import { resolveAbsent } from './hygiene.js';
-import { hashToken, isValidHandle, newId, newToken, normalizeHandle, normalizeSlug } from './ids.js';
+import { hashToken, isValidHandle, newId, newOtpCode, newToken, normalizeHandle, normalizeSlug } from './ids.js';
 import {
   DEFAULT_RULES,
   ESCALATION_PRIORITIES,
@@ -385,6 +385,50 @@ export async function requestHandover(
   return (result ?? request) as HandoverRequestDoc;
 }
 
+/**
+ * What is waiting for an agent, in one place: the answers it has not acted on,
+ * its own questions nobody has answered, and anybody asking for the board.
+ *
+ * One function because there are two doors and they drifted apart within a day
+ * of the second one being added. The MCP version filtered a single page of
+ * escalations in memory, which quietly dropped an open question off the end
+ * once a project had fifty answered ones, and never applied the "already acted
+ * on" filter at all, so an agent in a loop kept being handed the same decision
+ * to carry out again. Both are the exact confusions the fields exist to end.
+ */
+export async function readInbox(
+  store: Store,
+  project: ProjectDoc,
+  options: { agent?: string; includeActed?: boolean } = {},
+): Promise<{ answers: EscalationDoc[]; waiting: EscalationDoc[]; handovers: HandoverRequestDoc[] }> {
+  const forAgent = options.agent ? { agent: options.agent } : {};
+  const [answers, waiting, handovers] = await Promise.all([
+    store.escalations
+      .find({
+        projectId: project._id,
+        status: { $ne: 'open' },
+        ...(options.includeActed ? {} : { acknowledgedAt: null }),
+        ...forAgent,
+      })
+      .sort({ answeredAt: -1 })
+      .limit(50)
+      .toArray(),
+    // Oldest first: the oldest question is the one that has been holding work
+    // up the longest.
+    store.escalations
+      .find({ projectId: project._id, status: 'open', ...forAgent })
+      .sort({ createdAt: 1 })
+      .limit(50)
+      .toArray(),
+    project.claimedBy ? Promise.resolve([]) : listHandoverRequests(store, project._id),
+  ]);
+  return {
+    answers: answers as EscalationDoc[],
+    waiting: waiting as EscalationDoc[],
+    handovers,
+  };
+}
+
 /** Who has asked for this project, oldest first. */
 export async function listHandoverRequests(
   store: Store,
@@ -430,6 +474,65 @@ export async function acceptShare(
 
 /** How many wrong codes a pending claim survives. */
 export const MAX_CLAIM_ATTEMPTS = 5;
+
+/** How long an emailed claim code is good for. */
+export const CLAIM_CODE_TTL_MS = 15 * 60_000;
+
+/**
+ * Start the human claim: mint a code and mail it.
+ *
+ * Shared, like `verifyClaimCode`, and for a sharper reason. The browser form
+ * used to reach this by making an HTTP request to our own public base URL,
+ * which is a request that leaves the process, comes back through the router,
+ * and cannot be exercised by a test at all: the suite's base URL does not
+ * resolve, so the route answered 500 and the test that was supposed to prove a
+ * read link cannot take a project passed without ever reaching the check it
+ * was about.
+ *
+ * The caller decides who is allowed to ask. This function only refuses what is
+ * wrong with the request itself.
+ */
+export async function startEmailClaim(
+  store: Store,
+  project: ProjectDoc,
+  email: string,
+  config: Config,
+  mailer: { sendClaimCode(to: string, code: string, projectName: string): Promise<string> },
+): Promise<{ alreadyClaimedBy: string | null; delivery: string; expiresInSeconds: number }> {
+  if (!/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(email)) {
+    throw badRequest('bad_email', 'That does not look like an email address.');
+  }
+  if (project.claimedBy) {
+    return { alreadyClaimedBy: project.claimedBy, delivery: 'none', expiresInSeconds: 0 };
+  }
+
+  const code = newOtpCode();
+  const now = new Date();
+  const address = email.toLowerCase();
+  await store.claimCodes.deleteMany({ projectId: project._id });
+  await store.claimCodes.insertOne({
+    _id: newId('c'),
+    projectId: project._id,
+    email: address,
+    codeHash: hashToken(code),
+    attempts: 0,
+    createdAt: now,
+    expiresAt: new Date(now.getTime() + CLAIM_CODE_TTL_MS),
+  });
+  const delivery = await mailer.sendClaimCode(email, code, project.name);
+  if (delivery === 'discarded') {
+    // The code exists and reached nobody. Answering ok here tells an agent to
+    // wait for something that is never coming, so the misconfiguration is
+    // reported as the fault it is.
+    await store.claimCodes.deleteMany({ projectId: project._id, email: address });
+    throw new ServiceError(
+      503,
+      'mail_not_configured',
+      'This deployment cannot send email, so the code could not be delivered. Nothing is pending. Tell whoever runs it to set RESEND_API_KEY, or hand the project over with /share instead.',
+    );
+  }
+  return { alreadyClaimedBy: null, delivery, expiresInSeconds: CLAIM_CODE_TTL_MS / 1000 };
+}
 
 /**
  * Spend one attempt on a pending claim, and claim the project if it matched.
@@ -514,6 +617,12 @@ export async function claimProjectWithEmail(
     // A project with an owner cannot be handed to anybody else, so every
     // request for it is answered, whichever way it went.
     store.handovers.deleteMany({ projectId: project._id }),
+    // Including the OAuth client, which is easy to forget precisely because it
+    // is not a key: an agent that came in through RFC 7591 registration would
+    // otherwise lose its client_id a week after a person made the project
+    // permanent, and the failure would read as "invalid_client" on a board
+    // that is not going anywhere.
+    store.oauthClients.updateMany({ projectId: project._id }, clear),
     // Every key except the ones that expire for a reason of their own. An
     // access token from the OAuth endpoint carries an hour, and clearing that
     // here because the project stopped expiring would silently promote it to a
@@ -648,6 +757,18 @@ export interface UpsertItemInput {
    * because that part is true either way.
    */
   insertOnly?: boolean;
+  /**
+   * The writer is not an agent of this project: an anonymous report through
+   * `/feedback`, and nothing else so far.
+   *
+   * A write is normally proof of life. It clears the stale flag, moves
+   * `touchedAt` and puts the writer's name on the item, all of which say
+   * "somebody who works here is on this". A passer-by saying the same thing
+   * twice is not that, and letting it count meant anybody could keep a report
+   * looking fresh and signed by them, for ever, by resending its title. The
+   * note still lands on the timeline, which is the part that is true.
+   */
+  guest?: boolean;
 }
 
 export interface UpsertItemResult {
@@ -793,7 +914,12 @@ export async function upsertItem(
     }
   }
 
-  const set: Record<string, unknown> = { updatedAt: now, touchedAt: now };
+  // `touchedAt` is what staleness is measured from, so a guest write moves
+  // `updatedAt` (something changed, and the change feed should say so) without
+  // moving it.
+  const set: Record<string, unknown> = input.guest
+    ? { updatedAt: now }
+    : { updatedAt: now, touchedAt: now };
   const setOnInsert: Record<string, unknown> = {
     _id: newId('i'),
     projectId: project._id,
@@ -829,9 +955,21 @@ export async function upsertItem(
   // Any write by an agent is proof of life: it clears the stale flag that the
   // hygiene engine may have set. Hygiene marks, agents unmark, and neither
   // needs to know about the other.
-  set.stale = false;
-  set.staleSince = null;
-  set.lastActor = input.actor;
+  //
+  // A passer-by is not an agent of this project, though. A second anonymous
+  // report of the same title used to unmark a stale item and put its own name
+  // on it, so anybody could keep a report looking fresh, signed by them, by
+  // sending the same title every few days. The note still lands; the item's
+  // own liveness belongs to the people who work on it.
+  if (input.guest) {
+    // Only on the write that creates the item, so a report carries the name of
+    // whoever filed it and nothing later can overwrite that from outside.
+    setOnInsert.lastActor = input.actor;
+  } else {
+    set.stale = false;
+    set.staleSince = null;
+    set.lastActor = input.actor;
+  }
 
   const status = applyStatus ? input.status : undefined;
   if (!existing) {
@@ -1682,11 +1820,14 @@ export async function createApiKey(
   return { key, token, expiresAt };
 }
 
-export async function listApiKeys(store: Store, projectId: string): Promise<ApiKeyDoc[]> {
+export async function listApiKeys(
+  store: Store,
+  projectId: string,
+): Promise<Array<ApiKeyDoc & { expiresAt?: Date | null }>> {
   return store.keys
     .find({ projectId }, { projection: { hash: 0 } })
     .sort({ createdAt: 1 })
-    .toArray() as Promise<ApiKeyDoc[]>;
+    .toArray();
 }
 
 export async function revokeApiKey(
