@@ -51,6 +51,20 @@ export interface BoardRow {
   columns: BoardCell[];
 }
 
+/**
+ * Narrowing the board to one person's work.
+ *
+ * A board that six agents write to is unreadable by the seventh unless it can
+ * be asked "what is mine". Owner is the field an item is assigned to; agent is
+ * whoever is actually on it, which is the claim holder, or the last writer for
+ * an item nobody is holding. Those are two different questions and a board that
+ * only answers one of them answers the wrong one half the time.
+ */
+export interface BoardFilter {
+  owner?: string;
+  agent?: string;
+}
+
 export interface BoardView {
   config: BoardConfig;
   rows: BoardRow[];
@@ -59,6 +73,8 @@ export interface BoardView {
   unplaced: number;
   scanned: number;
   partial: boolean;
+  /** What the board was narrowed to, so a page can say it is not the whole board. */
+  filter: BoardFilter;
 }
 
 function hasAny(values: string[] | undefined, present: string[]): boolean {
@@ -114,7 +130,12 @@ export function boardConfigOf(project: Pick<ProjectDoc, 'board'>): BoardConfig {
   return project.board ?? DEFAULT_BOARD;
 }
 
-export function buildBoard(items: ItemDoc[], config: BoardConfig, now = new Date()): BoardView {
+export function buildBoard(
+  items: ItemDoc[],
+  config: BoardConfig,
+  now = new Date(),
+  filter: BoardFilter = {},
+): BoardView {
   const lanes = new Map<string, BoardRow>();
   const totals = config.columns.map((column) => ({
     key: column.key,
@@ -175,13 +196,14 @@ export function buildBoard(items: ItemDoc[], config: BoardConfig, now = new Date
     unplaced,
     scanned: items.length,
     partial: items.length >= BOARD_SCAN_LIMIT,
+    filter,
   };
 }
 
 export async function loadBoard(
   store: Store,
   project: ProjectDoc,
-  options: { includeClosed?: boolean } = {},
+  options: { includeClosed?: boolean } & BoardFilter = {},
 ): Promise<BoardView> {
   const config = boardConfigOf(project);
 
@@ -197,16 +219,50 @@ export async function loadBoard(
       return statuses.some((status) => status === 'done' || status === 'dropped');
     });
 
-  const filter: Record<string, unknown> = { projectId: project._id };
-  if (!wantsClosed) filter.status = { $nin: ['done', 'dropped'] };
+  const query: Record<string, unknown> = { projectId: project._id };
+  if (!wantsClosed) query.status = { $nin: ['done', 'dropped'] };
+
+  const narrowed: BoardFilter = {};
+  if (options.owner) {
+    narrowed.owner = options.owner;
+    query.owner = options.owner;
+  }
+  if (options.agent) {
+    narrowed.agent = options.agent;
+    // Holding it counts, and so does having been the last to write to it. An
+    // agent that finished a piece of work an hour ago still wants to find it.
+    query.$or = [{ 'claim.agent': options.agent }, { lastActor: options.agent }];
+  }
 
   const items = (await store.items
-    .find(filter, { projection: { timeline: 0 } })
+    .find(query, { projection: { timeline: 0 } })
     .sort({ priority: -1, updatedAt: -1 })
     .limit(BOARD_SCAN_LIMIT)
     .toArray()) as ItemDoc[];
 
-  return buildBoard(items, config);
+  return buildBoard(items, config, new Date(), narrowed);
+}
+
+/**
+ * The people and agents a board could be narrowed to. Read from the items
+ * themselves rather than a list somebody maintains, so the filter never offers
+ * a name with nothing behind it.
+ */
+export async function boardFacets(
+  store: Store,
+  project: ProjectDoc,
+): Promise<{ owners: string[]; agents: string[] }> {
+  const [owners, actors, holders, registered] = await Promise.all([
+    store.items.distinct('owner', { projectId: project._id }),
+    store.items.distinct('lastActor', { projectId: project._id }),
+    store.items.distinct('claim.agent', { projectId: project._id }),
+    store.agents.distinct('handle', { projectId: project._id }),
+  ]);
+  const clean = (values: unknown[]): string[] =>
+    [...new Set(values.filter((value): value is string => typeof value === 'string' && value !== ''))]
+      .sort()
+      .slice(0, 50);
+  return { owners: clean(owners), agents: clean([...actors, ...holders, ...registered]) };
 }
 
 /**

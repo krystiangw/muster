@@ -2,7 +2,7 @@ import type { BoardView } from '../board.js';
 import { BOARD_PRESETS, COLUMN_RENDER_LIMIT, applyForColumn } from '../board.js';
 import { boardConfigJson } from '../serialize.js';
 import { chip, escapeHtml, formatWhen } from '../html.js';
-import type { ItemDoc, ProjectDoc } from '../types.js';
+import type { ItemDoc, ProjectDoc, TimelineEntry } from '../types.js';
 
 /**
  * The board, rendered server side.
@@ -36,23 +36,97 @@ ${options
   </form>`;
 }
 
+/**
+ * Who is on this card, by name.
+ *
+ * "Agent" is not a label on a board six agents write to; the handle is. A live
+ * claim is the strongest answer, and for a card nobody is holding the last
+ * writer is the next best one, marked as a past tense so the two do not read
+ * the same.
+ */
+function whoChips(item: ItemDoc, claimed: boolean): string {
+  const parts: string[] = [];
+  if (claimed) parts.push(chip(item.claim!.agent, 'claim'));
+  else if (item.lastActor) parts.push(chip(`last: ${item.lastActor}`, 'note'));
+  if (item.owner) parts.push(chip(`owner: ${item.owner}`, 'dropped'));
+  return parts.join(' ');
+}
+
 function card(item: ItemDoc, now: Date, move: string): string {
   const claimed = item.claim !== null && new Date(item.claim.expiresAt) > now;
   const classes = ['card', item.stale ? 'is-stale' : '', claimed ? 'is-claimed' : '']
     .filter(Boolean)
     .join(' ');
+  // The title is the one thing a column is too narrow for, so it is clamped to
+  // two lines here and shown whole in the preview the card links to.
   return `<article class="${classes}">
-  <div class="slug">${escapeHtml(item.slug)}</div>
-  <div class="t">${escapeHtml(item.title || '(no title)')}</div>
+  <a class="peek" href="#${escapeHtml(item._id)}">
+    <span class="slug">${escapeHtml(item.slug)}</span>
+    <span class="t">${escapeHtml(item.title || '(no title)')}</span>
+  </a>
   <div class="meta">
-    ${claimed ? chip(item.claim!.agent, 'claim') : ''}
+    ${whoChips(item, claimed)}
     ${item.stale ? chip('stale', 'stale') : ''}
-    ${item.owner ? chip(item.owner, 'dropped') : ''}
     ${(item.labels ?? []).slice(0, 3).map((label) => chip(label, 'open')).join(' ')}
     <span class="slug">${escapeHtml(formatWhen(item.updatedAt))}</span>
   </div>
   ${move}
 </article>`;
+}
+
+/**
+ * The preview behind a card, opened by clicking it.
+ *
+ * It is a `:target` sheet, not a dialog: `#id` in the URL opens it, `#` closes
+ * it, and the whole thing works with JavaScript switched off, which is the rule
+ * the rest of these pages follow. It exists because a column is too narrow for
+ * a real title, and truncating without anywhere to read the rest is a board
+ * that hides what it is about.
+ */
+function preview(item: ItemDoc, now: Date, timeline: TimelineEntry[]): string {
+  const claimed = item.claim !== null && new Date(item.claim.expiresAt) > now;
+  return `<div class="peeked" id="${escapeHtml(item._id)}">
+  <a class="scrim" href="#" aria-label="Close"></a>
+  <div class="sheet">
+    <div class="sheet-top">
+      <span class="slug">${escapeHtml(item.slug)}</span>
+      <a class="close" href="#">close</a>
+    </div>
+    <h3>${escapeHtml(item.title || '(no title)')}</h3>
+    <div class="meta">
+      ${chip(item.status, item.status)}
+      ${whoChips(item, claimed)}
+      ${item.stale ? chip('stale', 'stale') : ''}
+      ${item.source ? chip(`from ${item.source}`, 'note') : ''}
+      ${item.priority ? chip(`priority ${item.priority}`, 'open') : ''}
+      ${(item.labels ?? []).map((label) => chip(label, 'open')).join(' ')}
+    </div>
+    ${item.body ? `<p class="body">${escapeHtml(item.body)}</p>` : '<p class="none">No description. Whoever picks this up should write one.</p>'}
+    ${
+      claimed
+        ? `<p class="why">Held by ${escapeHtml(item.claim!.agent)}, lease until ${escapeHtml(
+            formatWhen(item.claim!.expiresAt),
+          )}.</p>`
+        : ''
+    }
+    ${
+      timeline.length > 0
+        ? `<ul class="timeline">
+${timeline
+  .map(
+    (entry) => `      <li><span class="when">${escapeHtml(formatWhen(entry.at))}</span>
+        <span class="who${entry.by === 'hygiene' ? ' hygiene' : ''}">${escapeHtml(entry.by)}</span>
+        <span>${escapeHtml(entry.message)}</span></li>`,
+  )
+  .join('\n')}
+    </ul>`
+        : ''
+    }
+    <p class="why">updated ${escapeHtml(formatWhen(item.updatedAt))} &middot; created ${escapeHtml(
+      formatWhen(item.createdAt),
+    )} &middot; ${item.timelineCount} timeline entr${item.timelineCount === 1 ? 'y' : 'ies'}</p>
+  </div>
+</div>`;
 }
 
 interface MoveTarget {
@@ -66,6 +140,10 @@ export interface BoardRenderOptions {
   moveAction?: string;
   /** Shown once above the board, after a move that did not land where it was sent. */
   notice?: string;
+  /** Last timeline entries per item id, for the previews. */
+  timelines?: Map<string, TimelineEntry[]>;
+  /** Rendered above the board when it can be narrowed by owner or agent. */
+  filters?: string;
 }
 
 export function renderBoard(view: BoardView, options: BoardRenderOptions = {}): string {
@@ -76,9 +154,25 @@ export function renderBoard(view: BoardView, options: BoardRenderOptions = {}): 
         .map((column) => ({ key: column.key, title: column.title }))
     : [];
   const lanes = view.rows.length > 0 ? view.rows : [{ key: '', title: '', columns: [] }];
+  const shown = lanes.flatMap((lane) =>
+    lane.columns.flatMap((cell) => cell.items.slice(0, COLUMN_RENDER_LIMIT)),
+  );
   // Above the board, not below it: a column is taller than a screen, and a
   // confirmation nobody scrolls to is not a confirmation.
   return `${options.notice ? `<p class="notice">${escapeHtml(options.notice)}</p>` : ''}
+${options.filters ?? ''}
+${
+    view.filter.owner || view.filter.agent
+      ? `<p class="notice"><b>Narrowed to ${escapeHtml(
+          [
+            view.filter.owner ? `owner ${view.filter.owner}` : '',
+            view.filter.agent ? `agent ${view.filter.agent}` : '',
+          ]
+            .filter(Boolean)
+            .join(' and '),
+        )}.</b> The counts below are of that work, not of the whole board.</p>`
+      : ''
+  }
 <div class="board">
 ${lanes
   .map(
@@ -127,7 +221,48 @@ ${
     view.partial
       ? '<p class="notice warn">This board has more items than one page reads, so the counts are partial.</p>'
       : ''
-  }`;
+  }
+${shown.map((item) => preview(item, now, options.timelines?.get(item._id) ?? [])).join('\n')}`;
+}
+
+/**
+ * The narrowing controls. A GET form, so the result is a URL somebody can keep:
+ * an agent's own board is a bookmark, not a session.
+ */
+export function renderBoardFilters(
+  view: BoardView,
+  facets: { owners: string[]; agents: string[] },
+  action: string,
+): string {
+  if (facets.owners.length === 0 && facets.agents.length === 0) return '';
+  const options = (values: string[], selected: string | undefined, anything: string): string =>
+    [`<option value="">${escapeHtml(anything)}</option>`]
+      .concat(
+        values.map(
+          (value) =>
+            `<option value="${escapeHtml(value)}"${value === selected ? ' selected' : ''}>${escapeHtml(value)}</option>`,
+        ),
+      )
+      .join('\n      ');
+
+  return `<form class="row filters" method="get" action="${escapeHtml(action)}">
+  <label>Owner
+    <select name="owner">
+      ${options(facets.owners, view.filter.owner, 'anyone')}
+    </select>
+  </label>
+  <label>Agent
+    <select name="agent">
+      ${options(facets.agents, view.filter.agent, 'any agent')}
+    </select>
+  </label>
+  <button type="submit">Show</button>
+  ${
+    view.filter.owner || view.filter.agent
+      ? `<a class="ghost-link" href="${escapeHtml(action)}">whole board</a>`
+      : ''
+  }
+</form>`;
 }
 
 export function renderBoardSettings(project: ProjectDoc, view: BoardView, action: string): string {

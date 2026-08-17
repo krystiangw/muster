@@ -617,6 +617,7 @@ export async function upsertItem(
   // needs to know about the other.
   set.stale = false;
   set.staleSince = null;
+  set.lastActor = input.actor;
 
   const status = applyStatus ? input.status : undefined;
   if (!existing) {
@@ -730,7 +731,7 @@ export async function appendNote(
   const item = await store.items.findOneAndUpdate(
     { projectId: project._id, slug: normalizeSlug(slug) },
     {
-      $set: { updatedAt: now, touchedAt: now, stale: false, staleSince: null },
+      $set: { updatedAt: now, touchedAt: now, stale: false, staleSince: null, lastActor: actor },
       $push: { timeline: { $each: [entry], $slice: -TIMELINE_KEEP } },
       $inc: { timelineCount: 1 },
     },
@@ -781,6 +782,7 @@ export async function claimItem(
         touchedAt: now,
         stale: false,
         staleSince: null,
+        lastActor: agent,
       },
       $push: {
         timeline: {
@@ -853,7 +855,7 @@ export async function releaseItem(
   const item = await store.items.findOneAndUpdate(
     { projectId: project._id, slug: normalizeSlug(slug), 'claim.agent': agent },
     {
-      $set: { claim: null, updatedAt: now, touchedAt: now },
+      $set: { claim: null, updatedAt: now, touchedAt: now, lastActor: agent },
       $push: {
         timeline: {
           $each: [

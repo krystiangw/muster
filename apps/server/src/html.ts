@@ -82,6 +82,9 @@ td.mono, .mono { font-family:var(--mono); font-size:13px; }
 .chip.dropped { color:var(--muted); background:var(--surface-2); }
 .chip.stale { color:var(--warn); background:color-mix(in srgb,var(--warn) 16%,transparent); }
 .chip.claim { color:var(--ink-2); background:var(--surface-2); }
+/* A claim is somebody working now; the last writer is somebody who was. The
+   outline says "past tense" without spending another colour on it. */
+.chip.note { color:var(--muted); background:transparent; border:1px solid var(--rule); }
 form { display:flex; flex-direction:column; gap:12px; max-width:440px; }
 form.row { flex-direction:row; align-items:flex-end; gap:10px; max-width:none; flex-wrap:wrap; }
 label { display:flex; flex-direction:column; gap:5px; font-size:14px; color:var(--ink-2); }
@@ -117,7 +120,13 @@ button.ghost { background:transparent; color:var(--accent); }
 .col .card { background:var(--surface); border:1px solid var(--rule); border-radius:2px;
   padding:9px 10px; margin:0; display:flex; flex-direction:column; gap:5px; }
 .col .card .slug { font-family:var(--mono); font-size:11px; color:var(--muted); word-break:break-all; }
-.col .card .t { font-size:13.5px; line-height:1.35; }
+/* The whole card body is the link to its preview: a title clamped to two lines
+   has to be readable somewhere, and the card itself is where people click. */
+.col .card .peek { display:flex; flex-direction:column; gap:5px; text-decoration:none;
+  color:inherit; border:0; }
+.col .card .peek:hover .t { color:var(--accent); }
+.col .card .t { font-size:13.5px; line-height:1.35; display:-webkit-box; -webkit-line-clamp:2;
+  -webkit-box-orient:vertical; overflow:hidden; }
 .col .card .meta { display:flex; flex-wrap:wrap; gap:5px; align-items:center; }
 .col .card.is-stale { border-left:2px solid var(--warn); }
 .col .card.is-claimed { border-left:2px solid var(--accent); }
@@ -137,6 +146,32 @@ button.ghost { background:transparent; color:var(--accent); }
 .col .card .move button:hover { border-color:var(--accent); color:var(--accent); }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
   clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+/* The card preview. :target, not a dialog: the URL opens it, "#" closes it, and
+   it works with scripting off like everything else here. It also means a
+   preview is a link somebody can send. */
+.peeked { display:none; }
+.peeked:target { display:block; position:fixed; inset:0; z-index:50; }
+.peeked .scrim { position:absolute; inset:0; background:color-mix(in srgb,var(--ink) 45%,transparent);
+  border:0; }
+.peeked .sheet { position:relative; margin:6vh auto; max-width:min(680px,92vw); max-height:88vh;
+  overflow-y:auto; background:var(--surface); border:1px solid var(--rule); border-radius:4px;
+  padding:20px 22px; box-shadow:0 18px 50px color-mix(in srgb,var(--ink) 22%,transparent);
+  display:flex; flex-direction:column; gap:12px; }
+.peeked .sheet-top { display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
+.peeked .sheet-top .slug { font-family:var(--mono); font-size:12px; color:var(--muted);
+  word-break:break-all; }
+.peeked .sheet h3 { margin:0; font-size:21px; line-height:1.25; text-wrap:balance; }
+.peeked .sheet .meta { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+.peeked .sheet .body { margin:0; white-space:pre-wrap; font-size:14.5px; line-height:1.55; }
+.peeked .sheet .why { font-family:var(--mono); font-size:11px; color:var(--muted); margin:0; }
+.peeked .sheet .none { color:var(--muted); font-style:italic; margin:0; font-size:14px; }
+.peeked .sheet .timeline { border-top:1px solid var(--rule); padding-top:4px; }
+.filters { align-items:flex-end; margin-bottom:16px; }
+.filters label { font-family:var(--mono); font-size:11px; letter-spacing:.09em;
+  text-transform:uppercase; color:var(--muted); }
+.filters select { font-size:14px; padding:6px 9px; min-width:150px; }
+.filters button { padding:7px 14px; }
+.ghost-link { align-self:center; font-size:13.5px; }
 .col .more { font-family:var(--mono); font-size:11px; color:var(--muted); }
 .col .none { font-size:12.5px; color:var(--muted); font-style:italic; }
 .timeline { list-style:none; padding:0; margin:0; font-size:14px; }

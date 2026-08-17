@@ -223,6 +223,11 @@ const TOOLS: ToolDefinition[] = [
       type: 'object',
       properties: {
         items: { type: 'boolean', description: 'false for counts only' },
+        owner: { type: 'string', description: 'Only items assigned to this owner' },
+        agent: {
+          type: 'string',
+          description: 'Only items this agent is on: holding the claim, or the last to write',
+        },
       },
     },
     requiresProject: true,
@@ -545,7 +550,10 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
       }
       case 'board': {
         void maybeSweep(store, project).catch(() => undefined);
-        const view = await loadBoard(store, project);
+        const view = await loadBoard(store, project, {
+          ...(str(args.owner) ? { owner: str(args.owner) } : {}),
+          ...(str(args.agent) ? { agent: str(args.agent) } : {}),
+        });
         return boardJson(view, args.items !== false);
       }
       case 'move': {

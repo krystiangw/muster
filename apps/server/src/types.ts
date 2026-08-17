@@ -95,6 +95,13 @@ export interface ItemDoc {
   labels: string[];
   fields: Record<string, unknown>;
   claim: Claim | null;
+  /**
+   * Who touched this last, by handle. A board where six agents work looks like
+   * one anonymous queue without it: the claim says who holds an item right now,
+   * and this says who moved the ones nobody is holding. Hygiene never sets it,
+   * because a sweep is not somebody working.
+   */
+  lastActor: string | null;
   timeline: TimelineEntry[];
   timelineCount: number;
   absence: Absence;

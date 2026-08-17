@@ -27,6 +27,9 @@ export function itemJson(item: ItemDoc, includeTimeline = false): Record<string,
     source: item.source,
     fields: item.fields,
     stale: item.stale,
+    // Who touched it last. On a board with six agents this is the difference
+    // between a queue of work and a queue of anonymous work.
+    last_actor: item.lastActor ?? null,
     claim: item.claim
       ? {
           agent: item.claim.agent,
@@ -126,6 +129,12 @@ export function boardJson(view: BoardView, includeItems = true): Record<string, 
     totals: view.totals,
     unplaced: view.unplaced,
     partial: view.partial,
+    // Present and empty on an unfiltered board, so a caller reading counts
+    // always knows whether it is looking at all of the work or some of it.
+    filter: {
+      ...(view.filter.owner ? { owner: view.filter.owner } : {}),
+      ...(view.filter.agent ? { agent: view.filter.agent } : {}),
+    },
     rows: view.rows.map((row) => ({
       key: row.key,
       title: row.title,

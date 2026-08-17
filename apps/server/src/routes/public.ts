@@ -1,18 +1,64 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
-import { BOARD_PRESETS, loadBoard, moveItem, parseBoardConfig } from '../board.js';
+import {
+  BOARD_PRESETS,
+  COLUMN_RENDER_LIMIT,
+  boardFacets,
+  loadBoard,
+  moveItem,
+  parseBoardConfig,
+  type BoardView,
+} from '../board.js';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
 import { chip, escapeHtml, formatWhen, layout } from '../html.js';
-import { renderBoard, renderBoardSettings } from './boardHtml.js';
+import { renderBoard, renderBoardFilters, renderBoardSettings } from './boardHtml.js';
 import { maybeSweep } from '../hygiene.js';
 import type { RateLimiter } from '../rateLimit.js';
 import { ServiceError, answerEscalation, createProject } from '../service.js';
-import { ESCALATION_STATUSES, type EscalationStatus, type ItemDoc } from '../types.js';
+import {
+  ESCALATION_STATUSES,
+  type EscalationStatus,
+  type ItemDoc,
+  type TimelineEntry,
+} from '../types.js';
 
 export interface PublicDeps {
   store: Store;
   config: Config;
   limiter: RateLimiter;
+}
+
+/**
+ * The last few timeline entries for the cards the page is about to draw.
+ *
+ * The board query leaves the timeline on the server, because it is the big
+ * field on an item and no column needs it. A card's preview does need it, and
+ * only for the handful of items actually rendered, so it is a second query with
+ * a $slice rather than a fatter first one.
+ */
+const PREVIEW_TIMELINE = 4;
+
+async function recentTimelines(
+  store: Store,
+  projectId: string,
+  view: BoardView,
+): Promise<Map<string, TimelineEntry[]>> {
+  const ids = view.rows
+    .flatMap((row) => row.columns.flatMap((cell) => cell.items.slice(0, COLUMN_RENDER_LIMIT)))
+    .map((item) => item._id);
+  const timelines = new Map<string, TimelineEntry[]>();
+  if (ids.length === 0) return timelines;
+
+  const docs = await store.items
+    .find(
+      { projectId, _id: { $in: ids } },
+      { projection: { timeline: { $slice: -PREVIEW_TIMELINE } } },
+    )
+    .toArray();
+  for (const doc of docs) {
+    timelines.set(doc._id, [...(doc.timeline ?? [])].reverse());
+  }
+  return timelines;
 }
 
 export function registerPublic(app: FastifyInstance, deps: PublicDeps): void {
@@ -152,6 +198,21 @@ which column the item <em>actually</em> landed in: a column can filter on more t
 and an honest board says so rather than showing the card somewhere you did not send it. In the
 browser each card carries a select and a button, because a drag needs JavaScript and these pages
 have none.</p>
+
+<h3>Who is on what</h3>
+<p>Every item carries <code>last_actor</code>: the handle of whoever touched it last. A claim says
+who is on an item right now, and this says who was on the ones nobody is holding, which on a project
+six loops write to is the difference between a queue of work and a queue of anonymous work. Hygiene
+never sets it, because a sweep is not somebody working.</p>
+<p>Both questions are askable. <code>?owner=alex</code> is the work assigned to a person;
+<code>?agent=errors-loop</code> is the work that agent holds or was the last to write to. Those are
+different questions, and a board that answered only one of them would answer the wrong one half the
+time. <code>GET /v1/{project}/board/facets</code> lists the names either one accepts, read from the
+items rather than from a list somebody maintains, so a filter never offers a name with nothing
+behind it. In the browser the same two are dropdowns, and the result is a URL worth keeping.</p>
+<p>Clicking a card opens its preview: the whole title, the description, who holds it and the last
+few timeline entries, each with the handle of whoever wrote it. It is a <code>:target</code> panel,
+so it costs no JavaScript, and its URL can be sent to somebody.</p>
 
 <h2>One project, one instance</h2>
 <p>A project is the unit of separation. It has its own id, name, description, token, items, agents,
@@ -529,11 +590,23 @@ ${
         );
     }
     void maybeSweep(store, project).catch(() => undefined);
-    const view = await loadBoard(store, project);
+    const query = request.query as {
+      moved?: string;
+      landed?: string;
+      owner?: string;
+      agent?: string;
+    };
+    const [view, facets] = await Promise.all([
+      loadBoard(store, project, {
+        ...(query.owner ? { owner: query.owner.slice(0, 48) } : {}),
+        ...(query.agent ? { agent: query.agent.slice(0, 48) } : {}),
+      }),
+      boardFacets(store, project),
+    ]);
+
     // A move redirects back here saying what it did. The message is built from
     // the board's own columns rather than carried in the URL, so a crafted link
     // cannot put words on somebody else's page.
-    const query = request.query as { moved?: string; landed?: string };
     const landedIn = view.config.columns.find((column) => column.key === query.landed);
     const notice = query.moved
       ? landedIn
@@ -541,6 +614,7 @@ ${
         : `"${query.moved.slice(0, 80)}" matches no column now. Check the layout below.`
       : undefined;
 
+    const boardUrl = `/r/${escapeHtml(readToken)}/board`;
     const body = `
 <h1>${escapeHtml(project.name)}</h1>
 ${project.description ? `<p class="lead">${escapeHtml(project.description)}</p>` : ''}
@@ -548,7 +622,9 @@ ${project.description ? `<p class="lead">${escapeHtml(project.description)}</p>`
   <a href="/r/${escapeHtml(readToken)}">questions and timeline</a></p>
 
 ${renderBoard(view, {
-  moveAction: `/r/${escapeHtml(readToken)}/board/move`,
+  moveAction: `${boardUrl}/move`,
+  filters: renderBoardFilters(view, facets, boardUrl),
+  timelines: await recentTimelines(store, project._id, view),
   ...(notice ? { notice } : {}),
 })}
 

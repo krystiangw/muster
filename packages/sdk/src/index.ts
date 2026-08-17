@@ -21,6 +21,8 @@ export interface Item {
   source: string | null;
   fields: Record<string, unknown>;
   stale: boolean;
+  /** Who touched it last, by handle. Null on an item nobody has written to yet. */
+  last_actor: string | null;
   claim: { agent: string; expires_at: string; heartbeat_at: string } | null;
   absence: { count: number; since: string | null } | null;
   created_at: string;
@@ -109,11 +111,6 @@ export interface CreatedProject {
 }
 
 /**
- * A board column: a name and a filter over what an item already is. There is
- * deliberately no way to express a new status here, which is what stops a board
- * layout from becoming a vocabulary every agent has to learn.
- */
-/**
  * What moving an item into a column means. A column that declares nothing gets
  * a conservative reading of its own filter, so the ordinary board works without
  * anybody writing this twice.
@@ -128,6 +125,11 @@ export interface BoardApply {
   release?: boolean;
 }
 
+/**
+ * A board column: a name and a filter over what an item already is. There is
+ * deliberately no way to express a new status here, which is what stops a board
+ * layout from becoming a vocabulary every agent has to learn.
+ */
 export interface BoardColumn {
   key?: string;
   title: string;
@@ -162,6 +164,8 @@ export interface BoardCell {
 
 export interface BoardView {
   board: BoardConfig;
+  /** What the board was narrowed to. Empty when it is the whole board. */
+  filter: { owner?: string; agent?: string };
   totals: Array<{ key: string; title: string; count: number }>;
   /** Items no column matched. A board that hides work is worse than no board. */
   unplaced: number;
@@ -473,11 +477,23 @@ export class Muster {
    * and claim state, so the board tells you how this project wants work
    * described. It never introduces a fifth status.
    */
-  async board(options: { items?: boolean; includeClosed?: boolean } = {}): Promise<BoardView> {
+  async board(
+    options: { items?: boolean; includeClosed?: boolean; owner?: string; agent?: string } = {},
+  ): Promise<BoardView> {
     return this.request('GET', '/board', undefined, {
       items: options.items === undefined ? undefined : String(options.items),
       include_closed: options.includeClosed === undefined ? undefined : String(options.includeClosed),
+      owner: options.owner,
+      agent: options.agent,
     });
+  }
+
+  /**
+   * The owners and agents this board can be narrowed to, read from the items
+   * themselves so every name offered has work behind it.
+   */
+  async boardFacets(): Promise<{ owners: string[]; agents: string[] }> {
+    return this.request('GET', '/board/facets');
   }
 
   /** Lays the board out. Needs an admin token. */

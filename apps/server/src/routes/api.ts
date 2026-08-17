@@ -4,7 +4,14 @@ import type { Store } from '../db.js';
 import { maybeSweep, sweepProject } from '../hygiene.js';
 import { hashToken, isValidHandle, newOtpCode, newId } from '../ids.js';
 import { RateLimiter } from '../rateLimit.js';
-import { BOARD_PRESETS, boardConfigOf, loadBoard, moveItem, parseBoardConfig } from '../board.js';
+import {
+  BOARD_PRESETS,
+  boardConfigOf,
+  boardFacets,
+  loadBoard,
+  moveItem,
+  parseBoardConfig,
+} from '../board.js';
 import {
   agentJson,
   boardApplyJson,
@@ -568,6 +575,13 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
             properties: {
               include_closed: { type: 'boolean' },
               items: { type: 'boolean', description: 'Set false for counts only.' },
+              owner: { type: 'string', maxLength: 48, description: 'Only items assigned to this owner.' },
+              agent: {
+                type: 'string',
+                maxLength: 48,
+                description:
+                  'Only items this agent is on: holding the claim, or the last to write to them.',
+              },
             },
             additionalProperties: false,
           },
@@ -575,14 +589,35 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       },
       async (request) => {
         const { project } = auth(request);
-        const query = request.query as { include_closed?: boolean; items?: boolean };
+        const query = request.query as {
+          include_closed?: boolean;
+          items?: boolean;
+          owner?: string;
+          agent?: string;
+        };
         void maybeSweep(store, project).catch(() => undefined);
-        const view = await loadBoard(
-          store,
-          project,
-          query.include_closed === undefined ? {} : { includeClosed: query.include_closed },
-        );
+        const view = await loadBoard(store, project, {
+          ...(query.include_closed === undefined ? {} : { includeClosed: query.include_closed }),
+          ...(query.owner ? { owner: query.owner } : {}),
+          ...(query.agent ? { agent: query.agent } : {}),
+        });
         return boardJson(view, query.items !== false);
+      },
+    );
+
+    scoped.get(
+      '/v1/:project/board/facets',
+      {
+        schema: {
+          tags: ['board'],
+          summary: 'The owners and agents this board can be narrowed to',
+          description:
+            'Read from the items themselves, so every name offered has work behind it. Pass one to GET /board as owner= or agent=.',
+        },
+      },
+      async (request) => {
+        const { project } = auth(request);
+        return boardFacets(store, project);
       },
     );
 

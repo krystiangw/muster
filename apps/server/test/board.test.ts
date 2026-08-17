@@ -754,6 +754,138 @@ describe('moving an item into a column', () => {
   });
 });
 
+describe('a board many agents write to', () => {
+  it('names the agent on every card, and never the word "agent"', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', {
+      slug: 'held',
+      title: 'held',
+      owner: 'alex',
+      actor: 'errors-loop',
+    });
+    await post(project, '/items', { slug: 'touched', title: 'touched', actor: 'scoring-loop' });
+    await post(project, '/items/held/claim', { agent: 'errors-loop', ttl_minutes: 30 });
+
+    const view = await board(project);
+    const doing = cell(view, 'doing').items[0];
+    assert.equal(doing.claim.agent, 'errors-loop');
+    assert.equal(doing.last_actor, 'errors-loop');
+
+    const todo = cell(view, 'todo').items[0];
+    assert.equal(todo.claim, null);
+    assert.equal(todo.last_actor, 'scoring-loop', 'the last writer is on an item nobody holds');
+
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(page.body, /errors-loop/i);
+    assert.match(page.body, /last: scoring-loop/i);
+    assert.match(page.body, /owner:/i, 'owners are labelled as owners, not left bare');
+  });
+
+  it('does not let hygiene claim to be the last one working', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'forgotten', title: 'forgotten', actor: 'errors-loop' });
+    await harness.store.items.updateOne(
+      { projectId: project.id, slug: 'forgotten' },
+      { $set: { touchedAt: new Date(Date.now() - 200 * 3_600_000) } },
+    );
+    await post(project, '/sweep', {});
+
+    const item = await harness.store.items.findOne({ projectId: project.id, slug: 'forgotten' });
+    assert.equal(item!.stale, true, 'the sweep did run');
+    assert.equal(item!.lastActor, 'errors-loop', 'and it is still the agent who wrote it');
+  });
+
+  it('narrows the board to one owner and to one agent', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', {
+      slug: 'alex-open',
+      title: 'alex open',
+      owner: 'alex',
+      actor: 'errors-loop',
+    });
+    await post(project, '/items', {
+      slug: 'kasia-open',
+      title: 'kasia open',
+      owner: 'kasia',
+      actor: 'trades-loop',
+    });
+    await post(project, '/items', { slug: 'held', title: 'held', owner: 'kasia', actor: 'a' });
+    await post(project, '/items/held/claim', { agent: 'errors-loop', ttl_minutes: 30 });
+
+    const byOwner = await board(project, '?owner=kasia');
+    assert.equal(byOwner.filter.owner, 'kasia');
+    const owned = byOwner.rows[0].columns.flatMap((column: { items: unknown[] }) => column.items);
+    assert.equal(owned.length, 2, 'both of kasia’s, in whichever column they fall');
+
+    const byAgent = await board(project, '?agent=errors-loop');
+    assert.equal(byAgent.filter.agent, 'errors-loop');
+    const slugs = byAgent.rows[0].columns
+      .flatMap((column: { items: Array<{ slug: string }> }) => column.items)
+      .map((item: { slug: string }) => item.slug)
+      .sort();
+    // Holding it counts, and so does having been the last to write to it.
+    assert.deepEqual(slugs, ['alex-open', 'held']);
+
+    const whole = await board(project);
+    assert.deepEqual(whole.filter, {}, 'an unfiltered board says so rather than staying silent');
+  });
+
+  it('offers only names that have work behind them', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', {
+      slug: 'one',
+      title: 'one',
+      owner: 'alex',
+      actor: 'errors-loop',
+    });
+    await post(project, '/agents', { handle: 'idle-loop', scope: [] });
+
+    const facets = (
+      await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/board/facets`,
+        headers: authed(project),
+      })
+    ).json();
+    assert.deepEqual(facets.owners, ['alex']);
+    assert.ok(facets.agents.includes('errors-loop'));
+    assert.ok(facets.agents.includes('idle-loop'), 'a registered agent counts even before it writes');
+  });
+});
+
+describe('the card preview', () => {
+  it('carries the whole title, the body and who did what, without JavaScript', async () => {
+    const project = await createProject(harness);
+    const title =
+      'A withdraw stuck in pending for forty minutes, three tickets from the same user and one from support';
+    await post(project, '/items', {
+      slug: 'errors:withdraw-stuck',
+      title,
+      body: 'The full description, which a 230px column has no room for.',
+      actor: 'errors-loop',
+    });
+    await post(project, '/items/errors:withdraw-stuck/timeline', {
+      actor: 'errors-loop',
+      message: 'Venue support says the batch is queued behind a maintenance window.',
+    });
+
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    const item = await harness.store.items.findOne({
+      projectId: project.id,
+      slug: 'errors:withdraw-stuck',
+    });
+
+    assert.match(page.body, new RegExp(`<a class="peek" href="#${item!._id}"`));
+    assert.match(page.body, new RegExp(`<div class="peeked" id="${item!._id}"`));
+    assert.match(page.body, /three tickets from the same user and one from support/);
+    assert.match(page.body, /a 230px column has no room for/);
+    assert.match(page.body, /queued behind a maintenance window/, 'and the recent timeline');
+    assert.ok(!/<script/i.test(page.body), 'still nothing to execute');
+  });
+});
+
 describe('the board over MCP', () => {
   it('is the same board an agent sees over HTTP', async () => {
     const project = await createProject(harness);

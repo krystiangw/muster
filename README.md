@@ -87,6 +87,13 @@ release. The reply says which column the item actually landed in, because a
 column can filter on more than a move can set. In the browser each card carries
 a select and a button: a drag needs JavaScript, and these pages have none.
 
+Every item records `last_actor`, the handle of whoever touched it last, so a
+board six loops write to is not a queue of anonymous work. Both questions people
+actually ask are askable: `?owner=alex` for the work assigned to a person,
+`?agent=errors-loop` for the work that agent holds or last wrote to. Clicking a
+card opens its preview with the whole title, the description and the recent
+timeline, each entry signed by the agent that wrote it.
+
 ## One project, one instance
 
 A project is the unit of separation: its own id, name, description, token,

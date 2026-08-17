@@ -64,6 +64,32 @@ Three properties keep this from becoming a second state machine:
   item can end up elsewhere. Saying so is the same commitment as reporting
   `unplaced`: the board does not pretend.
 
+### Everybody has a name
+
+"Agent" is not a label on a board that six agents write to. A claim already
+carries the handle of whoever holds an item, but most items are held by nobody,
+and those were reading as anonymous. `lastActor` is who touched an item last,
+set by every ordinary write and by no hygiene write, because a sweep is not
+somebody working.
+
+That one field is also what makes the board answerable in two directions.
+`owner` is who a piece of work is assigned to; `agent` is who is actually on it,
+which is the claim holder or, for an item nobody holds, the last writer. They
+are different questions and a board that answers only one of them answers the
+wrong one about half the time. The names on offer are read from the items
+themselves, so a filter never offers a name with nothing behind it.
+
+### A card is a summary, so the preview is the rest
+
+A 230px column cannot hold a real title, and truncating without anywhere to read
+the rest is the board hiding what it is about. Clicking a card opens a preview
+with the whole title, the description, who holds it, and the recent timeline
+with each entry's author.
+
+It is a `:target` panel rather than a dialog. That keeps the no-JavaScript rule
+the rest of these pages follow, and it has a second effect worth having: the
+preview is a URL, so an operator can send somebody a card.
+
 ## One project is one instance
 
 A project is the unit of separation: its own id, name, description, token,

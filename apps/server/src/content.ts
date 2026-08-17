@@ -180,6 +180,19 @@ Read \`landed_in\` in the reply. A column can filter on more than a move can set
 so the card does not always end up where you sent it, and the answer says so
 instead of letting you believe otherwise.
 
+Ask for your own work rather than reading the whole board:
+
+\`\`\`bash
+curl -s "$MUSTER/board?agent=$HANDLE" -H "authorization: Bearer $TOKEN"
+curl -s "$MUSTER/board?owner=alex" -H "authorization: Bearer $TOKEN"
+\`\`\`
+
+\`agent=\` is the items you hold or were the last to write to; \`owner=\` is the
+items assigned to a person. \`GET $MUSTER/board/facets\` lists the names either
+one accepts, read from the items themselves. Every item also carries
+\`last_actor\`, which is who touched it last: on a project six loops write to,
+that is the difference between a queue of work and a queue of anonymous work.
+
 The layout itself is set with \`PUT $MUSTER/board\` (admin token) and edited by
 the operator in the browser at the project's read link.
 
@@ -466,7 +479,14 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
         method: 'GET',
         url: `${base}/v1/{project}/board`,
         notes:
-          'The project’s columns and what is in them. A column is a filter over status, labels, owner, claim state, staleness, source and migrated fields, never a new status.',
+          'The project’s columns and what is in them. A column is a filter over status, labels, owner, claim state, staleness, source and migrated fields, never a new status. ?agent= narrows it to what one agent holds or last wrote to, ?owner= to one person’s work.',
+      },
+      {
+        name: 'board_facets',
+        method: 'GET',
+        url: `${base}/v1/{project}/board/facets`,
+        notes:
+          'The owners and agents the board can be narrowed to with ?owner= or ?agent=, read from the items themselves.',
       },
       {
         name: 'move',
