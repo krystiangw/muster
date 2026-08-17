@@ -274,6 +274,22 @@ enough to see a trend and short enough that it never becomes a second copy of
 the service's data. A test asserts the exact set of fields, so widening it is a
 decision somebody has to make on purpose.
 
+Page views are in the same log and follow the same rule. An agent's reads leave
+items behind; a person who opens the landing page and closes the tab leaves
+nothing, and that is the half of the funnel nobody could see. What made a third
+party tempting here is exactly what made it wrong: the page is the one place
+this product still promises no JavaScript at all, and a hosted counter costs
+either a script tag or an image request to somebody else's host, with the
+visitor's address attached. Counting it ourselves costs a line per page.
+
+Two properties keep it honest. The page names are a closed set, never the
+request path, because a read link and an operator link are credentials that
+live in the path and this collection is built to hold no secrets: the two
+capability pages are counted by what kind of page they are and nothing about
+which project. And crawlers are dropped rather than counted, because "how often
+are we indexed" is a different question from "how many people looked", and only
+one of them was asked.
+
 Two smaller choices worth keeping:
 
 - **Recording can never fail a request.** Every write is fire and forget with

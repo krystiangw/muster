@@ -56,6 +56,8 @@ const [
   busiest,
   weekSignups,
   weekWrites,
+  pageRows,
+  weekViews,
 ] = await Promise.all([
   count(events, { kind: 'discover' }),
   count(events, { kind: 'signup' }),
@@ -75,6 +77,8 @@ const [
   projects.find({}, { projection: { name: 1, counts: 1 } }).sort({ 'counts.items': -1 }).limit(5).toArray(),
   count(events, { kind: 'signup', at: { $gte: since(7) } }),
   count(events, { kind: 'first_write', at: { $gte: since(7) } }),
+  events.aggregate([{ $match: { kind: 'view' } }, { $group: { _id: '$detail', n: { $sum: 1 } } }, { $sort: { n: -1 } }]).toArray(),
+  count(events, { kind: 'view', at: { $gte: since(7) } }),
 ]);
 
 const hours = answered
@@ -105,6 +109,14 @@ if (doorRows.length > 0) {
 if (fileRows.length > 0) {
   console.log('\nWhat they read');
   for (const { _id, n } of fileRows) row(_id ?? 'unknown', n);
+}
+
+// People, not agents. Crawlers are dropped where the view is recorded, and the
+// two capability pages are counted by kind so no token ever reaches this log.
+if (pageRows.length > 0) {
+  console.log('\nPages people opened');
+  for (const { _id, n } of pageRows) row(_id ?? 'unknown', n);
+  row('  in the last seven days', weekViews);
 }
 
 console.log('\nOn the boards right now');

@@ -22,7 +22,7 @@ import {
 } from '../session.js';
 import { ESCALATION_STATUSES, type EscalationStatus } from '../types.js';
 import { clientIp } from './api.js';
-import { record } from '../events.js';
+import { record, recordView } from '../events.js';
 
 /**
  * The operator view: every project one person owns, and every question waiting
@@ -114,6 +114,7 @@ and you can end that from the view itself.</p>
   // ------------------------------------------------------------- signing in
 
   app.get('/operator', { schema: { hide: true } }, async (request, reply) => {
+    recordView(store, 'operator', request.headers['user-agent']);
     const session = await readSession(store, request);
     if (!session) return html(reply, 'Sign in to Muster', signInForm());
     return html(reply, 'Your Muster projects', await renderView(session), 200, true);

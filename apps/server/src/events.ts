@@ -23,6 +23,8 @@ import { newId } from './ids.js';
 export type EventKind =
   /** Somebody fetched one of the protocol files. The top of the funnel. */
   | 'discover'
+  /** A person opened one of the pages. The half of the funnel agents cannot show. */
+  | 'view'
   /** A project was created. */
   | 'signup'
   /** An agent registered itself in a project. */
@@ -40,6 +42,42 @@ export type EventKind =
 
 /** Which door it came through. */
 export type EventDoor = 'http' | 'mcp' | 'oauth' | 'browser';
+
+/**
+ * The pages a view can be recorded for, and nothing else.
+ *
+ * A closed set rather than the request path, for one reason that outranks
+ * tidiness: a read link and an operator link are credentials that live in the
+ * path, so recording the URL would write working capabilities into a
+ * collection built to hold no secrets at all. The two capability pages are
+ * counted under a name that says which kind of page it was and nothing about
+ * which project.
+ */
+export const VIEWABLE = [
+  'landing',
+  'docs',
+  'docs/keys',
+  'pricing',
+  'signup',
+  'operator',
+  'project',
+  'board',
+] as const;
+
+export type Viewable = (typeof VIEWABLE)[number];
+
+/**
+ * Crawlers, as far as a page counter needs to care.
+ *
+ * Not a security control and not exhaustive: a counter that includes every
+ * indexing bot answers "how often are we crawled", which nobody asked. The
+ * string is read and thrown away; no user agent is ever stored.
+ */
+const CRAWLER = /bot\b|bot\/|crawler|spider|slurp|feedfetcher|scrapy|curl\/|wget/i;
+
+export function isCrawler(userAgent: string | undefined): boolean {
+  return userAgent !== undefined && CRAWLER.test(userAgent);
+}
 
 export interface EventDoc {
   _id: string;
@@ -111,6 +149,19 @@ export function record(
 }
 
 /**
+ * Records that a person looked at a page.
+ *
+ * The one thing the collections cannot show: an agent's reads leave items
+ * behind, a person reading the landing page and closing the tab leaves
+ * nothing. Crawlers are dropped rather than counted, because "how often are we
+ * indexed" is a different question from "how many people looked".
+ */
+export function recordView(store: Store, page: Viewable, userAgent: string | undefined): void {
+  if (isCrawler(userAgent)) return;
+  record(store, 'view', { door: 'browser', detail: page });
+}
+
+/**
  * Records the moment a project first received work, exactly once, ever.
  *
  * The obvious test, "were there no items before this one", is wrong twice over:
@@ -144,6 +195,10 @@ export interface Insights {
     claimed: number;
   };
   doors: Record<string, number>;
+  /** Page views by page, people only. The half of the funnel agents cannot show. */
+  pages: Record<string, number>;
+  /** Views in the last seven days, so a trend is visible without a chart. */
+  pagesLastWeek: number;
   /** What is on the boards right now, across every project. */
   live: {
     projects: number;
@@ -190,6 +245,8 @@ export async function insights(store: Store): Promise<Insights> {
     firstWrites,
     claims,
     doorRows,
+    pageRows,
+    viewsLastWeek,
     projects,
     claimedProjects,
     openItems,
@@ -220,6 +277,17 @@ export async function insights(store: Store): Promise<Insights> {
         { $group: { _id: '$door', count: { $sum: 1 } } },
       ])
       .toArray(),
+    store.events
+      .aggregate<{ _id: string; count: number }>([
+        { $match: { kind: 'view' } },
+        { $group: { _id: '$detail', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+      ])
+      .toArray(),
+    store.events.countDocuments({
+      kind: 'view',
+      at: { $gte: new Date(Date.now() - 7 * 86_400_000) },
+    }),
     store.projects.countDocuments({}),
     store.projects.countDocuments({ claimedBy: { $ne: null } }),
     store.items.countDocuments({ status: { $nin: ['done', 'dropped'] } }),
@@ -259,6 +327,8 @@ export async function insights(store: Store): Promise<Insights> {
       claimed: claims,
     },
     doors: Object.fromEntries(doorRows.map((row) => [row._id, row.count])),
+    pages: Object.fromEntries(pageRows.map((row) => [row._id, row.count])),
+    pagesLastWeek: viewsLastWeek,
     live: {
       projects,
       claimedProjects,

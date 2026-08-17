@@ -242,3 +242,49 @@ describe('what the service knows about its own use', () => {
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
 });
+
+describe('counting the people, not the agents', () => {
+  it('records a page view per page, and never the token in the URL', async () => {
+    const project = await createProject(harness, 'watched');
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    for (const url of ['/', '/docs', '/pricing', '/', `/r/${readToken}`, `/r/${readToken}/board`]) {
+      await harness.server.inject({ method: 'GET', url });
+    }
+    await flushEvents();
+
+    const numbers = await insights(harness.store);
+    assert.equal(numbers.pages.landing, 2, 'two visits to the same page are two views');
+    assert.equal(numbers.pages.docs, 1);
+    assert.equal(numbers.pages.pricing, 1);
+    assert.equal(numbers.pages.project, 1, 'a capability page counts by kind');
+    assert.equal(numbers.pages.board, 1);
+    assert.ok(numbers.pagesLastWeek >= 6);
+
+    // The reason the page set is closed rather than the request path: a read
+    // link is a credential that lives in the path, and this collection is
+    // built to hold no secrets at all.
+    const recorded = await harness.store.events.find({ kind: 'view' }).toArray();
+    for (const event of recorded) {
+      assert.doesNotMatch(String(event.detail), /r_/, 'no token reaches the log');
+      assert.equal(event.projectId, null, 'and no page view is attributed to a project');
+    }
+  });
+
+  it('does not count a crawler as a person', async () => {
+    const before = (await insights(harness.store)).pages.signup ?? 0;
+    for (const ua of ['Googlebot/2.1 (+http://www.google.com/bot.html)', 'curl/8.4.0', 'Bingbot']) {
+      await harness.server.inject({ method: 'GET', url: '/signup', headers: { 'user-agent': ua } });
+    }
+    await flushEvents();
+    assert.equal((await insights(harness.store)).pages.signup ?? 0, before, 'still nobody');
+
+    await harness.server.inject({
+      method: 'GET',
+      url: '/signup',
+      headers: { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1.15' },
+    });
+    await flushEvents();
+    assert.equal((await insights(harness.store)).pages.signup ?? 0, before + 1);
+  });
+});

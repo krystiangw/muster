@@ -11,6 +11,7 @@ import {
 } from '../board.js';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
+import { recordView } from '../events.js';
 import { chip, escapeHtml, formatWhen, layout } from '../html.js';
 import { renderBoard, renderBoardFilters, renderBoardSettings } from './boardHtml.js';
 import { maybeSweep } from '../hygiene.js';
@@ -145,7 +146,8 @@ export function registerPublic(app: FastifyInstance, deps: PublicDeps): void {
 
   // ------------------------------------------------------------- landing
 
-  app.get('/', { schema: { hide: true } }, async (_request, reply) => {
+  app.get('/', { schema: { hide: true } }, async (request, reply) => {
+    recordView(store, 'landing', request.headers['user-agent']);
     const body = `
 <h1>Shared operational memory for agents that outlive their sessions</h1>
 <p class="lead">Muster remembers who is on duty, who owns what, what rotted and what needs a
@@ -226,7 +228,8 @@ as activity, and any of them is undone by an ordinary write.</p>
 
   // ---------------------------------------------------------------- docs
 
-  app.get('/docs', { schema: { hide: true } }, async (_request, reply) => {
+  app.get('/docs', { schema: { hide: true } }, async (request, reply) => {
+    recordView(store, 'docs', request.headers['user-agent']);
     const body = `
 <h1>Docs</h1>
 <p class="lead">Everything below is served as plain HTML, with no JavaScript, because an agent
@@ -382,7 +385,8 @@ also how an existing inbox gets imported:</p>
       .send(layout({ title: 'Muster docs', description: 'Objects, statuses, hygiene rules and interfaces.' }, body));
   });
 
-  app.get('/docs/keys', { schema: { hide: true } }, async (_request, reply) => {
+  app.get('/docs/keys', { schema: { hide: true } }, async (request, reply) => {
+    recordView(store, 'docs/keys', request.headers['user-agent']);
     const body = `
 <h1>Keys and access</h1>
 <p class="lead">Every call is authenticated with a bearer token that belongs to exactly one
@@ -430,7 +434,8 @@ There is no authorization code flow, because there is no end user to ask for con
       .send(layout({ title: 'Keys and access', description: 'Tokens, roles and programmatic key provisioning.' }, body));
   });
 
-  app.get('/pricing', { schema: { hide: true } }, async (_request, reply) => {
+  app.get('/pricing', { schema: { hide: true } }, async (request, reply) => {
+    recordView(store, 'pricing', request.headers['user-agent']);
     const { demo, free } = config.tiers;
     const body = `
 <h1>Pricing</h1>
@@ -479,7 +484,8 @@ want us to run it under an agreement, and the free tier stays.</p>
 
   // -------------------------------------------------------------- signup
 
-  app.get('/signup', { schema: { hide: true } }, async (_request, reply) => {
+  app.get('/signup', { schema: { hide: true } }, async (request, reply) => {
+    recordView(store, 'signup', request.headers['user-agent']);
     const body = `
 <h1>Create a project</h1>
 <p class="lead">One field, no account. You will get a token and a link. An agent can do this same
@@ -545,6 +551,7 @@ address. Claiming is free and raises the limits:</p>
   // ----------------------------------------------------------- read view
 
   app.get('/r/:readToken', { schema: { hide: true } }, async (request, reply) => {
+    recordView(store, 'project', request.headers['user-agent']);
     const { readToken } = request.params as { readToken: string };
     const project = await store.projects.findOne({ readToken });
     if (!project) {
@@ -685,6 +692,7 @@ ${
   });
 
   app.get('/r/:readToken/board', { schema: { hide: true } }, async (request, reply) => {
+    recordView(store, 'board', request.headers['user-agent']);
     const { readToken } = request.params as { readToken: string };
     const project = await store.projects.findOne({ readToken });
     if (!project) {
