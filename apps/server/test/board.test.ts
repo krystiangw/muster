@@ -603,48 +603,59 @@ describe('moving an item into a column', () => {
     );
   });
 
+  /**
+   * A move is several writes, and the interesting failures happen between them.
+   * That interleaving cannot be produced from outside the process, so these
+   * tests hand the move a store that lets somebody else in after the nth call
+   * of one method. The seam is in the test, never in the product.
+   */
+  function storeThatInterrupts(after: { call: string; nth: number }, meddle: () => Promise<void>) {
+    let seen = 0;
+    const items = new Proxy(harness.store.items, {
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver);
+        if (prop !== after.call) {
+          return typeof value === 'function' ? (value as Function).bind(target) : value;
+        }
+        return async (...args: unknown[]) => {
+          const result = await (value as Function).apply(target, args);
+          seen += 1;
+          if (seen === after.nth) await meddle();
+          return result;
+        };
+      },
+    });
+    return { ...harness.store, items };
+  }
+
+  async function projectDoc(project: Project) {
+    return (await harness.store.projects.findOne({ _id: project.id }))!;
+  }
+
   it('does not revoke a claim taken after it read the item', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'contested', title: 'contested', actor: 'a' });
     await post(project, '/items/contested/claim', { agent: 'first', ttl_minutes: 30 });
-    const doc = (await harness.store.projects.findOne({ _id: project.id }))!;
 
-    // Somebody claims the item in the instant after the move has read it, which
-    // is exactly what happens when the previous lease had expired and another
-    // agent picked the work up. That interleaving is the whole point of the
-    // guard and cannot be produced from outside the process, so the store hands
-    // the move its snapshot and then lets the other agent in.
-    let swapped = false;
-    const items = new Proxy(harness.store.items, {
-      get(target, prop, receiver) {
-        const value = Reflect.get(target, prop, receiver);
-        if (prop !== 'findOne') {
-          return typeof value === 'function' ? (value as Function).bind(target) : value;
-        }
-        return async (...args: unknown[]) => {
-          const found = await (value as Function).apply(target, args);
-          if (!swapped) {
-            swapped = true;
-            await harness.store.items.updateOne(
-              { projectId: project.id, slug: 'contested' },
-              {
-                $set: {
-                  claim: {
-                    agent: 'second',
-                    claimedAt: new Date(),
-                    heartbeatAt: new Date(),
-                    expiresAt: new Date(Date.now() + 1_800_000),
-                  },
-                },
-              },
-            );
-          }
-          return found;
-        };
-      },
+    // The previous lease expired and another agent picked the work up, in the
+    // instant after the move read the item.
+    const store = storeThatInterrupts({ call: 'findOne', nth: 1 }, async () => {
+      await harness.store.items.updateOne(
+        { projectId: project.id, slug: 'contested' },
+        {
+          $set: {
+            claim: {
+              agent: 'second',
+              claimedAt: new Date(),
+              heartbeatAt: new Date(),
+              expiresAt: new Date(Date.now() + 1_800_000),
+            },
+          },
+        },
+      );
     });
 
-    const result = await moveItem({ ...harness.store, items }, doc, {
+    const result = await moveItem(store, await projectDoc(project), {
       slug: 'contested',
       column: 'todo',
       actor: 'mover',
@@ -653,6 +664,38 @@ describe('moving an item into a column', () => {
     const item = await harness.store.items.findOne({ projectId: project.id, slug: 'contested' });
     assert.equal(item!.claim?.agent, 'second', 'the newer holder keeps the item');
     assert.equal(result.landedIn, 'doing', 'and the board says where it really is');
+  });
+
+  it('reports an item deleted between the write and the labels as gone', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'doomed', title: 'doomed', actor: 'a' });
+    await put(project, '/board', {
+      columns: [
+        {
+          key: 'watching',
+          title: 'Watching',
+          match: { labels: ['monitoring'] },
+          apply: { add_labels: ['monitoring'] },
+        },
+        { key: 'rest', title: 'Rest', match: {} },
+      ],
+    });
+
+    // Deleted after the item was written and before its labels were applied.
+    // Answering 200 here would put a card on the board for an item that is gone.
+    const store = storeThatInterrupts({ call: 'findOneAndUpdate', nth: 1 }, async () => {
+      await harness.store.items.deleteOne({ projectId: project.id, slug: 'doomed' });
+    });
+
+    await assert.rejects(
+      moveItem(store, await projectDoc(project), {
+        slug: 'doomed',
+        column: 'watching',
+        actor: 'mover',
+      }),
+      (error: { statusCode?: number; code?: string }) =>
+        error.statusCode === 404 && error.code === 'not_found',
+    );
   });
 
   it('rate limits writes through a read link, which is a shareable capability', async () => {

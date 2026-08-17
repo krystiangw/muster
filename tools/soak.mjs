@@ -3,7 +3,7 @@
  * that unit tests cannot: that the open-item counter matches reality, that a
  * slug never becomes two items, and that two agents never hold one claim.
  */
-const BASE = 'http://127.0.0.1:4611';
+const BASE = process.env.BASE ?? 'http://127.0.0.1:4600';
 const AGENTS = ['errors-loop', 'trades-loop', 'pm-loop', 'system-loop', 'scoring-loop'];
 const SLUGS = Array.from({ length: 25 }, (_, i) => `soak:item-${i}`);
 const ROUNDS = Number(process.argv[2] ?? 400);
@@ -29,7 +29,17 @@ for (const handle of AGENTS) {
   await call('/agents', 'POST', { handle, scope: [] });
 }
 
-const counters = { upsert: 0, claim: 0, close: 0, reopen: 0, note: 0, release: 0, observe: 0, error: 0 };
+const counters = {
+  upsert: 0,
+  claim: 0,
+  close: 0,
+  reopen: 0,
+  note: 0,
+  release: 0,
+  move: 0,
+  observe: 0,
+  error: 0,
+};
 const errors = [];
 
 const operations = [
@@ -68,6 +78,16 @@ const operations = [
     const r = await call(`/items/${pick(SLUGS)}/timeline`, 'POST', { actor: agent, message: 'note' });
     if (r.status >= 400 && r.status !== 404) errors.push(r.body);
     counters.note += 1;
+  },
+  async (agent) => {
+    // A move is several writes behind one request, which is exactly the shape
+    // that goes wrong under concurrency; the invariants below cover it too.
+    const column = pick(['todo', 'doing', 'blocked', 'done']);
+    const r = await call(`/items/${pick(SLUGS)}/move`, 'POST', { column, actor: agent });
+    if (r.status >= 400 && ![404, 409].includes(r.status) && r.body.error !== 'limit_reached') {
+      errors.push(r.body);
+    }
+    counters.move += 1;
   },
   async () => {
     const present = SLUGS.filter(() => Math.random() < 0.5);

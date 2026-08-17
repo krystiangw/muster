@@ -389,7 +389,14 @@ export async function moveItem(
       ],
       { returnDocument: 'after' },
     );
-    if (relabelled) current = relabelled as ItemDoc;
+    // Nothing to match means the item was deleted since the upsert. Returning
+    // the snapshot from before would put a card on the board that no longer
+    // exists, which is the same lie the upsert stage refuses to tell.
+    if (!relabelled) {
+      await undoClaim();
+      throw new ServiceError(404, 'not_found', `No item with slug "${slug}" in this project.`);
+    }
+    current = relabelled as ItemDoc;
   }
 
   if (apply.release && before.claim) {
@@ -428,7 +435,22 @@ export async function moveItem(
       },
       { returnDocument: 'after' },
     );
-    if (released) current = released as ItemDoc;
+    if (released) {
+      current = released as ItemDoc;
+    } else {
+      // Either somebody took the item legitimately, which is the case this
+      // guard exists for, or it was deleted. Only a read tells the two apart,
+      // and only on this rare path.
+      const still = (await store.items.findOne(
+        { projectId: project._id, slug },
+        { projection: { timeline: 0 } },
+      )) as ItemDoc | null;
+      if (!still) {
+        await undoClaim();
+        throw new ServiceError(404, 'not_found', `No item with slug "${slug}" in this project.`);
+      }
+      current = still;
+    }
   }
 
   const landed = config.columns.find((candidate) =>

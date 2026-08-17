@@ -5,9 +5,9 @@
 # mongodb-memory-server already downloaded for the test suite, and keeps its
 # data in .data/ so a restart does not lose the board.
 #
-# It binds to localhost and raises the project creation limit, because the
-# hosted default of five an hour exists to slow down strangers, and there are
-# none here.
+# It binds to localhost and raises the published limits, because they exist to
+# slow down strangers and there are none here. The soak tool in particular is
+# meant to hammer this instance, and throttling it just measures the throttle.
 #
 #   scripts/dev-local.sh            # start (or restart) on port 4600
 #   scripts/dev-local.sh stop       # stop both
@@ -55,6 +55,8 @@ PORT="$PORT" \
 HOST=127.0.0.1 \
 LOG_LEVEL=info \
 LIMIT_CREATE_PROJECTS_PER_HOUR="${LIMIT_CREATE_PROJECTS_PER_HOUR:-100}" \
+LIMIT_WRITES_PER_MINUTE="${LIMIT_WRITES_PER_MINUTE:-6000}" \
+LIMIT_READS_PER_MINUTE="${LIMIT_READS_PER_MINUTE:-6000}" \
 nohup node apps/server/dist/index.js > "$DATA/log/muster.log" 2>&1 &
 
 sleep 2

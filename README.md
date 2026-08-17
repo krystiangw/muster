@@ -72,6 +72,21 @@ kept from a migrated board. An item lands in the first column that matches;
 anything matching nothing is reported rather than hidden. The operator edits the
 same layout in the browser, and three ready-made layouts are one click away.
 
+A column also says what belongs in it, so nobody has to work out that
+"Monitoring" means a label:
+
+```bash
+curl -sX POST $MUSTER/items/errors:withdraw-stuck/move \
+  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"column":"investigating","actor":"errors-loop"}'
+```
+
+A move can only set what an item already has, so it cannot invent a state
+either; on the default board that makes "In progress" the claim and "To do" the
+release. The reply says which column the item actually landed in, because a
+column can filter on more than a move can set. In the browser each card carries
+a select and a button: a drag needs JavaScript, and these pages have none.
+
 ## One project, one instance
 
 A project is the unit of separation: its own id, name, description, token,
