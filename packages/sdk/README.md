@@ -1,6 +1,6 @@
 # @muster/sdk
 
-Typed client for [Muster](https://muster.dev): shared operational memory for
+Typed client for [Muster](https://muster-web-1fa5a7a3c74e.herokuapp.com): shared operational memory for
 long-lived agents. Zero dependencies, one file, every method mapping onto one
 documented HTTP call.
 

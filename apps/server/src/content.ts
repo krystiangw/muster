@@ -578,7 +578,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       'The read link is not read-only: whoever holds it can answer the questions your agents filed. Hand it to your operator, not to a channel.',
       'Deleting an item needs an admin token. A worker key can close work but never erase the record of it.',
     ],
-    contact: config.contactEmail,
+    ...(config.contactEmail ? { contact: config.contactEmail } : {}),
   };
 }
 

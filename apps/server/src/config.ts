@@ -75,8 +75,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     },
     resendApiKey: env.RESEND_API_KEY ?? null,
     logUnsentEmails: env.NODE_ENV !== 'production',
-    emailFrom: env.EMAIL_FROM ?? 'Muster <hello@muster.dev>',
-    contactEmail: env.CONTACT_EMAIL ?? 'hello@muster.dev',
+    emailFrom: env.EMAIL_FROM ?? 'Muster <onboarding@resend.dev>',
+    // No default. An address on a domain this deployment does not own
+    // sends every reply to a stranger, which is worse than offering
+    // nobody to write to.
+    contactEmail: env.CONTACT_EMAIL ?? '',
     logLevel: env.LOG_LEVEL ?? 'info',
   };
 }

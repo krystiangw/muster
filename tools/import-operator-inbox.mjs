@@ -10,7 +10,7 @@
  * Dry run by default. Nothing is written until you pass --apply.
  *
  *   node tools/import-operator-inbox.mjs --base http://localhost:4600
- *   node tools/import-operator-inbox.mjs --base https://muster.dev --apply
+ *   node tools/import-operator-inbox.mjs --base https://muster-web-1fa5a7a3c74e.herokuapp.com --apply
  *
  * Tokens for the projects it creates cannot be recovered, so they are written to
  * ~/.muster-tokens.json. That is a home directory rather than anywhere near a

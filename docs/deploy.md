@@ -9,7 +9,7 @@ takes a domain, which is the operator's call. The commands are ready to paste.
 |---|---|---|
 | Heroku dyno, EU, **Basic** | 7 USD/mies. | Eco sleeps after 30 minutes of silence. A cold start of 5-10 seconds is a timeout for an agent, and the whole product promise is that an agent can rely on this mid-loop. |
 | MongoDB Atlas **M0**, EU | 0 USD | 512 MB. Our documents are a few kilobytes; this is a year of headroom at our own scale. |
-| `muster.dev` at Porkbun | ~12-15 USD/rok | `.dev` is HSTS-preloaded, so HTTPS is not optional, and the name types cleanly into a curl line. |
+| `musterboard.dev` at Porkbun | 8.75 USD first year, 12.87 to renew | `.dev` is HSTS-preloaded, so HTTPS is not optional. `muster.dev` itself has been registered to somebody else since 2021, and every short variant of the name went in 2026. |
 | Resend | 0 USD | Free tier covers the claim codes. Domain already verified for our other sends. |
 
 Total to run it: **about 8 USD a month.**
@@ -34,10 +34,10 @@ heroku stack:set heroku-24 -a muster-web
 heroku config:set -a muster-web \
   MONGODB_URI='mongodb+srv://...' \
   MONGODB_DB=muster \
-  BASE_URL=https://muster.dev \
+  BASE_URL=https://muster-web-1fa5a7a3c74e.herokuapp.com \
   RESEND_API_KEY='...' \
-  EMAIL_FROM='Muster <hello@muster.dev>' \
-  CONTACT_EMAIL=hello@muster.dev \
+  EMAIL_FROM='Muster <onboarding@resend.dev>' \
+  CONTACT_EMAIL= \
   LOG_LEVEL=info
 heroku ps:type -a muster-web web=basic
 git push heroku main
@@ -49,8 +49,8 @@ and pnpm comes from the `packageManager` field, exactly like `equity-analyst-web
 ## 4. Domain to the dyno
 
 ```bash
-heroku domains:add muster.dev -a muster-web
-heroku domains:add www.muster.dev -a muster-web
+heroku domains:add musterboard.dev -a muster-web
+heroku domains:add www.musterboard.dev -a muster-web
 heroku certs:auto:enable -a muster-web
 ```
 
@@ -61,8 +61,8 @@ HTTPS from the first request, so do not announce the domain before
 ## 5. Verify, in this order
 
 ```bash
-curl -s https://muster.dev/health
-curl -sX POST https://muster.dev/p -H 'content-type: application/json' -d '{"name":"smoke"}'
+curl -s https://muster-web-1fa5a7a3c74e.herokuapp.com/health
+curl -sX POST https://muster-web-1fa5a7a3c74e.herokuapp.com/p -H 'content-type: application/json' -d '{"name":"smoke"}'
 ```
 
 Then run our own scanner against it, which is the acceptance test for the whole
@@ -70,7 +70,7 @@ agent-entry layer:
 
 ```bash
 curl -sX POST https://letagentsin.com/api/scan \
-  -H 'content-type: application/json' -d '{"domain":"muster.dev"}'
+  -H 'content-type: application/json' -d '{"domain":"musterboard.dev"}'
 ```
 
 The test suite asserts all fifteen checks locally

@@ -133,7 +133,7 @@ export async function buildApp(
         version: '0.1.0',
         description:
           'Shared operational memory for long-lived agents: who is on duty, who owns what, what rotted and what needs a human. Signup is a single POST and needs no human.',
-        contact: { email: config.contactEmail },
+        ...(config.contactEmail ? { contact: { email: config.contactEmail } } : {}),
       },
       servers: [{ url: config.baseUrl }],
       components: {

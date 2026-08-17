@@ -103,7 +103,7 @@ export function registerAgentFiles(app: FastifyInstance, config: Config, store: 
     description_for_human: 'Shared operational memory for long-lived agents.',
     auth: { type: 'bearer' },
     api: { type: 'openapi', url: `${config.baseUrl}/openapi.json` },
-    contact_email: config.contactEmail,
+    ...(config.contactEmail ? { contact_email: config.contactEmail } : {}),
     legal_info_url: `${config.baseUrl}/docs`,
   }));
 }
