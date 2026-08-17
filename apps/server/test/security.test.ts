@@ -611,6 +611,44 @@ describe('a read link can ask for a project and never take one', () => {
     assert.equal(await harness.store.shares.countDocuments({ projectId: project.id }), 0);
   });
 
+  it('refuses a write posted from another site, and lets curl through', async () => {
+    // The routes under /r/ are authorised by the token in the path, so for an
+    // ordinary project this adds nothing. For a project narrowed to its owner
+    // the link alone no longer opens it and the session cookie does, which is
+    // exactly when a cross site form post is worth something to an attacker.
+    const project = await createProject(harness);
+    const readToken = project.readUrl.split('/r/')[1]!;
+    await post(project, '/items', { slug: 'work', title: 'work', actor: 'a' });
+
+    const fromElsewhere = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/owner`,
+      payload: 'slug=work&owner=attacker',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        origin: 'https://not-us.example',
+      },
+    });
+    assert.equal(fromElsewhere.statusCode, 403);
+    const untouched = await harness.store.items.findOne({ projectId: project.id, slug: 'work' });
+    assert.equal(untouched?.owner ?? null, null);
+
+    // Our own page still works, and so does a caller that sends no Origin at
+    // all, which is every agent using curl.
+    const fromUs = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/owner`,
+      payload: 'slug=work&owner=alex',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        origin: harness.config.baseUrl,
+      },
+    });
+    assert.equal(fromUs.statusCode, 303);
+    const assigned = await harness.store.items.findOne({ projectId: project.id, slug: 'work' });
+    assert.equal(assigned?.owner, 'alex');
+  });
+
   it('will not take an ask for a project that already has an owner', async () => {
     const project = await createProject(harness);
     const readToken = project.readUrl.split('/r/')[1]!;

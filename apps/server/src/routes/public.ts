@@ -1008,7 +1008,38 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
    * routes take the ordinary write limit. A leaked link should cost the project
    * its privacy, not let somebody rewrite its timelines in a loop.
    */
-  const limitWrites = (request: { params: unknown }, reply: FastifyReply): boolean => {
+  /**
+   * A cross site form post, refused.
+   *
+   * These routes are authorised by the token in the path, so for an ordinary
+   * project CSRF adds nothing: whoever can forge the request already has the
+   * link. For a project narrowed to its owner it is not nothing, because the
+   * link alone no longer opens it and the browser's session cookie does: an
+   * attacker who learned the read token could otherwise make the owner's own
+   * browser move cards.
+   *
+   * An absent Origin is allowed on purpose. Every browser sends one on a form
+   * post; curl sends none, and refusing those would break the agents.
+   */
+  const sameOrigin = (request: FastifyRequest, reply: FastifyReply): boolean => {
+    const origin = request.headers.origin;
+    if (typeof origin !== 'string' || origin === '' || origin === config.baseUrl) return true;
+    void reply
+      .code(403)
+      .type('text/html; charset=utf-8')
+      .send(
+        layout(
+          { title: 'Not from this page' },
+          `<h1>That form did not come from here</h1>
+           <p>The request arrived from ${escapeHtml(origin)}, which is not this service. Nothing
+           was changed. Open the board again and retry.</p>`,
+        ),
+      );
+    return false;
+  };
+
+  const limitWrites = (request: FastifyRequest, reply: FastifyReply): boolean => {
+    if (!sameOrigin(request, reply)) return false;
     const { readToken } = request.params as { readToken: string };
     const verdict = limiter.check(`rl:${readToken}`, config.rateLimits.write);
     if (verdict.ok) return true;
@@ -1285,32 +1316,25 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     // more thing to go wrong in production and, worse, made the route
     // untestable: the suite's base URL does not resolve, so the check this
     // page exists to enforce was never once exercised by a test.
-    // The per project limit on claim emails, which the loopback used to apply
-    // on our behalf. Without it this form sends at the ordinary write rate, and
-    // each send invalidates the pending code, so a leaked admin token could
-    // both flood an address and keep the real code from ever working.
-    const claimVerdict = limiter.check(`claim:${project._id}`, config.rateLimits.claimEmail);
-    if (!claimVerdict.ok) {
-      return reply
-        .code(429)
-        .header('retry-after', String(claimVerdict.retryAfterSeconds))
-        .type('text/html; charset=utf-8')
-        .send(
-          layout(
-            { title: 'Slow down' },
-            `<h1>Too many codes for this project</h1>
-             <p>Try again in ${claimVerdict.retryAfterSeconds} seconds, or use the code that was
-             already sent.</p>`,
-          ),
-        );
-    }
-
     let ok = false;
+    let flooded = false;
     try {
       const { key } = await authenticate(store, form.token ?? '');
       if (key.projectId === project._id && key.role === 'admin') {
-        const started = await startEmailClaim(store, project, form.email ?? '', config, mailer);
-        ok = started.alreadyClaimedBy === null;
+        // The per project limit on claim emails, which the loopback used to
+        // apply on our behalf: without it this form sends at the ordinary
+        // write rate, and every send invalidates the pending code.
+        //
+        // Charged only once the token has proved itself. Charging it first let
+        // anybody holding the read link spend the project's whole hourly
+        // budget on five wrong tokens, which blocks the real claim from the
+        // browser and from the API alike.
+        const verdict = limiter.check(`claim:${project._id}`, config.rateLimits.claimEmail);
+        if (!verdict.ok) flooded = true;
+        else {
+          const started = await startEmailClaim(store, project, form.email ?? '', config, mailer);
+          ok = started.alreadyClaimedBy === null;
+        }
       }
     } catch {
       // Every refusal reads the same to whoever is at the form: a wrong token,
@@ -1318,6 +1342,15 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
       // "that did not work", because telling them apart is telling a stranger
       // which of their guesses was close.
       ok = false;
+    }
+    if (flooded) {
+      return reply.code(429).type('text/html; charset=utf-8').send(
+        layout(
+          { title: 'Slow down' },
+          `<h1>Too many codes for this project</h1>
+           <p>Use the code that was already sent, or try again in an hour.</p>`,
+        ),
+      );
     }
     return reply.type('text/html; charset=utf-8').send(
       layout(
@@ -1362,8 +1395,11 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     // real ceiling is the five attempts a pending claim carries, but a second
     // code box in the same service should count against the same limit as the
     // first.
-    const { readToken: token } = request.params as { readToken: string };
-    const verdict = limiter.check(`verify:${token}`, config.rateLimits.verifyCode);
+    // Keyed by caller, not by the read link, which every visitor shares: a
+    // bucket on the token lets one of them spend the whole allowance and lock
+    // the person the code was actually sent to out of the form. The real
+    // ceiling on guessing is the five attempts the pending claim carries.
+    const verdict = limiter.check(`verify:${clientIp(request)}`, config.rateLimits.verifyCode);
     if (!verdict.ok) {
       return reply
         .code(429)
