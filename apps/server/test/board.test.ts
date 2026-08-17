@@ -1115,6 +1115,22 @@ describe('the board over MCP', () => {
   });
 });
 
+describe('a card that is blocked says so', () => {
+  it('wherever the layout puts it, including in progress', async () => {
+    const project = await createProject(harness, 'stuck');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    await post(project, '/items', { slug: 'jammed', title: 'jammed', actor: 'a' });
+    await post(project, '/items/jammed/claim', { agent: 'a', ttl_minutes: 30 });
+    await post(project, '/items', { slug: 'jammed', status: 'blocked', actor: 'a' });
+
+    // Somebody holding an item they cannot move is what blocked means, so the
+    // claim column keeps it. The card has to say the rest itself, or the
+    // question "what is stuck" has no answer on this board.
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(page.body, /<span class="chip blocked">blocked<\/span>/);
+  });
+});
+
 describe('acting on a card without a script', () => {
   let project: Project;
   let readToken: string;

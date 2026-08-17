@@ -12,7 +12,7 @@ import {
 } from '../board.js';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
-import { recordView } from '../events.js';
+import { record, recordView } from '../events.js';
 import { chip, escapeHtml, formatWhen, layout } from '../html.js';
 import { avatar } from '../identity.js';
 import { renderBoard, renderBoardFilters, renderBoardSettings } from './boardHtml.js';
@@ -951,6 +951,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`)}
       column: form.column,
       actor: 'operator',
     });
+    record(store, 'move', { door: 'browser', detail: form.column.slice(0, 40), projectId: project._id });
     // Back to the board they were actually looking at. Somebody working through
     // one agent's queue should not be thrown to the whole board by moving a card.
     const params = new URLSearchParams({

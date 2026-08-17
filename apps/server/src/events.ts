@@ -25,6 +25,16 @@ export type EventKind =
   | 'discover'
   /** A person opened one of the pages. The half of the funnel agents cannot show. */
   | 'view'
+  /**
+   * A person moved a card from the board.
+   *
+   * Counted for one reason, written down so nobody wonders later: drag and
+   * drop was refused on the grounds that the operator barely moves cards by
+   * hand, since agents move their own work through the API. That is a claim
+   * about behaviour, and a claim about behaviour with no measurement behind it
+   * is a preference. If this number says otherwise, the decision comes back.
+   */
+  | 'move'
   /** A project was created. */
   | 'signup'
   /** An agent registered itself in a project. */

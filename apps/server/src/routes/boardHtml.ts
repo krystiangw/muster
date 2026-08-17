@@ -99,6 +99,14 @@ function card(item: ItemDoc, now: Date, move: string, agents?: Map<string, strin
   </a>
   <div class="meta">
     ${whoChips(item, claimed, agents)}
+    ${
+      // A blocked card can sit in "In progress", because somebody holding an
+      // item they cannot move is exactly what blocked means, and the columns
+      // are a partition: first match wins. The chip is how the card still says
+      // it, wherever the layout puts it. Anything else makes the operator's
+      // "what is stuck" question unanswerable from the board.
+      item.status === 'blocked' ? chip('blocked', 'blocked') : ''
+    }
     ${item.stale ? chip('stale', 'stale') : ''}
     ${(item.labels ?? []).slice(0, 3).map((label) => chip(label, 'open')).join(' ')}
     <span class="slug">${escapeHtml(formatWhen(item.updatedAt))}</span>

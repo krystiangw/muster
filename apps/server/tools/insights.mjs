@@ -58,6 +58,8 @@ const [
   weekWrites,
   pageRows,
   weekViews,
+  moves,
+  boardViews,
 ] = await Promise.all([
   count(events, { kind: 'discover' }),
   count(events, { kind: 'signup' }),
@@ -79,6 +81,8 @@ const [
   count(events, { kind: 'first_write', at: { $gte: since(7) } }),
   events.aggregate([{ $match: { kind: 'view' } }, { $group: { _id: '$detail', n: { $sum: 1 } } }, { $sort: { n: -1 } }]).toArray(),
   count(events, { kind: 'view', at: { $gte: since(7) } }),
+  count(events, { kind: 'move' }),
+  count(events, { kind: 'view', detail: 'board' }),
 ]);
 
 const hours = answered
@@ -117,6 +121,10 @@ if (pageRows.length > 0) {
   console.log('\nPages people opened');
   for (const { _id, n } of pageRows) row(_id ?? 'unknown', n);
   row('  in the last seven days', weekViews);
+  // The number that decides whether drag and drop was refused on evidence or
+  // on taste. Above roughly three moves per board view, the refusal is wrong.
+  row('cards moved by hand', moves);
+  row('  per board view', boardViews === 0 ? 0 : (moves / boardViews).toFixed(2));
 }
 
 console.log('\nOn the boards right now');
