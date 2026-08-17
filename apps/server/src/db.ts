@@ -200,7 +200,9 @@ export async function ensureIndexes(store: Store): Promise<void> {
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
     ]),
     store.operatorCodes.createIndexes([
-      { key: { email: 1 }, name: 'email' },
+      // Unique, so two overlapping requests for the same address cannot leave
+      // two live codes behind and make the newer email the one that fails.
+      { key: { email: 1 }, unique: true, name: 'email' },
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
     ]),
   ]);

@@ -16,6 +16,7 @@ import {
   type ItemDoc,
   type ItemStatus,
   type ProjectDoc,
+  type ProjectVisibility,
   type ShareDoc,
   type TimelineEntry,
   type TimelineKind,
@@ -180,7 +181,7 @@ export async function authenticate(store: Store, token: string): Promise<AuthCon
 export async function updateProject(
   store: Store,
   projectId: string,
-  input: { name?: string; description?: string },
+  input: { name?: string; description?: string; visibility?: ProjectVisibility },
 ): Promise<ProjectDoc> {
   const set: Record<string, unknown> = {};
   if (input.name !== undefined) {
@@ -189,6 +190,23 @@ export async function updateProject(
     set.name = name.slice(0, 120);
   }
   if (input.description !== undefined) set.description = input.description.slice(0, 500);
+  if (input.visibility !== undefined) {
+    if (input.visibility !== 'link' && input.visibility !== 'owner') {
+      throw badRequest('bad_visibility', 'Visibility is "link" or "owner".');
+    }
+    if (input.visibility === 'owner') {
+      const project = await store.projects.findOne({ _id: projectId });
+      if (!project?.claimedBy) {
+        // Closing a project to an owner it does not have would lock everybody
+        // out of it, including the agent that just created it.
+        throw badRequest(
+          'not_claimed',
+          'Only a project somebody owns can be narrowed to its owner. Claim it by email first, or hand it over with /share.',
+        );
+      }
+    }
+    set.visibility = input.visibility;
+  }
 
   const project = await store.projects.findOneAndUpdate(
     { _id: projectId },

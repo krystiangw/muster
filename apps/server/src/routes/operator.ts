@@ -95,7 +95,7 @@ and you can end that from the view itself.</p>
   app.post('/operator', { schema: { hide: true } }, async (request, reply) => {
     const form = (request.body ?? {}) as { email?: string };
     const email = (form.email ?? '').trim().toLowerCase();
-    const verdict = limiter.check(`operator:${clientIp(request)}`, config.rateLimits.claimEmail);
+    const verdict = limiter.check(`operator-send:${clientIp(request)}`, config.rateLimits.claimEmail);
     if (!verdict.ok) {
       return html(
         reply,
@@ -125,17 +125,34 @@ and you can end that from the view itself.</p>
     if (/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(email)) {
       const code = newOtpCode();
       const now = new Date();
-      // One live code per address. A second request replaces the first rather
-      // than giving somebody two valid codes to guess against.
-      await store.operatorCodes.deleteMany({ email });
-      await store.operatorCodes.insertOne({
-        _id: newId('oc'),
-        email,
-        codeHash: hashToken(code),
-        attempts: 0,
-        createdAt: now,
-        expiresAt: new Date(now.getTime() + CODE_TTL_MS),
-      });
+      // One live code per address, replaced in a single write. Deleting and
+      // then inserting lets two overlapping requests both delete before either
+      // inserts, which leaves two live codes and makes the newer email the one
+      // that fails.
+      const replaceCode = () =>
+        store.operatorCodes.updateOne(
+          { email },
+          {
+            $set: {
+              codeHash: hashToken(code),
+              attempts: 0,
+              createdAt: now,
+              expiresAt: new Date(now.getTime() + CODE_TTL_MS),
+            },
+            $setOnInsert: { _id: newId('oc'), email },
+          },
+          { upsert: true },
+        );
+      try {
+        await replaceCode();
+      } catch (error) {
+        // Two requests for the same address in the same instant: the index did
+        // its job and refused the second insert. The document exists now, so
+        // the retry takes the update path and the code in the email we are
+        // about to send is the one that will work.
+        if ((error as { code?: number }).code !== 11000) throw error;
+        await replaceCode();
+      }
       try {
         await mailer.sendOperatorCode(email, code);
       } catch (error) {
@@ -167,7 +184,13 @@ and you can end that from the view itself.</p>
   app.post('/operator/verify', { schema: { hide: true } }, async (request, reply) => {
     const form = (request.body ?? {}) as { email?: string; code?: string };
     const email = (form.email ?? '').trim().toLowerCase();
-    const verdict = limiter.check(`operator:${clientIp(request)}`, config.rateLimits.claimEmail);
+    // A bucket of its own. Sharing the one that limits outbound email meant a
+    // single sign in spent two of five slots an hour, so a household or an
+    // office behind one address locked itself out by signing in twice.
+    const verdict = limiter.check(
+      `operator-verify:${clientIp(request)}`,
+      config.rateLimits.verifyCode,
+    );
     if (!verdict.ok) {
       return html(
         reply,
@@ -187,14 +210,24 @@ and you can end that from the view itself.</p>
         400,
       );
 
-    const pending = await store.operatorCodes.findOne({ email, expiresAt: { $gt: new Date() } });
-    if (!pending || pending.attempts >= MAX_CODE_ATTEMPTS) return wrong();
-    if (pending.codeHash !== hashToken(String(form.code ?? ''))) {
-      await store.operatorCodes.updateOne({ _id: pending._id }, { $inc: { attempts: 1 } });
-      return wrong();
-    }
+    // The attempt is spent in the same write that reads the code, so several
+    // guesses landing together cannot all see attempts=0 and slip past the
+    // ceiling between them. Expiry is checked here rather than left to the TTL
+    // sweeper, which runs on its own schedule.
+    const pending = await store.operatorCodes.findOneAndUpdate(
+      { email, expiresAt: { $gt: new Date() }, attempts: { $lt: MAX_CODE_ATTEMPTS } },
+      { $inc: { attempts: 1 } },
+      { returnDocument: 'after' },
+    );
+    if (!pending) return wrong();
+    if (pending.codeHash !== hashToken(String(form.code ?? ''))) return wrong();
 
-    await store.operatorCodes.deleteMany({ email });
+    // And the code is spent by the delete rather than by having been read: if
+    // two correct submissions race, exactly one of them removes the document,
+    // and only that one gets a session out of it.
+    const spent = await store.operatorCodes.deleteOne({ _id: pending._id });
+    if (spent.deletedCount !== 1) return wrong();
+
     await startSession(store, config, reply, email);
     return reply.redirect('/operator', 303);
   });
@@ -205,20 +238,44 @@ and you can end that from the view itself.</p>
    * or a Referer header before this change stops being a way in the moment its
    * owner uses it.
    */
+  const noSuchLink = (reply: FastifyReply) =>
+    html(
+      reply,
+      'No such link',
+      `<h1>No such link</h1>
+       <p>That link is wrong, or it has already been exchanged for a session. Links are good for
+       one sign in now.</p>
+       <p><a href="/operator">Sign in with your email</a></p>`,
+      404,
+    );
+
   app.get('/operator/:token', { schema: { hide: true } }, async (request, reply) => {
     const { token } = request.params as { token: string };
+    const record = await store.operatorTokens.findOne({ hash: hashToken(token) });
+    if (!record) return noSuchLink(reply);
+
+    // Deliberately not spent by this GET. Mail security scanners and link
+    // preview crawlers fetch every URL in a message before the person does, and
+    // a one use link that a scanner can burn is a link that never works. The
+    // exchange happens on the button below, which a crawler will not press.
+    return html(
+      reply,
+      'Sign in',
+      `<h1>Sign in as ${escapeHtml(record.email)}</h1>
+       <p>This link was emailed before sign in codes existed. Using it once signs this browser in
+       for 30 days and then stops working.</p>
+       <form method="post" action="/operator/${escapeHtml(token)}">
+         <div><button type="submit">Sign in with this link</button></div>
+       </form>
+       <p style="color:var(--muted);font-size:14.5px">Or <a href="/operator">use a code</a>, which
+       is how it works from now on.</p>`,
+    );
+  });
+
+  app.post('/operator/:token', { schema: { hide: true } }, async (request, reply) => {
+    const { token } = request.params as { token: string };
     const record = await store.operatorTokens.findOneAndDelete({ hash: hashToken(token) });
-    if (!record) {
-      return html(
-        reply,
-        'No such link',
-        `<h1>No such link</h1>
-         <p>That link is wrong, or it has already been exchanged for a session. Links are good for
-         one sign in now.</p>
-         <p><a href="/operator">Sign in with your email</a></p>`,
-        404,
-      );
-    }
+    if (!record) return noSuchLink(reply);
     await startSession(store, config, reply, record.email);
     return reply.redirect('/operator', 303);
   });

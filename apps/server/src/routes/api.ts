@@ -1191,27 +1191,30 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       async (request) => {
         const { project } = requireAdmin(request);
         const { email, code } = request.body as { email: string; code: string };
-        const pending = await store.claimCodes.findOne({
-          projectId: project._id,
-          email: email.toLowerCase(),
-          // Expiry is checked here rather than left to the TTL index. Mongo
-          // sweeps expired documents on its own schedule, up to a minute late
-          // and later under load, so a fifteen minute code was quietly good for
-          // longer than the response promised.
-          expiresAt: { $gt: new Date() },
-        });
+        // The attempt is spent in the write that reads the code, so several
+        // guesses arriving together cannot all see the same count and slip past
+        // the ceiling between them. Expiry is checked here rather than left to
+        // the TTL index, which sweeps on its own schedule and runs late under
+        // load, so a fifteen minute code was quietly good for longer than the
+        // response promised.
+        const pending = await store.claimCodes.findOneAndUpdate(
+          {
+            projectId: project._id,
+            email: email.toLowerCase(),
+            expiresAt: { $gt: new Date() },
+            attempts: { $lt: MAX_CLAIM_ATTEMPTS },
+          },
+          { $inc: { attempts: 1 } },
+          { returnDocument: 'after' },
+        );
         if (!pending) {
-          throw new ServiceError(404, 'no_pending_claim', 'No claim is pending for that address.');
-        }
-        if (pending.attempts >= MAX_CLAIM_ATTEMPTS) {
           throw new ServiceError(
-            429,
-            'too_many_attempts',
-            'Too many wrong codes. Start the claim again.',
+            404,
+            'no_pending_claim',
+            'No claim is pending for that address, or it expired or ran out of attempts. Start the claim again.',
           );
         }
         if (pending.codeHash !== hashToken(code)) {
-          await store.claimCodes.updateOne({ _id: pending._id }, { $inc: { attempts: 1 } });
           throw new ServiceError(400, 'bad_code', 'That code does not match.');
         }
         await claimProjectWithEmail(store, project, email.toLowerCase(), config);

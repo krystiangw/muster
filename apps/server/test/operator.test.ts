@@ -231,15 +231,43 @@ describe('the operator view', () => {
       lastUsedAt: null,
     });
 
-    const first = await harness.server.inject({ method: 'GET', url: `/operator/${planted}` });
-    assert.equal(first.statusCode, 303);
-    assert.equal(first.headers.location, '/operator');
-    assert.ok(String(first.headers['set-cookie']).startsWith('muster_session='));
+    // A mail scanner fetching the URL must not spend it: it opens a page with a
+    // button, and a crawler does not press buttons.
+    const looked = await harness.server.inject({ method: 'GET', url: `/operator/${planted}` });
+    assert.equal(looked.statusCode, 200);
+    assert.ok(!String(looked.headers['set-cookie'] ?? '').includes('muster_session='));
+    assert.equal(
+      await harness.store.operatorTokens.countDocuments({ _id: 'o_legacy' }),
+      1,
+      'looking at it does not burn it',
+    );
+
+    const used = await harness.server.inject({ method: 'POST', url: `/operator/${planted}` });
+    assert.equal(used.statusCode, 303);
+    assert.equal(used.headers.location, '/operator');
+    assert.ok(String(used.headers['set-cookie']).startsWith('muster_session='));
 
     // Burned. A URL that reached a log or a history before today stops being a
     // way in the moment its owner uses it.
-    const second = await harness.server.inject({ method: 'GET', url: `/operator/${planted}` });
-    assert.equal(second.statusCode, 404);
+    const again = await harness.server.inject({ method: 'POST', url: `/operator/${planted}` });
+    assert.equal(again.statusCode, 404);
+  });
+
+  it('does not let the legacy route shadow the routes named after it', async () => {
+    // /operator/verify and /operator/logout are static segments and must win
+    // over /operator/:token, or signing in would look like redeeming a link.
+    const project = await createProject(harness, 'routing');
+    await claimFor(project, 'router@example.com');
+    const session = await signIn(harness, 'router@example.com');
+    assert.ok(session.cookie.startsWith('muster_session='));
+
+    const out = await harness.server.inject({
+      method: 'POST',
+      url: '/operator/logout',
+      payload: session.form({}),
+      headers: session.headers,
+    });
+    assert.equal(out.statusCode, 200);
   });
 
   it('lets a session lapse, and a code with it', async () => {

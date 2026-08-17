@@ -265,6 +265,17 @@ export const DEFAULT_BOARD: BoardConfig = {
   ],
 };
 
+/**
+ * Who may open the read link.
+ *
+ * `link` is the default and has to be: an agent creates a project before any
+ * person is involved, and the whole handover depends on being able to send
+ * somebody a URL that just works. Once a person owns the project they can
+ * narrow it to themselves, after which the link alone is not enough and the
+ * reader has to be signed in as the owner.
+ */
+export type ProjectVisibility = 'link' | 'owner';
+
 export type ProjectTier = 'demo' | 'free' | 'pro';
 
 export interface ProjectLimits {
@@ -288,6 +299,8 @@ export interface ProjectDoc {
   /** Absent on projects created before boards existed; DEFAULT_BOARD applies. */
   board?: BoardConfig;
   readToken: string;
+  /** Absent on projects created before this existed; `link` applies. */
+  visibility?: ProjectVisibility;
   claimedBy: string | null;
   claimedAt: Date | null;
   /** Unclaimed demo projects are swept by a TTL index. Null once claimed. */

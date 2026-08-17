@@ -1,5 +1,5 @@
 import { clientIp } from './api.js';
-import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   BOARD_PRESETS,
   COLUMN_RENDER_LIMIT,
@@ -16,10 +16,12 @@ import { renderBoard, renderBoardFilters, renderBoardSettings } from './boardHtm
 import { maybeSweep } from '../hygiene.js';
 import type { RateLimiter } from '../rateLimit.js';
 import { ServiceError, answerEscalation, createProject } from '../service.js';
+import { readSession } from '../session.js';
 import {
   ESCALATION_STATUSES,
   type EscalationStatus,
   type ItemDoc,
+  type ProjectDoc,
   type TimelineEntry,
 } from '../types.js';
 
@@ -95,6 +97,26 @@ async function agentDescriptions(
     .toArray();
   for (const doc of docs) described.set(doc.handle, doc.description);
   return described;
+}
+
+/**
+ * A project narrowed to its owner is not readable with the link alone.
+ *
+ * The default stays `link`, and has to: an agent creates a project before any
+ * person is involved, and handing one over depends on being able to send
+ * somebody a URL that just works. Once a person owns it they can close it, and
+ * from then on the reader has to be signed in as that person. The refusal is a
+ * 404 rather than a 403 so that holding a wrong link never confirms that a
+ * right one exists.
+ */
+async function readableBy(
+  store: Store,
+  request: FastifyRequest,
+  project: ProjectDoc,
+): Promise<boolean> {
+  if ((project.visibility ?? 'link') === 'link') return true;
+  const session = await readSession(store, request);
+  return session !== null && session.email === project.claimedBy;
 }
 
 export function registerPublic(app: FastifyInstance, deps: PublicDeps): void {
@@ -490,6 +512,20 @@ address. Claiming is free and raises the limits:</p>
           ),
         );
     }
+    if (!(await readableBy(store, request, project))) {
+      return reply
+        .code(404)
+        .type('text/html; charset=utf-8')
+        .send(
+          layout(
+            { title: 'No such project' },
+            `<h1>No such project</h1>
+             <p>That link is wrong, or the project expired and was deleted.</p>
+             <p>If it is yours, <a href="/operator">sign in</a>: its owner narrowed it to
+             themselves, so the link alone no longer opens it.</p>`,
+          ),
+        );
+    }
     void maybeSweep(store, project).catch(() => undefined);
 
     const [items, escalations, agents] = await Promise.all([
@@ -622,6 +658,20 @@ ${
           ),
         );
     }
+    if (!(await readableBy(store, request, project))) {
+      return reply
+        .code(404)
+        .type('text/html; charset=utf-8')
+        .send(
+          layout(
+            { title: 'No such project' },
+            `<h1>No such project</h1>
+             <p>That link is wrong, or the project expired and was deleted.</p>
+             <p>If it is yours, <a href="/operator">sign in</a>: its owner narrowed it to
+             themselves, so the link alone no longer opens it.</p>`,
+          ),
+        );
+    }
     void maybeSweep(store, project).catch(() => undefined);
     const query = request.query as {
       moved?: string;
@@ -704,6 +754,11 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`)}
     const form = (request.body ?? {}) as { board?: string; preset?: string };
     const project = await store.projects.findOne({ readToken });
     if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
+    // Writing through the link is exactly what the link is for, so a project
+    // closed to its owner has to refuse it here too, not only on the page.
+    if (!(await readableBy(store, request, project))) {
+      throw new ServiceError(404, 'not_found', 'No such project.');
+    }
 
     let config;
     if (form.preset) {
@@ -739,6 +794,11 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`)}
     };
     const project = await store.projects.findOne({ readToken });
     if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
+    // Writing through the link is exactly what the link is for, so a project
+    // closed to its owner has to refuse it here too, not only on the page.
+    if (!(await readableBy(store, request, project))) {
+      throw new ServiceError(404, 'not_found', 'No such project.');
+    }
     if (!form.slug || !form.column) {
       throw new ServiceError(400, 'bad_move', 'A move needs an item and a column.');
     }
@@ -765,6 +825,11 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`)}
     const form = (request.body ?? {}) as { status?: string; answer?: string };
     const project = await store.projects.findOne({ readToken });
     if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
+    // Writing through the link is exactly what the link is for, so a project
+    // closed to its owner has to refuse it here too, not only on the page.
+    if (!(await readableBy(store, request, project))) {
+      throw new ServiceError(404, 'not_found', 'No such project.');
+    }
 
     const status = (form.status ?? 'answered') as EscalationStatus;
     if (!ESCALATION_STATUSES.includes(status)) {
@@ -779,6 +844,11 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`)}
     const form = (request.body ?? {}) as { email?: string; token?: string };
     const project = await store.projects.findOne({ readToken });
     if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
+    // Writing through the link is exactly what the link is for, so a project
+    // closed to its owner has to refuse it here too, not only on the page.
+    if (!(await readableBy(store, request, project))) {
+      throw new ServiceError(404, 'not_found', 'No such project.');
+    }
 
     // The read link is shareable, so the claim itself is gated on the project
     // token: whoever can write to the project decides who owns it.

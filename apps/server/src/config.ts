@@ -20,6 +20,7 @@ export interface Config {
     write: RateLimitRule;
     read: RateLimitRule;
     claimEmail: RateLimitRule;
+    verifyCode: RateLimitRule;
   };
   resendApiKey: string | null;
   /**
@@ -67,6 +68,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       write: { requests: int(env.LIMIT_WRITES_PER_MINUTE, 120), windowSeconds: 60 },
       read: { requests: int(env.LIMIT_READS_PER_MINUTE, 600), windowSeconds: 60 },
       claimEmail: { requests: int(env.LIMIT_CLAIM_EMAILS_PER_HOUR, 5), windowSeconds: 3600 },
+      // Typing a code is not sending an email. Five an hour would leave four
+      // guesses and two clean sign ins per address behind a shared address,
+      // while the real ceiling on guessing is the five attempts a code allows.
+      verifyCode: { requests: int(env.LIMIT_CODE_ATTEMPTS_PER_HOUR, 60), windowSeconds: 3600 },
     },
     resendApiKey: env.RESEND_API_KEY ?? null,
     logUnsentEmails: env.NODE_ENV !== 'production',
