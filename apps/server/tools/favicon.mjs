@@ -22,12 +22,20 @@ import { writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
-/** The tile, and the columns on it, in a unit square. */
+/**
+ * The tile, and the columns on it, in a unit square.
+ *
+ * The gaps are sized for the smallest frame rather than the largest. At 16
+ * pixels a column is two and a bit wide, so a gap under a pixel and a half
+ * closes up under antialiasing and the three columns read as one smudge. That
+ * is the whole design constraint here: the mark has to survive a browser tab,
+ * where it is smaller than a word.
+ */
 const TILE_RADIUS = 0.215;
 const COLUMNS = [
-  { x: 0.205, width: 0.17, top: 0.2, height: 0.6 },
-  { x: 0.415, width: 0.17, top: 0.2, height: 0.42 },
-  { x: 0.625, width: 0.17, top: 0.2, height: 0.28 },
+  { x: 0.19, width: 0.143, top: 0.2, height: 0.6 },
+  { x: 0.4285, width: 0.143, top: 0.2, height: 0.42 },
+  { x: 0.667, width: 0.143, top: 0.2, height: 0.28 },
 ];
 
 /** The two colours the rest of the site already uses for accent and page. */
