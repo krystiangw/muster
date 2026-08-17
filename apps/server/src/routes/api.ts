@@ -1194,6 +1194,11 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         const pending = await store.claimCodes.findOne({
           projectId: project._id,
           email: email.toLowerCase(),
+          // Expiry is checked here rather than left to the TTL index. Mongo
+          // sweeps expired documents on its own schedule, up to a minute late
+          // and later under load, so a fifteen minute code was quietly good for
+          // longer than the response promised.
+          expiresAt: { $gt: new Date() },
         });
         if (!pending) {
           throw new ServiceError(404, 'no_pending_claim', 'No claim is pending for that address.');

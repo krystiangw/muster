@@ -39,12 +39,39 @@ export interface OperatorTokenDoc {
   lastUsedAt: Date | null;
 }
 
+/**
+ * A browser session for one operator. The credential is a cookie, so it never
+ * reaches a log, a URL or a Referer header, and it carries the CSRF secret for
+ * the forms that session renders.
+ */
+export interface OperatorSessionDoc {
+  _id: string;
+  email: string;
+  hash: string;
+  csrf: string;
+  createdAt: Date;
+  lastUsedAt: Date;
+  expiresAt: Date;
+}
+
+/** A six digit code that lets somebody start a session with their address. */
+export interface OperatorCodeDoc {
+  _id: string;
+  email: string;
+  codeHash: string;
+  attempts: number;
+  createdAt: Date;
+  expiresAt: Date;
+}
+
 export interface Store {
   client: MongoClient;
   db: Db;
   projects: Collection<ProjectDoc>;
   oauthClients: Collection<OAuthClientDoc>;
   operatorTokens: Collection<OperatorTokenDoc>;
+  operatorSessions: Collection<OperatorSessionDoc>;
+  operatorCodes: Collection<OperatorCodeDoc>;
   agents: Collection<Expiring<AgentDoc>>;
   items: Collection<Expiring<ItemDoc>>;
   escalations: Collection<Expiring<EscalationDoc>>;
@@ -71,6 +98,8 @@ export async function createStore(uri: string, dbName: string): Promise<Store> {
     projects: db.collection<ProjectDoc>('projects'),
     oauthClients: db.collection<OAuthClientDoc>('oauthClients'),
     operatorTokens: db.collection<OperatorTokenDoc>('operatorTokens'),
+    operatorSessions: db.collection<OperatorSessionDoc>('operatorSessions'),
+    operatorCodes: db.collection<OperatorCodeDoc>('operatorCodes'),
     agents: db.collection<Expiring<AgentDoc>>('agents'),
     items: db.collection<Expiring<ItemDoc>>('items'),
     escalations: db.collection<Expiring<EscalationDoc>>('escalations'),
@@ -163,6 +192,16 @@ export async function ensureIndexes(store: Store): Promise<void> {
     store.operatorTokens.createIndexes([
       { key: { hash: 1 }, unique: true, name: 'hash' },
       { key: { email: 1 }, name: 'email' },
+    ]),
+    store.operatorSessions.createIndexes([
+      { key: { hash: 1 }, unique: true, name: 'hash' },
+      { key: { email: 1 }, name: 'email' },
+      // The session ends on its own even if nobody logs out.
+      { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
+    ]),
+    store.operatorCodes.createIndexes([
+      { key: { email: 1 }, name: 'email' },
+      { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
     ]),
   ]);
 }

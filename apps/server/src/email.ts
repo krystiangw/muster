@@ -14,6 +14,7 @@ export type Delivery = 'sent' | 'logged' | 'discarded';
 
 export interface Mailer {
   sendClaimCode(to: string, code: string, projectName: string): Promise<Delivery>;
+  sendOperatorCode(to: string, code: string): Promise<Delivery>;
   sendOperatorLink(to: string, url: string, projectCount: number): Promise<Delivery>;
 }
 
@@ -66,6 +67,22 @@ export function createMailer(config: Config, log: (msg: string) => void): Mailer
         'your agents on your behalf, so treat it like a password.',
         '',
         'If you did not ask for this, ignore the message. Nothing changed.',
+      ]);
+    },
+    async sendOperatorCode(to, code) {
+      // A code rather than a link, on purpose. A link in a mail ends up in the
+      // browser history, in the Referer of whatever the person clicks next, and
+      // in whatever forwards the message; six digits typed into a form end up
+      // nowhere. It is also the same gesture as claiming a project, so there is
+      // one thing for a person to learn instead of two.
+      return send(to, `Your Muster code: ${code}`, [
+        `${code} signs you in to your Muster projects.`,
+        '',
+        'The code is valid for 15 minutes and can be used once. Signing in gives',
+        'this browser access for 30 days; you can end it from the view itself.',
+        '',
+        'If you did not ask for this, ignore the message. Nothing changed, and',
+        'nobody learned anything about this address.',
       ]);
     },
     async sendClaimCode(to, code, projectName) {

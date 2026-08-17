@@ -1,11 +1,19 @@
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
 import type { Mailer } from '../email.js';
 import { chip, escapeHtml, formatWhen, layout } from '../html.js';
-import { hashToken, newId, newToken } from '../ids.js';
+import { hashToken, newId, newOtpCode } from '../ids.js';
 import type { RateLimiter } from '../rateLimit.js';
 import { ServiceError, acceptShare, answerEscalation } from '../service.js';
+import {
+  checkCsrf,
+  csrfField,
+  endSession,
+  readSession,
+  startSession,
+  type OperatorSession,
+} from '../session.js';
 import { ESCALATION_STATUSES, type EscalationStatus } from '../types.js';
 import { clientIp } from './api.js';
 
@@ -18,6 +26,10 @@ import { clientIp } from './api.js';
  * the one thing every competing board leaves to the human: they all assume you
  * are looking at one board at a time. An agent files a question in whichever
  * project it lives in; the operator answers everything in one place.
+ *
+ * Getting in is an address and a six digit code, the same gesture as claiming a
+ * project. There is no account: the address is the identity, the code proves it
+ * for this browser, and the session it opens is a cookie rather than a URL.
  */
 export interface OperatorDeps {
   store: Store;
@@ -26,129 +38,220 @@ export interface OperatorDeps {
   mailer: Mailer;
 }
 
+const CODE_TTL_MS = 15 * 60_000;
+const MAX_CODE_ATTEMPTS = 5;
+
 export function registerOperator(app: FastifyInstance, deps: OperatorDeps): void {
   const { store, config, limiter, mailer } = deps;
 
-  app.get('/operator', { schema: { hide: true } }, async (_request, reply) => {
-    const body = `
+  const html = (reply: FastifyReply, title: string, body: string, code = 200) =>
+    reply.code(code).type('text/html; charset=utf-8').send(layout({ title }, body));
+
+  /** Every action below belongs to whoever is signed in, and to nobody else. */
+  async function requireSession(
+    request: FastifyRequest,
+    reply: FastifyReply,
+  ): Promise<OperatorSession | null> {
+    const session = await readSession(store, request);
+    if (session) return session;
+    void html(
+      reply,
+      'Sign in',
+      `<h1>Sign in first</h1>
+       <p>That session has ended or was never started here.</p>
+       <p><a href="/operator">Sign in with your email</a></p>`,
+      401,
+    );
+    return null;
+  }
+
+  function signInForm(message?: string): string {
+    return `
 <h1>Everything waiting on you</h1>
 <p class="lead">One page for every project you claimed, and every question your
-agents parked for a human. Enter the address you claimed your projects with and
-we send you the link.</p>
+agents parked for a human. No account: your address is the identity, and a code
+proves it for this browser.</p>
+${message ? `<p class="notice">${escapeHtml(message)}</p>` : ''}
 <form method="post" action="/operator">
   <label>Email
     <input type="email" name="email" required placeholder="you@example.com">
   </label>
-  <div><button type="submit">Send me the link</button></div>
+  <div><button type="submit">Send me a code</button></div>
 </form>
-<p style="color:var(--muted);font-size:14.5px;margin-top:20px">Anyone holding the
-link can answer your agents on your behalf, so treat it like a password. Asking
-for a new one leaves the old one working; if you have lost one or shared it by
-mistake, open a link you still have and turn off every other one from there.</p>
+<p style="color:var(--muted);font-size:14.5px;margin-top:20px">The code is good for
+15 minutes and works once. Signing in keeps this browser signed in for 30 days,
+and you can end that from the view itself.</p>
 `;
-    return reply
-      .type('text/html; charset=utf-8')
-      .send(layout({ title: 'Muster operator view' }, body));
+  }
+
+  // ------------------------------------------------------------- signing in
+
+  app.get('/operator', { schema: { hide: true } }, async (request, reply) => {
+    const session = await readSession(store, request);
+    if (!session) return html(reply, 'Muster operator view', signInForm());
+    return html(reply, 'Muster operator view', await renderView(session));
   });
 
   app.post('/operator', { schema: { hide: true } }, async (request, reply) => {
     const form = (request.body ?? {}) as { email?: string };
     const email = (form.email ?? '').trim().toLowerCase();
-    const ip = clientIp(request);
-    const verdict = limiter.check(`operator:${ip}`, config.rateLimits.claimEmail);
+    const verdict = limiter.check(`operator:${clientIp(request)}`, config.rateLimits.claimEmail);
     if (!verdict.ok) {
-      return reply
-        .code(429)
-        .type('text/html; charset=utf-8')
-        .send(
-          layout(
-            { title: 'Slow down' },
-            `<h1>Too many requests</h1><p>Try again in ${verdict.retryAfterSeconds} seconds.</p>`,
-          ),
-        );
+      return html(
+        reply,
+        'Slow down',
+        `<h1>Too many requests</h1><p>Try again in ${verdict.retryAfterSeconds} seconds.</p>`,
+        429,
+      );
     }
 
-    const projects = await store.projects.countDocuments({ claimedBy: email });
-    if (projects > 0) {
-      const token = newToken();
-      // Asking for a link deliberately does not revoke the previous one. This
-      // endpoint takes an email address and nothing else, so revoking here
-      // would let anyone who knows the address knock the owner's link out from
-      // under them, over and over. Revocation lives inside the view instead,
-      // where holding a working link is the proof that you may end the others.
-      await store.operatorTokens.insertOne({
-        _id: newId('o'),
+    // A deployment with no mail provider cannot send anything to anybody, and
+    // saying so is safe: it is a property of the deployment rather than of the
+    // address, so it reads the same for everyone and stays no kind of probe.
+    if (!config.resendApiKey && !config.logUnsentEmails) {
+      return html(
+        reply,
+        'This Muster cannot send email',
+        `<h1>This Muster cannot send email</h1>
+         <p>No mail provider is configured here, so a code cannot reach you. Whoever runs this
+         instance needs to set <code>RESEND_API_KEY</code>.</p>
+         <p>If an agent created a project for you, it can hand it over directly instead: the read
+         link it already has works without any email.</p>
+         <p><a href="/">Back</a></p>`,
+        503,
+      );
+    }
+
+    if (/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(email)) {
+      const code = newOtpCode();
+      const now = new Date();
+      // One live code per address. A second request replaces the first rather
+      // than giving somebody two valid codes to guess against.
+      await store.operatorCodes.deleteMany({ email });
+      await store.operatorCodes.insertOne({
+        _id: newId('oc'),
         email,
-        hash: hashToken(token),
-        createdAt: new Date(),
-        lastUsedAt: null,
+        codeHash: hashToken(code),
+        attempts: 0,
+        createdAt: now,
+        expiresAt: new Date(now.getTime() + CODE_TTL_MS),
       });
       try {
-        await mailer.sendOperatorLink(email, `${config.baseUrl}/operator/${token}`, projects);
+        await mailer.sendOperatorCode(email, code);
       } catch (error) {
-        // A bounced or failed send must not answer differently from an address
-        // that owns nothing, or the failure itself becomes the account probe.
-        request.log.error({ err: error }, 'operator link delivery failed');
+        // A bounced send must not answer differently from an address nobody
+        // has ever used, or the failure itself becomes the account probe.
+        request.log.error({ err: error }, 'operator code delivery failed');
       }
     }
 
-    // A deployment with no mail provider cannot send this link to anybody, and
-    // saying so is safe: it is a property of the deployment, not of the address
-    // that was typed, so it answers the same for everyone and stays no kind of
-    // probe. Telling somebody to check an inbox nothing will arrive in is the
-    // one answer worse than an honest error.
-    if (!config.resendApiKey && !config.logUnsentEmails) {
-      return reply
-        .code(503)
-        .type('text/html; charset=utf-8')
-        .send(
-          layout(
-            { title: 'This Muster cannot send email' },
-            `<h1>This Muster cannot send email</h1>
-             <p>No mail provider is configured here, so the link cannot reach you. Whoever runs
-             this instance needs to set <code>RESEND_API_KEY</code>.</p>
-             <p>If an agent created a project for you, it can hand it over directly instead:
-             the read link it already has works without any email.</p>
-             <p><a href="/">Back</a></p>`,
-          ),
-        );
-    }
-
-    // The same answer either way: whether an address owns projects here is not
-    // something a stranger gets to probe.
-    return reply.type('text/html; charset=utf-8').send(
-      layout(
-        { title: 'Check your email' },
-        `<h1>Check your email</h1>
-         <p>If ${escapeHtml(email)} has claimed any project on Muster, the link is on its way.</p>
-         <p><a href="/">Back</a></p>`,
-      ),
+    // The same page whether the address owns nine projects, owns none, or is
+    // not an address at all. Whether somebody uses this service is not
+    // something a stranger gets to establish by typing a guess into a form.
+    return html(
+      reply,
+      'Check your email',
+      `<h1>Check your email</h1>
+       <p>If ${escapeHtml(email || 'that address')} can sign in here, a six digit code is on its
+       way. It is good for 15 minutes.</p>
+       <form method="post" action="/operator/verify">
+         <input type="hidden" name="email" value="${escapeHtml(email)}">
+         <label>Code<input name="code" inputmode="numeric" autocomplete="one-time-code"
+           pattern="[0-9]{6}" maxlength="6" required placeholder="123456"></label>
+         <div><button type="submit">Sign in</button></div>
+       </form>
+       <p style="color:var(--muted);font-size:14.5px"><a href="/operator">Ask for another code</a></p>`,
     );
   });
 
+  app.post('/operator/verify', { schema: { hide: true } }, async (request, reply) => {
+    const form = (request.body ?? {}) as { email?: string; code?: string };
+    const email = (form.email ?? '').trim().toLowerCase();
+    const verdict = limiter.check(`operator:${clientIp(request)}`, config.rateLimits.claimEmail);
+    if (!verdict.ok) {
+      return html(
+        reply,
+        'Slow down',
+        `<h1>Too many attempts</h1><p>Try again in ${verdict.retryAfterSeconds} seconds.</p>`,
+        429,
+      );
+    }
+
+    const wrong = () =>
+      html(
+        reply,
+        'That code did not work',
+        `<h1>That code did not work</h1>
+         <p>It may have expired, been used already, or belong to a different address.</p>
+         <p><a href="/operator">Start again</a></p>`,
+        400,
+      );
+
+    const pending = await store.operatorCodes.findOne({ email, expiresAt: { $gt: new Date() } });
+    if (!pending || pending.attempts >= MAX_CODE_ATTEMPTS) return wrong();
+    if (pending.codeHash !== hashToken(String(form.code ?? ''))) {
+      await store.operatorCodes.updateOne({ _id: pending._id }, { $inc: { attempts: 1 } });
+      return wrong();
+    }
+
+    await store.operatorCodes.deleteMany({ email });
+    await startSession(store, config, reply, email);
+    return reply.redirect('/operator', 303);
+  });
+
+  /**
+   * The links that were emailed before sessions existed. One visit exchanges
+   * the link for a session and burns it, so a URL that reached a log, a history
+   * or a Referer header before this change stops being a way in the moment its
+   * owner uses it.
+   */
   app.get('/operator/:token', { schema: { hide: true } }, async (request, reply) => {
     const { token } = request.params as { token: string };
-    const record = await store.operatorTokens.findOne({ hash: hashToken(token) });
+    const record = await store.operatorTokens.findOneAndDelete({ hash: hashToken(token) });
     if (!record) {
-      return reply
-        .code(404)
-        .type('text/html; charset=utf-8')
-        .send(
-          layout(
-            { title: 'No such link' },
-            '<h1>No such link</h1><p>That link is wrong or was replaced. <a href="/operator">Ask for a new one</a>.</p>',
-          ),
-        );
+      return html(
+        reply,
+        'No such link',
+        `<h1>No such link</h1>
+         <p>That link is wrong, or it has already been exchanged for a session. Links are good for
+         one sign in now.</p>
+         <p><a href="/operator">Sign in with your email</a></p>`,
+        404,
+      );
     }
-    void store.operatorTokens.updateOne({ _id: record._id }, { $set: { lastUsedAt: new Date() } });
+    await startSession(store, config, reply, record.email);
+    return reply.redirect('/operator', 303);
+  });
 
-    const projects = await store.projects.find({ claimedBy: record.email }).toArray();
+  app.post('/operator/logout', { schema: { hide: true } }, async (request, reply) => {
+    const session = await requireSession(request, reply);
+    if (!session) return reply;
+    checkCsrf(session, request.body);
+    const form = (request.body ?? {}) as { scope?: string };
+    await endSession(store, config, request, reply, form.scope === 'everywhere');
+    return html(
+      reply,
+      'Signed out',
+      `<h1>Signed out</h1>
+       <p>${form.scope === 'everywhere' ? 'Every browser signed in with that address has been signed out, and every old style link has been turned off.' : 'This browser is signed out. Others are not.'}</p>
+       <p><a href="/operator">Sign in again</a></p>`,
+    );
+  });
+
+  // --------------------------------------------------------------- the view
+
+  async function renderView(session: OperatorSession): Promise<string> {
+    const projects = await store.projects.find({ claimedBy: session.email }).toArray();
     const ids = projects.map((project) => project._id);
     const names = new Map(projects.map((project) => [project._id, project.name]));
 
     // Boards an agent has offered this person. Nothing from them is in the
     // queue below until it is accepted.
-    const offers = await store.shares.find({ email: record.email }).sort({ createdAt: -1 }).limit(25).toArray();
+    const offers = await store.shares
+      .find({ email: session.email })
+      .sort({ createdAt: -1 })
+      .limit(25)
+      .toArray();
     const offered = await store.projects
       .find({ _id: { $in: offers.map((offer) => offer.projectId) } })
       .toArray();
@@ -188,7 +291,8 @@ mistake, open a link you still have and turn off every other one from there.</p>
      &middot; ${escapeHtml(formatWhen(when))} ${priority === 'urgent' || priority === 'high' ? chip(priority, 'blocked') : ''}</p>
   <p style="font-size:17px"><b>${escapeHtml(text)}</b></p>
   ${context ? `<p style="color:var(--ink-2);white-space:pre-wrap">${escapeHtml(context)}</p>` : ''}
-  <form method="post" action="/operator/${escapeHtml(token)}/escalations/${escapeHtml(id)}">
+  <form method="post" action="/operator/escalations/${escapeHtml(id)}">
+    ${csrfField(session)}
     <label>Your answer<textarea name="answer" placeholder="The decision, in your words."></textarea></label>
     <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">
       <button type="submit" name="status" value="answered">Answer</button>
@@ -199,10 +303,10 @@ mistake, open a link you still have and turn off every other one from there.</p>
   </form>
 </div>`;
 
-    const body = `
+    return `
 <h1>${waiting.length === 0 ? 'Nothing is waiting on you' : `${waiting.length} question${waiting.length === 1 ? '' : 's'} for you`}</h1>
 <p class="lead">Across ${projects.length} project${projects.length === 1 ? '' : 's'} claimed by
-${escapeHtml(record.email)}.</p>
+${escapeHtml(session.email)}.</p>
 
 ${waiting
   .map((doc) =>
@@ -228,7 +332,8 @@ ${offers
   <p class="mono" style="color:var(--muted);margin:0 0 10px">${project.counts.items} open item(s),
      ${project.counts.escalations} question(s) &middot;
      <a href="/r/${escapeHtml(project.readToken)}/board">look first</a></p>
-  <form class="row" method="post" action="/operator/${escapeHtml(token)}/shares/${escapeHtml(offer._id)}">
+  <form class="row" method="post" action="/operator/shares/${escapeHtml(offer._id)}">
+    ${csrfField(session)}
     <button type="submit" name="decision" value="accept">Take ownership</button>
     <button class="ghost" type="submit" name="decision" value="ignore">Not mine</button>
   </form>
@@ -277,11 +382,13 @@ ${staleItems
         : ''
     }
 
-<h2>This link</h2>
-<p style="color:var(--ink-2);font-size:15px">Anyone holding it can answer your agents. If one has
-gone somewhere it should not have, end every link except this one.</p>
-<form method="post" action="/operator/${escapeHtml(token)}/revoke-others">
-  <div><button class="ghost" type="submit">Turn off every other link</button></div>
+<h2>This browser</h2>
+<p style="color:var(--ink-2);font-size:15px">Signed in as ${escapeHtml(session.email)} for 30 days.
+Ending it everywhere also turns off every link emailed before sessions existed.</p>
+<form class="row" method="post" action="/operator/logout">
+  ${csrfField(session)}
+  <button class="ghost" type="submit">Sign out here</button>
+  <button class="ghost" type="submit" name="scope" value="everywhere">Sign out everywhere</button>
 </form>
 
 <h2>Recently answered</h2>
@@ -300,71 +407,47 @@ ${
             .join('')}</ul>`
     }
 `;
-    return reply
-      .type('text/html; charset=utf-8')
-      .send(layout({ title: 'Muster operator view' }, body));
+  }
+
+  // ------------------------------------------------------------- the actions
+
+  app.post('/operator/shares/:id', { schema: { hide: true } }, async (request, reply) => {
+    const session = await requireSession(request, reply);
+    if (!session) return reply;
+    checkCsrf(session, request.body);
+
+    const { id } = request.params as { id: string };
+    const form = (request.body ?? {}) as { decision?: string };
+    if (form.decision === 'ignore') {
+      await store.shares.deleteOne({ _id: id, email: session.email });
+      return reply.redirect('/operator', 303);
+    }
+    await acceptShare(store, config, session.email, id);
+    return reply.redirect('/operator', 303);
   });
 
-  app.post('/operator/:token/shares/:id', { schema: { hide: true } }, async (request, reply) => {
-    const { token, id } = request.params as { token: string; id: string };
-    const form = (request.body ?? {}) as { decision?: string };
-    const record = await store.operatorTokens.findOne({ hash: hashToken(token) });
-    if (!record) throw new ServiceError(404, 'not_found', 'No such link.');
+  app.post('/operator/escalations/:id', { schema: { hide: true } }, async (request, reply) => {
+    const session = await requireSession(request, reply);
+    if (!session) return reply;
+    checkCsrf(session, request.body);
 
-    if (form.decision === 'ignore') {
-      await store.shares.deleteOne({ _id: id, email: record.email });
-      return reply.redirect(`/operator/${token}`, 303);
+    const { id } = request.params as { id: string };
+    const form = (request.body ?? {}) as { status?: string; answer?: string };
+    const escalation = await store.escalations.findOne({ _id: id });
+    if (!escalation) throw new ServiceError(404, 'not_found', 'No such question.');
+    const project = await store.projects.findOne({
+      _id: escalation.projectId,
+      claimedBy: session.email,
+    });
+    if (!project) {
+      throw new ServiceError(403, 'not_yours', 'That question belongs to somebody else’s project.');
     }
 
-    await acceptShare(store, config, record.email, id);
-    return reply.redirect(`/operator/${token}`, 303);
+    const status = (form.status ?? 'answered') as EscalationStatus;
+    if (!ESCALATION_STATUSES.includes(status)) {
+      throw new ServiceError(400, 'bad_status', 'Unknown answer type.');
+    }
+    await answerEscalation(store, project._id, id, status, (form.answer ?? '').slice(0, 8000));
+    return reply.redirect('/operator', 303);
   });
-
-  app.post('/operator/:token/revoke-others', { schema: { hide: true } }, async (request, reply) => {
-    const { token } = request.params as { token: string };
-    const record = await store.operatorTokens.findOne({ hash: hashToken(token) });
-    if (!record) throw new ServiceError(404, 'not_found', 'No such link.');
-
-    const removed = await store.operatorTokens.deleteMany({
-      email: record.email,
-      _id: { $ne: record._id },
-    });
-    return reply.type('text/html; charset=utf-8').send(
-      layout(
-        { title: 'Other links turned off' },
-        `<h1>Done</h1>
-         <p>${removed.deletedCount} other link${removed.deletedCount === 1 ? '' : 's'} stopped working.
-         This one still does.</p>
-         <p><a href="/operator/${escapeHtml(token)}">Back to your projects</a></p>`,
-      ),
-    );
-  });
-
-  app.post(
-    '/operator/:token/escalations/:id',
-    { schema: { hide: true } },
-    async (request, reply) => {
-      const { token, id } = request.params as { token: string; id: string };
-      const form = (request.body ?? {}) as { status?: string; answer?: string };
-      const record = await store.operatorTokens.findOne({ hash: hashToken(token) });
-      if (!record) throw new ServiceError(404, 'not_found', 'No such link.');
-
-      const escalation = await store.escalations.findOne({ _id: id });
-      if (!escalation) throw new ServiceError(404, 'not_found', 'No such question.');
-      const project = await store.projects.findOne({
-        _id: escalation.projectId,
-        claimedBy: record.email,
-      });
-      if (!project) {
-        throw new ServiceError(403, 'not_yours', 'That question belongs to somebody else’s project.');
-      }
-
-      const status = (form.status ?? 'answered') as EscalationStatus;
-      if (!ESCALATION_STATUSES.includes(status)) {
-        throw new ServiceError(400, 'bad_status', 'Unknown answer type.');
-      }
-      await answerEscalation(store, project._id, id, status, (form.answer ?? '').slice(0, 8000));
-      return reply.redirect(`/operator/${token}`, 303);
-    },
-  );
 }

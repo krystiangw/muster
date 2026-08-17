@@ -92,8 +92,16 @@ export async function buildApp(config: Config, store: Store): Promise<App> {
     if (request.headers['x-forwarded-proto'] === 'https') {
       reply.header('strict-transport-security', 'max-age=31536000; includeSubDomains');
     }
-    // A capability URL response is nobody else's to cache.
-    if (request.url.startsWith('/r/') || request.url.startsWith('/operator/')) {
+    // Nobody else's to cache: a capability URL, or a page rendered for whoever
+    // is signed in. `/operator` with no trailing slash is the signed in view
+    // itself, so matching only `/operator/` would miss the page that actually
+    // carries somebody's queue.
+    if (
+      request.url.startsWith('/r/') ||
+      request.url === '/operator' ||
+      request.url.startsWith('/operator/') ||
+      request.url.startsWith('/operator?')
+    ) {
       reply.header('cache-control', 'private, no-store');
     }
     return payload;

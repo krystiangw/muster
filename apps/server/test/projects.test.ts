@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { hashToken } from '../src/ids.js';
-import { authed, createProject, startHarness, type Harness, type Project } from './helper.js';
+import {
+  authed,
+  createProject,
+  signIn,
+  startHarness,
+  type Harness,
+  type Project,
+} from './helper.js';
 
 /**
  * One project is one board with one identity. An agent creates it, describes it
@@ -36,22 +43,6 @@ async function claimFor(project: Project, email: string): Promise<void> {
     { $set: { codeHash: hashToken('123456') } },
   );
   await post(project, '/claim/verify', { email, code: '123456' });
-}
-
-async function operatorLink(email: string): Promise<string> {
-  await harness.server.inject({
-    method: 'POST',
-    url: '/operator',
-    payload: `email=${encodeURIComponent(email)}`,
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-  });
-  const record = await harness.store.operatorTokens.findOne({ email }, { sort: { createdAt: -1 } });
-  const planted = `mk_test_${email.replace(/[^a-z0-9]/g, '')}`;
-  await harness.store.operatorTokens.updateOne(
-    { _id: record!._id },
-    { $set: { hash: hashToken(planted) } },
-  );
-  return `/operator/${planted}`;
 }
 
 describe('a project is an instance of its own', () => {
@@ -120,7 +111,7 @@ describe('handing a project to its operator', () => {
   it('waits in their view until they accept, and then they own it', async () => {
     const owned = await createProject(harness, 'already mine');
     await claimFor(owned, 'boss@example.com');
-    const link = await operatorLink('boss@example.com');
+    const session = await signIn(harness, 'boss@example.com');
 
     const handed = await harness.server.inject({
       method: 'POST',
@@ -148,7 +139,11 @@ describe('handing a project to its operator', () => {
     assert.equal(before!.claimedBy, null);
     assert.ok(before!.expiresAt, 'still on the clock until somebody takes it');
 
-    const view = await harness.server.inject({ method: 'GET', url: link });
+    const view = await harness.server.inject({
+      method: 'GET',
+      url: '/operator',
+      headers: { cookie: session.cookie },
+    });
     assert.match(view.body, /Boards handed to you/);
     assert.match(view.body, /new-board/);
     assert.match(view.body, /the night run needs an owner/);
@@ -156,9 +151,9 @@ describe('handing a project to its operator', () => {
     const offer = await harness.store.shares.findOne({ projectId: project.id });
     const accepted = await harness.server.inject({
       method: 'POST',
-      url: `${link}/shares/${offer!._id}`,
-      payload: 'decision=accept',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      url: `/operator/shares/${offer!._id}`,
+      payload: session.form({ decision: 'accept' }),
+      headers: session.headers,
     });
     assert.equal(accepted.statusCode, 303);
 
@@ -168,7 +163,11 @@ describe('handing a project to its operator', () => {
     assert.equal(after!.tier, 'free');
     assert.equal(await harness.store.shares.countDocuments({ projectId: project.id }), 0);
 
-    const both = await harness.server.inject({ method: 'GET', url: link });
+    const both = await harness.server.inject({
+      method: 'GET',
+      url: '/operator',
+      headers: { cookie: session.cookie },
+    });
     assert.match(both.body, /new-board/);
     assert.match(both.body, /already mine/, 'both boards are now in one view');
   });
@@ -176,7 +175,7 @@ describe('handing a project to its operator', () => {
   it('can be turned down, and then it is not in the view', async () => {
     const anchor = await createProject(harness, 'anchor');
     await claimFor(anchor, 'picky@example.com');
-    const link = await operatorLink('picky@example.com');
+    const session = await signIn(harness, 'picky@example.com');
 
     const junk = await createProject(harness, 'not mine');
     await post(junk, '/share', { email: 'picky@example.com', agent: 'stranger' });
@@ -184,9 +183,9 @@ describe('handing a project to its operator', () => {
 
     const ignored = await harness.server.inject({
       method: 'POST',
-      url: `${link}/shares/${offer!._id}`,
-      payload: 'decision=ignore',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      url: `/operator/shares/${offer!._id}`,
+      payload: session.form({ decision: 'ignore' }),
+      headers: session.headers,
     });
     assert.equal(ignored.statusCode, 303);
     assert.equal(await harness.store.shares.countDocuments({ email: 'picky@example.com' }), 0);
@@ -222,7 +221,7 @@ describe('handing a project to its operator', () => {
 
     const anchor = await createProject(harness, 'anchor');
     await claimFor(anchor, 'second@example.com');
-    const link = await operatorLink('second@example.com');
+    const session = await signIn(harness, 'second@example.com');
 
     await harness.store.shares.insertOne({
       _id: 's_forged',
@@ -236,9 +235,9 @@ describe('handing a project to its operator', () => {
 
     const attempt = await harness.server.inject({
       method: 'POST',
-      url: `${link}/shares/s_forged`,
-      payload: 'decision=accept',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      url: '/operator/shares/s_forged',
+      payload: session.form({ decision: 'accept' }),
+      headers: session.headers,
     });
     assert.equal(attempt.statusCode, 409);
 
@@ -318,8 +317,8 @@ describe('handing a project to its operator', () => {
     await claimFor(first, 'one@example.com');
     const second = await createProject(harness, 'anchor two');
     await claimFor(second, 'two@example.com');
-    const linkOne = await operatorLink('one@example.com');
-    const linkTwo = await operatorLink('two@example.com');
+    const sessionOne = await signIn(harness, 'one@example.com');
+    const sessionTwo = await signIn(harness, 'two@example.com');
 
     const contested = await createProject(harness, 'contested');
     await post(contested, '/share', { email: 'one@example.com', agent: 'a' });
@@ -342,15 +341,15 @@ describe('handing a project to its operator', () => {
     const results = await Promise.all([
       harness.server.inject({
         method: 'POST',
-        url: `${linkOne}/shares/${offerOne!._id}`,
-        payload: 'decision=accept',
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        url: `/operator/shares/${offerOne!._id}`,
+        payload: sessionOne.form({ decision: 'accept' }),
+        headers: sessionOne.headers,
       }),
       harness.server.inject({
         method: 'POST',
-        url: `${linkTwo}/shares/s_contested`,
-        payload: 'decision=accept',
-        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        url: '/operator/shares/s_contested',
+        payload: sessionTwo.form({ decision: 'accept' }),
+        headers: sessionTwo.headers,
       }),
     ]);
 
