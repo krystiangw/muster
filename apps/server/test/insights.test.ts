@@ -80,6 +80,73 @@ describe('what the service knows about its own use', () => {
     assert.equal(written?.door, 'mcp');
   });
 
+  it('counts activation once, whatever shape the first item has', async () => {
+    const project = await createProject(harness, 'closed on arrival');
+    // A first item created as done leaves the open counter at zero, which is
+    // what made every later write look like a first.
+    await post(project, '/items', { slug: 'a', title: 'a', status: 'done', actor: 'x' });
+    await post(project, '/items', { slug: 'b', title: 'b', actor: 'x' });
+    await post(project, '/items', { slug: 'c', title: 'c', actor: 'x' });
+
+    const written = await harness.store.events.countDocuments({
+      kind: 'first_write',
+      projectId: project.id,
+    });
+    assert.equal(written, 1);
+
+    // And two arriving together still count once.
+    const racing = await createProject(harness, 'racing');
+    await Promise.all([
+      post(racing, '/items', { slug: 'one', title: 'one', actor: 'x' }),
+      post(racing, '/items', { slug: 'two', title: 'two', actor: 'x' }),
+    ]);
+    assert.equal(
+      await harness.store.events.countDocuments({ kind: 'first_write', projectId: racing.id }),
+      1,
+    );
+  });
+
+  it('counts projects that got an agent, not agents that got registered', async () => {
+    const project = await createProject(harness, 'many loops');
+    for (const handle of ['errors-loop', 'trades-loop', 'pm-loop']) {
+      await post(project, '/agents', { handle, scope: [] });
+    }
+
+    const report = await insights(harness.store);
+    const registrations = await harness.store.events.countDocuments({
+      kind: 'register',
+      projectId: project.id,
+    });
+    assert.equal(registrations, 3, 'every registration is logged');
+    // But a funnel stage counts projects, or it climbs above the stage above it.
+    assert.ok(report.funnel.withAnAgent <= report.funnel.signups);
+  });
+
+  it('does not log a question the cap refused', async () => {
+    const project = await createProject(harness, 'full');
+    await harness.store.projects.updateOne(
+      { _id: project.id },
+      { $set: { 'limits.escalations': 1 } },
+    );
+    await post(project, '/escalations', { agent: 'a', question: 'first' });
+    const refused = await post(project, '/escalations', { agent: 'a', question: 'second' });
+    assert.ok(refused.statusCode >= 400);
+
+    assert.equal(
+      await harness.store.events.countDocuments({ kind: 'escalate', projectId: project.id }),
+      1,
+      'a question that was never filed is not a question',
+    );
+  });
+
+  it('says how many answers its median is taken over', async () => {
+    const report = await insights(harness.store);
+    assert.equal(typeof report.behaviour.answersSampled, 'number');
+    if (report.behaviour.medianAnswerHours !== null) {
+      assert.ok(report.behaviour.answersSampled > 0);
+    }
+  });
+
   it('holds nothing about a person', async () => {
     await harness.server.inject({ method: 'GET', url: '/skill.md' });
     const events = await harness.store.events.find({}).limit(50).toArray();

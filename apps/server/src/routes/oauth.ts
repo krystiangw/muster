@@ -4,6 +4,7 @@ import type { Store } from '../db.js';
 import { hashToken, newId, newToken } from '../ids.js';
 import type { RateLimiter } from '../rateLimit.js';
 import { createApiKey, createProject } from '../service.js';
+import { record } from '../events.js';
 import { clientIp } from './api.js';
 
 /**
@@ -87,6 +88,7 @@ export function registerOAuth(app: FastifyInstance, deps: OAuthDeps): void {
 
       const body = (request.body ?? {}) as { client_name?: string };
       const { project } = await createProject(store, config, { name: body.client_name });
+      record(store, 'signup', { door: 'oauth', projectId: project._id });
       const clientId = newId('client');
       const clientSecret = newToken();
       await store.oauthClients.insertOne({

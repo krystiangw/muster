@@ -301,6 +301,13 @@ export interface ProjectDoc {
   readToken: string;
   /** Absent on projects created before this existed; `link` applies. */
   visibility?: ProjectVisibility;
+  /**
+   * When the project first received an item. Absent means never, which is what
+   * makes the activation moment countable exactly once: the open item counter
+   * cannot do it, because a first item created as `done` leaves it at zero and
+   * every later write then looks like the first.
+   */
+  firstWriteAt?: Date;
   claimedBy: string | null;
   claimedAt: Date | null;
   /** Unclaimed demo projects are swept by a TTL index. Null once claimed. */

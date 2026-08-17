@@ -54,6 +54,9 @@ export interface EventDoc {
 
 const KEEP_DAYS = 90;
 
+/** How many of the most recent answers the median is taken over. */
+export const ANSWER_SAMPLE = 500;
+
 /**
  * Records a moment. Never awaited on a request path, and never able to fail one:
  * telemetry that can break the thing it measures is worse than no telemetry.
@@ -75,6 +78,31 @@ export function record(
       expiresAt: new Date(now.getTime() + KEEP_DAYS * 86_400_000),
     })
     .catch(() => undefined);
+}
+
+/**
+ * Records the moment a project first received work, exactly once, ever.
+ *
+ * The obvious test, "were there no items before this one", is wrong twice over:
+ * the counter holds *open* items, so a first item created as done leaves it at
+ * zero and every later write looks like a first, and two concurrent creates
+ * both read the same zero. A guarded write to the project is the only thing
+ * that can answer "has this ever happened" once.
+ */
+export async function recordFirstWrite(
+  store: Store,
+  projectId: string,
+  door: EventDoor,
+): Promise<void> {
+  try {
+    const flagged = await store.projects.updateOne(
+      { _id: projectId, firstWriteAt: { $exists: false } },
+      { $set: { firstWriteAt: new Date() } },
+    );
+    if (flagged.modifiedCount === 1) record(store, 'first_write', { door, projectId });
+  } catch {
+    // Same rule as the rest of this file: measuring never breaks the request.
+  }
 }
 
 export interface Insights {
@@ -103,8 +131,10 @@ export interface Insights {
     activationRate: number;
     /** Signups a person took ownership of. */
     claimRate: number;
-    /** Median hours from a question being filed to it being answered. */
+    /** Median hours to an answer, over the most recent ANSWER_SAMPLE answers. */
     medianAnswerHours: number | null;
+    /** How many answers that median was taken over, so it can be read honestly. */
+    answersSampled: number;
     /** Items closed by the hygiene engine rather than by anybody. */
     closedByHygiene: number;
   };
@@ -144,7 +174,16 @@ export async function insights(store: Store): Promise<Insights> {
   ] = await Promise.all([
     store.events.countDocuments({ kind: 'discover' }),
     store.events.countDocuments({ kind: 'signup' }),
-    store.events.countDocuments({ kind: 'register' }),
+    // Projects that got an agent, not agents that got registered. One project
+    // with six loops is one project that reached this stage, and counting the
+    // registrations would push a funnel stage above the signups above it.
+    store.events
+      .aggregate<{ n: number }>([
+        { $match: { kind: 'register', projectId: { $ne: null } } },
+        { $group: { _id: '$projectId' } },
+        { $count: 'n' },
+      ])
+      .toArray(),
     store.events.countDocuments({ kind: 'first_write' }),
     store.events.countDocuments({ kind: 'claim' }),
     store.events
@@ -159,9 +198,13 @@ export async function insights(store: Store): Promise<Insights> {
     store.agents.countDocuments({}),
     store.escalations.countDocuments({ status: 'open' }),
     store.items.countDocuments({ stale: true, status: { $nin: ['done', 'dropped'] } }),
+    // Sorted before it is cut. An unsorted limit takes whatever the storage
+    // engine hands back first, which past five hundred answers means a median
+    // of an arbitrary old subset that silently stops moving.
     store.escalations
       .find({ answeredAt: { $ne: null } }, { projection: { createdAt: 1, answeredAt: 1 } })
-      .limit(500)
+      .sort({ answeredAt: -1 })
+      .limit(ANSWER_SAMPLE)
       .toArray(),
     store.items.countDocuments({
       status: { $in: ['done', 'dropped'] },
@@ -183,7 +226,7 @@ export async function insights(store: Store): Promise<Insights> {
     funnel: {
       discovered,
       signups,
-      withAnAgent: registered,
+      withAnAgent: registered[0]?.n ?? 0,
       withWork: firstWrites,
       claimed: claims,
     },
@@ -200,6 +243,7 @@ export async function insights(store: Store): Promise<Insights> {
       activationRate: signups === 0 ? 0 : firstWrites / signups,
       claimRate: signups === 0 ? 0 : claims / signups,
       medianAnswerHours: median(answerHours),
+      answersSampled: answerHours.length,
       closedByHygiene: hygieneClosed,
     },
     busiestProjects: busiest.map((project) => ({

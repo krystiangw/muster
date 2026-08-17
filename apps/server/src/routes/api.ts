@@ -4,7 +4,7 @@ import type { Store } from '../db.js';
 import { maybeSweep, sweepProject } from '../hygiene.js';
 import { hashToken, isValidHandle, newOtpCode, newId } from '../ids.js';
 import { RateLimiter } from '../rateLimit.js';
-import { record } from '../events.js';
+import { record, recordFirstWrite } from '../events.js';
 import {
   BOARD_PRESETS,
   boardConfigOf,
@@ -325,9 +325,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           history: body.history as UpsertItemInput['history'],
           actor,
         });
-        if (result.created && project.counts.items === 0) {
-          record(store, 'first_write', { door: 'http', projectId: project._id });
-        }
+        if (result.created) void recordFirstWrite(store, project._id, 'http');
 
         const warnings = [...result.warnings];
         if (project.rules.scopeWarnings && actor !== 'unknown-agent') {
@@ -765,7 +763,6 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           priority?: EscalationPriority;
           item_slug?: string | null;
         };
-        record(store, 'escalate', { door: 'http', projectId: project._id });
         const doc = await createEscalation(store, project, {
           agent: body.agent ?? 'unknown-agent',
           question: body.question,
@@ -773,6 +770,9 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           priority: body.priority,
           itemSlug: body.item_slug ?? null,
         });
+        // After the write, not before: a question the cap refused was never
+        // filed, and a log that says otherwise is worse than no log.
+        record(store, 'escalate', { door: 'http', projectId: project._id });
         return reply.code(201).send({
           escalation: escalationJson(doc),
           read_url: `${config.baseUrl}/r/${project.readToken}`,

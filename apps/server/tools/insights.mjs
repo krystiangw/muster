@@ -59,7 +59,7 @@ const [
 ] = await Promise.all([
   count(events, { kind: 'discover' }),
   count(events, { kind: 'signup' }),
-  count(events, { kind: 'register' }),
+  events.aggregate([{ $match: { kind: 'register', projectId: { $ne: null } } }, { $group: { _id: '$projectId' } }, { $count: 'n' }]).toArray(),
   count(events, { kind: 'first_write' }),
   count(events, { kind: 'claim' }),
   events.aggregate([{ $match: { kind: 'signup' } }, { $group: { _id: '$door', n: { $sum: 1 } } }]).toArray(),
@@ -71,7 +71,7 @@ const [
   count(agents),
   count(escalations, { status: 'open' }),
   count(items, { stale: true, status: { $nin: ['done', 'dropped'] } }),
-  escalations.find({ answeredAt: { $ne: null } }, { projection: { createdAt: 1, answeredAt: 1 } }).limit(500).toArray(),
+  escalations.find({ answeredAt: { $ne: null } }, { projection: { createdAt: 1, answeredAt: 1 } }).sort({ answeredAt: -1 }).limit(500).toArray(),
   projects.find({}, { projection: { name: 1, counts: 1 } }).sort({ 'counts.items': -1 }).limit(5).toArray(),
   count(events, { kind: 'signup', at: { $gte: since(7) } }),
   count(events, { kind: 'first_write', at: { $gte: since(7) } }),
@@ -88,12 +88,12 @@ const row = (label, value) => console.log(`  ${label.padEnd(28)} ${String(value)
 console.log(`\nMuster, ${new Date().toISOString().slice(0, 16).replace('T', ' ')}\n`);
 
 console.log('The funnel, since events were first recorded');
-row('read the protocol', discovered);
+row('reads of the protocol', discovered);
 row('created a project', signups);
-row('registered an agent', registered);
+row('registered an agent', registered[0]?.n ?? 0);
 row('wrote something', firstWrites);
 row('claimed by a person', claims);
-console.log(`  ${'read -> signup'.padEnd(28)} ${rate(signups, discovered)}`);
+console.log(`  ${'reads per signup'.padEnd(28)} ${discovered === 0 ? '  n/a' : (discovered / Math.max(signups, 1)).toFixed(1).padStart(5)}`);
 console.log(`  ${'signup -> wrote something'.padEnd(28)} ${rate(firstWrites, signups)}`);
 console.log(`  ${'signup -> claimed'.padEnd(28)} ${rate(claims, signups)}`);
 
@@ -116,6 +116,7 @@ row('  of those, stale', staleItems);
 row('agents', agentCount);
 row('questions waiting', openQuestions);
 row('median answer, hours', median === null ? 'n/a' : median.toFixed(1));
+if (hours.length > 0) console.log(`  ${'  over the last'.padEnd(28)} ${String(hours.length).padStart(7)} answers`);
 
 console.log('\nLast seven days');
 row('signups', weekSignups);

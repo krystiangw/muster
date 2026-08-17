@@ -1,5 +1,5 @@
 import { hashToken } from '../ids.js';
-import { record } from '../events.js';
+import { record, recordFirstWrite } from '../events.js';
 import { clientIp } from './api.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
@@ -522,7 +522,6 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         return { handle: agent.handle, scope: agent.scope, created };
       }
       case 'upsert_item': {
-        const before = project.counts.items;
         const result = await upsertItem(store, project, {
           slug: str(args.slug),
           title: args.title === undefined ? undefined : str(args.title),
@@ -535,9 +534,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           note: args.note === undefined ? undefined : str(args.note),
           actor,
         });
-        if (result.created && before === 0) {
-          record(store, 'first_write', { door: 'mcp', projectId: project._id });
-        }
+        if (result.created) void recordFirstWrite(store, project._id, 'mcp');
         void maybeSweep(store, project).catch(() => undefined);
         return {
           item: itemJson(result.item),
