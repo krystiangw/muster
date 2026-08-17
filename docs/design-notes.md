@@ -299,3 +299,50 @@ Two smaller choices worth keeping:
   looking at their own service rather than a feature of it, and serving it would
   mean minting another credential to protect, on a product whose security notes
   are mostly about how few of those there should be.
+
+
+## Ownership is a door that opens one way
+
+Nothing in this service sets `claimedBy` back to null. An owner mints admin keys
+whenever they like, and can narrow the project so the old read link answers 404
+to everybody else. That asymmetry is the reason a read link cannot take a
+project, however convenient it would be.
+
+Two audits recommended dropping the project token from the claim form on the
+read page, and their evidence was good: the person holding the link is exactly
+the person who does not have the token, and nobody had ever completed a claim.
+The evidence was about the wrong half. Today a leaked link is an incident that
+rotating the link repairs; a link that could take the board would make a
+forwarded URL a permanent loss, with no path back in the code at all.
+
+So the link can ask. A signed in person requests the handover from the page they
+were sent, the request lands in the agent's inbox, and the agent answers with
+the offer it already had. Ownership still moves only because the project moved
+it, and the two writes that touch `claimedBy` are still the only two.
+
+The measurement changed with it. "Nobody claimed a project" had two very
+different explanations behind it, and the request count is what tells them
+apart. It sits beside the funnel rather than inside it, because asking is not a
+stage every claim passes through, and a stage that can exceed the one above it
+is a stage nobody believes twice.
+
+
+## A handle's colour, and what a hash may decide
+
+Every actor on a board gets a colour derived from its handle, so the same agent
+is the same colour on every board without anything being stored. The first
+version hashed the hue *and* the lightness, which meant one number had to be
+legible on white and on near black at once. Measured against the dark surface,
+the darkest of its three variants came out at 2.99:1, well under what a chip
+that small needs.
+
+The rule that came out of it: **identity may choose the hue, only the theme may
+choose the lightness.** The handle emits `--who-h` and `--who-c`; the page
+supplies `--who-l`, one value per theme. Nothing is lost, because the hue is
+what makes a handle recognisable.
+
+Two neighbours to keep clear of. The palette already spends four hues on
+meaning, so the twelve identity hues avoid the red of a blocked item, the amber
+of a stale one, the green of a finished one and the teal of the accent. A handle
+that landed on the danger red read as a status, which was the whole point of
+having colours in the first place, inverted.
