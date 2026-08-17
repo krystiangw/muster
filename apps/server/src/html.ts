@@ -22,6 +22,15 @@ const CSS = `
   --bg:#f5f7f5; --surface:#fff; --surface-2:#ecefec; --ink:#141917; --ink-2:#3c4643;
   --muted:#61706c; --rule:#d6dcd8; --accent:#0e5f59; --accent-soft:#dcebe8;
   --danger:#a2372a; --warn:#8a6410; --ok:#2c6b48;
+  /* What a modal dims the page with, and what a shadow is made of. Both used to
+     be mixed from --ink, which is the text colour: in the dark theme that is
+     nearly white, so the layer meant to push the board back lit it up instead.
+     A shadow is dark in both themes or it is not a shadow. */
+  --scrim:#0b100f;
+  /* How dark a handle's colour is. The hue identifies the agent and comes off
+     its name; the lightness has to answer to the page it is drawn on, or one
+     number ends up trying to be legible on white and on near black at once. */
+  --who-l:0.45;
   --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,Consolas,monospace;
   --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;
   --serif:"Iowan Old Style","Charter","Palatino Linotype",Palatino,Georgia,serif;
@@ -30,16 +39,25 @@ const CSS = `
   :root {
     --bg:#0e1413; --surface:#151d1b; --surface-2:#1d2725; --ink:#e7ecea; --ink-2:#c3ccc9;
     --muted:#8e9c98; --rule:#2a3634; --accent:#55c4b5; --accent-soft:#17302d;
-    --danger:#e37966; --warn:#d3a445; --ok:#63c08a;
+    --danger:#e37966; --warn:#d3a445; --ok:#63c08a; --scrim:#030807; --who-l:0.82;
   }
 }
+/* So the scrollbars, the native select menus and the caret follow the page
+   rather than staying light under a dark one. */
+:root { color-scheme: light dark; }
 * { box-sizing:border-box; }
 body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans);
   font-size:16.5px; line-height:1.6; -webkit-font-smoothing:antialiased; }
 .wrap { max-width:900px; margin:0 auto; padding:32px 20px 80px; }
 /* A board page widens the column; the prose inside it stays readable. */
 .wrap.wide { max-width:1500px; }
-.wrap.wide > h1, .wrap.wide > p, .wrap.wide > .lead, .wrap.wide > form { max-width:66ch; }
+/* Prose keeps its measure. The filter bar is not prose: bound to 66 characters
+   it wrapped its last field onto a second row and left half the width of the
+   board it belongs to empty. */
+.wrap.wide > h1, .wrap.wide > p, .wrap.wide > .lead, .wrap.wide > form:not(.filters) { max-width:66ch; }
+/* Every page's own paragraphs, not just the ones on the pages that remembered
+   to ask: /docs and /operator were running to about 104 characters a line. */
+.wrap > p { max-width:66ch; }
 .prose { max-width:66ch; }
 header.top { display:flex; align-items:baseline; gap:16px; flex-wrap:wrap;
   border-bottom:1px solid var(--rule); padding-bottom:14px; margin-bottom:32px; }
@@ -93,7 +111,8 @@ td.mono, .mono { font-family:var(--mono); font-size:13px; }
    the danger red and the warning amber are all reserved elsewhere. */
 .who-chip { display:inline-flex; align-items:center; gap:5px; font-family:var(--mono);
   font-size:11px; padding:2px 7px 2px 3px; border-radius:999px; white-space:nowrap;
-  color:var(--who); background:var(--who-wash); }
+  color:oklch(var(--who-l) var(--who-c) var(--who-h));
+  background:oklch(var(--who-l) var(--who-c) var(--who-h) / .16); }
 .who-chip .face { flex:none; border-radius:50%; }
 .timeline .who .who-chip { font-size:11px; }
 td .face { vertical-align:-3px; margin-right:4px; }
@@ -143,7 +162,10 @@ button.ghost { background:transparent; color:var(--accent); }
 .lane { margin-bottom:22px; width:max-content; min-width:100%; }
 .lane > .lane-title { font-family:var(--mono); font-size:11px; letter-spacing:.09em; text-transform:uppercase;
   color:var(--muted); padding:0 0 8px; border-bottom:1px solid var(--rule); margin-bottom:12px; }
-.cols { display:grid; grid-auto-flow:column; grid-auto-columns:270px; gap:12px; align-items:start;
+/* stretch, not start: four framed columns holding different amounts of work
+   used to end at four different heights, which reads as a rendering fault
+   rather than as a difference in how much work each one holds. */
+.cols { display:grid; grid-auto-flow:column; grid-auto-columns:270px; gap:12px; align-items:stretch;
   width:max-content; }
 /* A column scrolls inside itself. Twenty-five cards in one lane otherwise push
    everything below the board a screen and a half down the page. */
@@ -159,7 +181,10 @@ button.ghost { background:transparent; color:var(--accent); }
    card above it and quietly restyle every card on every other page. */
 .col .card { background:var(--surface); border:1px solid var(--rule); border-radius:2px;
   padding:9px 10px; margin:0; display:flex; flex-direction:column; gap:5px; }
-.col .card .slug { font-family:var(--mono); font-size:11px; color:var(--muted); word-break:break-all; }
+/* anywhere, not break-all: a slug is read and retyped, and it has natural
+   break points at its colon and its hyphens. break-all ignored them and split
+   errors:venue-withdraw-stuck as "...withdraw-st" and "uck". */
+.col .card .slug { font-family:var(--mono); font-size:11px; color:var(--muted); overflow-wrap:anywhere; }
 /* The whole card body is the link to its preview: a title clamped to two lines
    has to be readable somewhere, and the card itself is where people click. */
 .col .card .peek { display:flex; flex-direction:column; gap:5px; text-decoration:none;
@@ -168,6 +193,11 @@ button.ghost { background:transparent; color:var(--accent); }
 .col .card .t { font-size:13.5px; line-height:1.35; display:-webkit-box; -webkit-line-clamp:2;
   -webkit-box-orient:vertical; overflow:hidden; }
 .col .card .meta { display:flex; flex-wrap:wrap; gap:5px; align-items:center; }
+/* The bottom line of a card: when it last moved, and how urgent it is. One row
+   with the two ends pinned, so a column of cards lines both up. */
+.col .card .foot { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+.col .card .prio { font-family:var(--mono); font-size:11.5px; font-weight:600;
+  font-variant-numeric:tabular-nums; color:var(--ink-2); }
 .col .card.is-stale { border-left:2px solid var(--warn); }
 .col .card.is-claimed { border-left:2px solid var(--accent); }
 /* The move control. A select and a button, because a drag needs JavaScript and
@@ -177,7 +207,7 @@ button.ghost { background:transparent; color:var(--accent); }
    above stacks fields in a 440px column, and inheriting either of those here
    drops the button onto its own line inside a 230px card. */
 .col .card .move { display:flex; flex-direction:row; align-items:center; gap:4px;
-  max-width:none; opacity:.35; transition:opacity .12s; }
+  max-width:none; opacity:.72; transition:opacity .12s; }
 .col .card:hover .move, .col .card .move:focus-within { opacity:1; }
 .col .card .move select { flex:1; min-width:0; font-size:11.5px; padding:2px 4px;
   border:1px solid var(--rule); border-radius:2px; background:var(--surface); color:var(--ink); }
@@ -191,11 +221,11 @@ button.ghost { background:transparent; color:var(--accent); }
    preview is a link somebody can send. */
 .peeked { display:none; }
 .peeked:target { display:block; position:fixed; inset:0; z-index:50; }
-.peeked .scrim { position:absolute; inset:0; background:color-mix(in srgb,var(--ink) 45%,transparent);
+.peeked .scrim { position:absolute; inset:0; background:color-mix(in srgb,var(--scrim) 55%,transparent);
   border:0; }
 .peeked .sheet { position:relative; margin:6vh auto; max-width:min(680px,92vw); max-height:88vh;
   overflow-y:auto; background:var(--surface); border:1px solid var(--rule); border-radius:4px;
-  padding:20px 22px; box-shadow:0 18px 50px color-mix(in srgb,var(--ink) 22%,transparent);
+  padding:20px 22px; box-shadow:0 18px 50px color-mix(in srgb,var(--scrim) 30%,transparent);
   display:flex; flex-direction:column; gap:12px; }
 .peeked .sheet-top { display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
 .peeked .sheet-top .slug { font-family:var(--mono); font-size:12px; color:var(--muted);
@@ -209,7 +239,7 @@ button.ghost { background:transparent; color:var(--accent); }
 .filters { align-items:flex-end; margin-bottom:16px; }
 .filters label { font-family:var(--mono); font-size:11px; letter-spacing:.09em;
   text-transform:uppercase; color:var(--muted); }
-.filters select { font-size:14px; padding:6px 9px; min-width:150px; max-width:320px; }
+.filters select { font-size:14px; padding:6px 9px; min-width:170px; max-width:230px; }
 .filters button { padding:7px 14px; }
 .filters .hint { align-self:center; font-size:12.5px; color:var(--muted); }
 .ghost-link { align-self:center; font-size:13.5px; }
@@ -227,7 +257,35 @@ footer.bot { margin-top:56px; border-top:1px solid var(--rule); padding-top:16px
   padding:14px 16px; margin-bottom:18px; font-size:15px; }
 .notice.warn { background:color-mix(in srgb,var(--warn) 12%,transparent);
   border-color:color-mix(in srgb,var(--warn) 35%,transparent); }
-@media (max-width:560px) { .timeline li { grid-template-columns:1fr; gap:2px; } }
+time { white-space:nowrap; }
+/* What the columns hold, in one line, for the width where the board itself is a
+   strip that scrolls sideways. */
+details.layout { margin-top:34px; border-top:1px solid var(--rule); padding-top:10px; }
+details.layout > summary { cursor:pointer; color:var(--muted); font-family:var(--mono);
+  font-size:12px; letter-spacing:.08em; text-transform:uppercase; padding:4px 0; }
+details.layout > summary:hover { color:var(--accent); }
+details.layout[open] > summary { margin-bottom:10px; }
+.tally { display:none; font-family:var(--mono); font-size:12.5px; color:var(--muted); }
+.tally b { color:var(--ink); font-variant-numeric:tabular-nums; }
+@media (max-width:560px) {
+  .timeline li { grid-template-columns:1fr; gap:2px; }
+  .tally { display:block; }
+  /* A table narrower than the phone is a table with a column off the screen,
+     and the column that goes first is the last one: the links. Nothing on the
+     page said it scrolled sideways, so on the operator's own list of projects
+     the only way into any of them was invisible. Below 560 each row becomes a
+     small card and every cell carries its own heading. */
+  .scroll { overflow-x:visible; border:0; background:none; }
+  table { min-width:0; display:block; }
+  thead { display:none; }
+  tbody, tr, td { display:block; }
+  tbody tr { background:var(--surface); border:1px solid var(--rule); border-radius:3px;
+    padding:8px 11px; margin-bottom:10px; }
+  td { border-bottom:0; padding:3px 0; }
+  tbody tr:last-child { margin-bottom:0; }
+  td[data-label]::before { content:attr(data-label); display:block; font-family:var(--mono);
+    font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+}
 `;
 
 /**
@@ -315,5 +373,53 @@ export function formatWhen(date: Date | string | null | undefined): string {
   if (!date) return '';
   const d = typeof date === 'string' ? new Date(date) : date;
   if (Number.isNaN(d.getTime())) return '';
-  return d.toISOString().slice(0, 16).replace('T', ' ');
+  return `${d.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
+}
+
+const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
+
+/**
+ * How long ago, in words, with the exact instant kept underneath.
+ *
+ * Every timestamp on these pages used to be printed as bare UTC, unlabelled.
+ * At two minutes to midnight in Warsaw, a card written ten minutes ago read
+ * `2026-08-17 21:48`, and a live claim read `lease until 2026-08-17 22:48`,
+ * which is an hour in the past to anybody reading a clock. The page was
+ * quietly wrong about the one thing an operator opens it to learn.
+ *
+ * A relative age needs no timezone and answers the question that was actually
+ * asked: is anybody still on this. The instant is still there, in the tooltip
+ * and in `datetime`, for whoever needs to correlate it with a log.
+ */
+export function ago(date: Date | string | null | undefined, now = new Date()): string {
+  if (!date) return '';
+  const d = typeof date === 'string' ? new Date(date) : date;
+  if (Number.isNaN(d.getTime())) return '';
+
+  const delta = d.getTime() - now.getTime();
+  const size = Math.abs(delta);
+  // Everything below reads as "N ago" or "in N", and the two sides share the
+  // same thresholds so that a lease about to expire and one that just did are
+  // described at the same resolution.
+  const say = (text: string): string => (delta >= 0 ? `in ${text}` : `${text} ago`);
+
+  if (size < 45 * 1000) return delta >= 0 ? 'in a moment' : 'just now';
+  if (size < 60 * MINUTE) return say(`${Math.round(size / MINUTE)} min`);
+  if (size < 36 * HOUR) return say(`${Math.round(size / HOUR)} h`);
+  if (size < 14 * DAY) return say(`${Math.round(size / DAY)} d`);
+  // Past a fortnight the age stops being the useful part: nobody acts on "31 d
+  // ago", and a date is what somebody would search a log for.
+  return d.toISOString().slice(0, 10);
+}
+
+/** The same, as an element a browser can show the exact instant for. */
+export function when(date: Date | string | null | undefined, now = new Date()): string {
+  if (!date) return '';
+  const d = typeof date === 'string' ? new Date(date) : date;
+  if (Number.isNaN(d.getTime())) return '';
+  return `<time datetime="${d.toISOString()}" title="${escapeHtml(formatWhen(d))}">${escapeHtml(
+    ago(d, now),
+  )}</time>`;
 }

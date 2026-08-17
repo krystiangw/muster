@@ -14,16 +14,24 @@ import {
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
 import { record, recordView } from '../events.js';
-import { chip, escapeHtml, formatWhen, layout } from '../html.js';
+import { chip, escapeHtml, layout, when } from '../html.js';
 import { avatar, who } from '../identity.js';
 import { renderBoard, renderBoardFilters, renderBoardSettings } from './boardHtml.js';
 import { DEMO_AGENTS, demoBoard } from './demoBoard.js';
 import { maybeSweep } from '../hygiene.js';
 import type { RateLimiter } from '../rateLimit.js';
-import { ServiceError, answerEscalation, appendNote, createProject, upsertItem } from '../service.js';
+import {
+  ServiceError,
+  answerEscalation,
+  appendNote,
+  createProject,
+  upsertItem,
+  verifyClaimCode,
+} from '../service.js';
 import { readSession } from '../session.js';
 import {
   ESCALATION_STATUSES,
+  type EscalationDoc,
   type EscalationStatus,
   type ItemDoc,
   type ProjectDoc,
@@ -206,7 +214,26 @@ items that live in one file. Every handle carries the colour and the face it wil
 board, because on a board six loops write to, the first question a card gets asked is whose it
 is.</p>
 <div class="demo">
-${renderBoard(demoBoard(), { agents: DEMO_AGENTS })}
+${(() => {
+  // One instant for the whole demonstration: the items are built relative to
+  // it and the ages are measured against it, so two visitors a millisecond
+  // apart are told the same thing, and no card sits on a rounding boundary
+  // reading "60 min ago" while its neighbour reads "1 h ago".
+  const now = new Date();
+  const demo = demoBoard(now);
+  return renderBoard(demo, {
+    now,
+    agents: DEMO_AGENTS,
+    // The previews carry the timelines too. A card that says "3 timeline
+    // entries" over an empty list is the one place on this page where the
+    // product can be caught contradicting itself in a single click.
+    timelines: new Map(
+      demo.rows
+        .flatMap((row) => row.columns.flatMap((cell) => cell.items))
+        .map((item) => [item._id, [...item.timeline].reverse()]),
+    ),
+  });
+})()}
 </div>
 <p class="why">A claim that stops being renewed expires and the card comes back by itself. An item
 nobody has touched says so rather than looking busy. A question for a human waits in a column of
@@ -262,6 +289,9 @@ as activity, and any of them is undone by an ordinary write.</p>
     <p class="label">been here before</p>
     <p style="margin:0 0 12px"><a href="/operator"><b>Sign in</b></a> with the address you claimed
     your projects with. No account and no password: a six digit code proves the address is yours.</p>
+    <p style="margin:0;font-size:14.5px;color:var(--ink-2)">Somebody sent you a link instead? Open
+    it. It needs no sign in, and it is the whole board plus whatever the agents are waiting on you
+    to answer.</p>
   </div>
 </div>
 <p class="why">Every page here is served as HTML with no JavaScript at all, which is why an agent
@@ -628,38 +658,60 @@ address. Claiming is free and raises the limits:</p>
       store.agents.find({ projectId: project._id }).sort({ lastSeenAt: -1 }).limit(50).toArray(),
     ]);
 
-    const open = escalations.filter((doc) => doc.status === 'open');
+    // Urgent first, then oldest, which is what /operator has always done. This
+    // page used to show newest first: somebody with time for one question
+    // answered the least important one, and the two pages of the same product
+    // disagreed about what mattered.
+    const open = escalations
+      .filter((doc) => doc.status === 'open')
+      .sort((a, b) => b.priorityRank - a.priorityRank || a.createdAt.getTime() - b.createdAt.getTime());
     const answered = escalations.filter((doc) => doc.status !== 'open');
+    const answeredId = one((request.query as { answered?: string }).answered);
+    const justAnswered = answered.find((doc) => doc._id === answeredId) ?? null;
 
-    const escalationForm = (id: string, question: string, context: string, agent: string, when: Date) => `
-<div class="card">
-  <p class="label">${escapeHtml(agent)} &middot; ${escapeHtml(formatWhen(when))}</p>
-  <p style="font-size:17px"><b>${escapeHtml(question)}</b></p>
-  ${context ? `<p style="color:var(--ink-2);white-space:pre-wrap">${escapeHtml(context)}</p>` : ''}
+    const answerForm = (id: string, answer = '') => `
   <form method="post" action="/r/${escapeHtml(readToken)}/escalations/${escapeHtml(id)}">
     <label>Your answer
-      <textarea name="answer" placeholder="The decision, in your words."></textarea>
+      <textarea name="answer" placeholder="The decision, in your words.">${escapeHtml(answer)}</textarea>
     </label>
-    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:8px;align-items:start">
       <button type="submit" name="status" value="answered">Answer</button>
       <button class="ghost" type="submit" name="status" value="resolved">Already handled</button>
       <button class="ghost" type="submit" name="status" value="wont_do">Won't do</button>
       <button class="ghost" type="submit" name="status" value="in_progress">I'm on it</button>
     </div>
-  </form>
+  </form>`;
+
+    const escalationForm = (doc: EscalationDoc) => `
+<div class="card">
+  <p class="label">${escapeHtml(doc.agent)} &middot; ${when(doc.createdAt)}
+    ${doc.priority === 'urgent' || doc.priority === 'high' ? chip(doc.priority, 'blocked') : ''}</p>
+  <p style="font-size:17px"><b>${escapeHtml(doc.question)}</b></p>
+  ${doc.context ? `<p style="color:var(--ink-2);white-space:pre-wrap">${escapeHtml(doc.context)}</p>` : ''}
+  ${
+    // The card this question is about, one click away. The slug was already in
+    // the question's context as text, which meant retyping it into the board's
+    // search box to see what the agent was looking at.
+    doc.itemSlug
+      ? `<p class="mono" style="font-size:12.5px"><a href="/r/${escapeHtml(readToken)}/board?q=${encodeURIComponent(
+          doc.itemSlug,
+        )}">${escapeHtml(doc.itemSlug)}</a></p>`
+      : ''
+  }
+  ${answerForm(doc._id)}
 </div>`;
 
     const itemRow = (item: ItemDoc) => {
       const last = item.timeline?.[item.timeline.length - 1];
       return `<tr>
-  <td class="mono">${escapeHtml(item.slug)}</td>
-  <td>${escapeHtml(item.title || '(no title)')}${
+  <td class="mono" data-label="Slug">${escapeHtml(item.slug)}</td>
+  <td data-label="Title and last note">${escapeHtml(item.title || '(no title)')}${
         last ? `<br><span class="mono" style="color:var(--muted)">${escapeHtml(last.by)}: ${escapeHtml(last.message.slice(0, 90))}</span>` : ''
       }</td>
-  <td>${chip(item.status, item.status)}${item.stale ? ` ${chip('stale', 'stale')}` : ''}${
+  <td data-label="State">${chip(item.status, item.status)}${item.stale ? ` ${chip('stale', 'stale')}` : ''}${
         item.claim ? ` ${chip(item.claim.agent, 'claim')}` : ''
       }</td>
-  <td class="mono">${escapeHtml(formatWhen(item.updatedAt))}</td>
+  <td class="mono" data-label="Updated">${when(item.updatedAt)}</td>
 </tr>`;
     };
 
@@ -668,8 +720,17 @@ address. Claiming is free and raises the limits:</p>
 ${project.description ? `<p class="lead">${escapeHtml(project.description)}</p>` : ''}
 <p class="mono" style="color:var(--muted)">${escapeHtml(project._id)} &middot;
   <a href="/r/${escapeHtml(readToken)}/board">open the board</a></p>
+${
+      // Said from the stored question, never from the URL: the parameter only
+      // names which one, and a link somebody crafted cannot put words here.
+      justAnswered
+        ? `<div class="notice">Answered. ${escapeHtml(
+            justAnswered.agent,
+          )} picks it up on its next iteration, and this page will say when it did.</div>`
+        : ''
+    }
 <p>${items.length} item(s), ${agents.length} agent(s), ${open.length} question(s)
-waiting for you.${project.expiresAt ? ` This project is unclaimed and will be deleted on ${escapeHtml(formatWhen(project.expiresAt))}.` : ''}</p>
+waiting for you.${project.expiresAt ? ` This project is unclaimed and will be deleted ${when(project.expiresAt)}.` : ''}</p>
 
 ${
       project.expiresAt
@@ -684,9 +745,20 @@ or paste the token below.
         : ''
     }
 
+${
+      // A project that has never been written to looks broken rather than new,
+      // and this is the first page a person sees, often before the agent has
+      // written anything at all.
+      items.length === 0 && agents.length === 0
+        ? `<div class="notice">Nothing here yet. This page fills in when an agent registers and
+writes its first item. Point it at <a href="/skill.md">skill.md</a> with the project token and it
+will do the rest.</div>`
+        : ''
+    }
+
 <h2>Waiting for you</h2>
 ${open.length === 0 ? '<p class="empty">Nothing. The agents are unblocked.</p>' : ''}
-${open.map((doc) => escalationForm(doc._id, doc.question, doc.context, doc.agent, doc.createdAt)).join('')}
+${open.map((doc) => escalationForm(doc as EscalationDoc)).join('')}
 
 <h2>Items</h2>
 <div class="scroll"><table>
@@ -712,15 +784,17 @@ ${
         : agents
             .map(
               (agent) =>
-                `<tr><td class="mono"><a href="/r/${escapeHtml(readToken)}/board?agent=${encodeURIComponent(
+                `<tr><td class="mono" data-label="Handle"><a href="/r/${escapeHtml(
+                  readToken,
+                )}/board?agent=${encodeURIComponent(
                   agent.handle,
-                )}">${avatar(agent.handle)} ${escapeHtml(agent.handle)}</a></td><td>${
+                )}">${avatar(agent.handle)} ${escapeHtml(agent.handle)}</a></td><td data-label="What it is for">${
                   agent.description === ''
                     ? '<span class="empty">said nothing</span>'
                     : escapeHtml(agent.description)
-                }</td><td class="mono">${escapeHtml(
+                }</td><td class="mono" data-label="Scope">${escapeHtml(
                   agent.scope.join(', ') || '(everything)',
-                )}</td><td class="mono">${escapeHtml(formatWhen(agent.lastSeenAt))}</td></tr>`,
+                )}</td><td class="mono" data-label="Last seen">${when(agent.lastSeenAt)}</td></tr>`,
             )
             .join('\n')
     }
@@ -733,7 +807,7 @@ ${
         : `<ul class="timeline">${answered
             .map(
               (doc) =>
-                `<li><span class="when">${escapeHtml(formatWhen(doc.answeredAt))}</span><span class="who">${escapeHtml(
+                `<li><span class="when">${when(doc.answeredAt)}</span><span class="who">${escapeHtml(
                   doc.status,
                 )}</span><span>${escapeHtml(doc.question)}${
                   doc.answer ? `<br><span style="color:var(--ink-2)">${escapeHtml(doc.answer)}</span>` : ''
@@ -741,10 +815,17 @@ ${
                   // Whether the answer landed. Answering into silence is the
                   // fastest way to stop answering at all.
                   doc.acknowledgedAt
-                    ? `<br><span class="why">${who(doc.acknowledgedBy ?? 'an agent')} acted ${escapeHtml(
-                        formatWhen(doc.acknowledgedAt),
-                      )}${doc.acknowledgedNote ? `: ${escapeHtml(doc.acknowledgedNote)}` : ''}</span>`
-                    : ''
+                    ? `<br><span class="why">${who(doc.acknowledgedBy ?? 'an agent')} acted ${when(doc.acknowledgedAt)}${doc.acknowledgedNote ? `: ${escapeHtml(doc.acknowledgedNote)}` : ''}</span>`
+                    : '<br><span class="why">not picked up yet</span>'
+                }${
+                  // An answer used to be final from the browser: four buttons
+                  // that look alike, one click, no way back. Answering the
+                  // wrong one is an ordinary human mistake and should cost a
+                  // correction, not a support request.
+                  `<details style="margin-top:6px"><summary class="why">change this answer</summary>${answerForm(
+                    doc._id,
+                    doc.answer ?? '',
+                  )}</details>`
                 }</span></li>`,
             )
             .join('')}</ul>`
@@ -771,12 +852,14 @@ ${
     const query = request.query as {
       moved?: string;
       landed?: string;
+      done?: string;
+      what?: string;
       owner?: string;
       agent?: string;
       label?: string;
       q?: string;
     };
-    const [view, facets] = await Promise.all([
+    const [view, facets, waiting] = await Promise.all([
       loadBoard(store, project, {
         ...(query.owner ? { owner: query.owner.slice(0, 48) } : {}),
         ...(query.agent ? { agent: query.agent.slice(0, 48) } : {}),
@@ -786,6 +869,10 @@ ${
         ...(query.q ? { q: query.q.slice(0, 80) } : {}),
       }),
       boardFacets(store, project),
+      // The only work on this board that no agent will ever do. It was
+      // reachable from here only through a link labelled "questions and
+      // timeline", in muted monospace, whatever the queue held.
+      store.escalations.countDocuments({ projectId: project._id, status: 'open' }),
     ]);
     const agents = await agentDescriptions(store, project._id, view);
 
@@ -793,18 +880,55 @@ ${
     // the board's own columns rather than carried in the URL, so a crafted link
     // cannot put words on somebody else's page.
     const landedIn = view.config.columns.find((column) => column.key === query.landed);
-    const notice = query.moved
-      ? landedIn
-        ? `"${query.moved.slice(0, 80)}" is now in ${landedIn.title}.`
-        : `"${query.moved.slice(0, 80)}" matches no column now. Check the layout below.`
+    // The item as this page has it, found by the slug the redirect named. Using
+    // the stored slug rather than the parameter keeps every word below server
+    // written, and it is also how the page can say what the move did to the
+    // card rather than only where it went.
+    const touched = query.moved || query.done
+      ? view.rows
+          .flatMap((row) => row.columns.flatMap((cell) => cell.items))
+          .find((item) => item.slug === (query.moved ?? query.done))
       : undefined;
+    const heldUntil =
+      touched?.claim && new Date(touched.claim.expiresAt) > new Date()
+        ? touched.claim.expiresAt
+        : null;
+    const movedNotice = query.moved
+      ? landedIn
+        ? `"${touched?.slug ?? query.moved.slice(0, 80)}" is now in ${landedIn.title}.${
+            // Moving a card into a claimed column takes it out on a lease. The
+            // card comes back on its own an hour later, and somebody who was
+            // never told that returns to a board that changed behind their
+            // back.
+            heldUntil
+              ? ` You are holding it until ${when(heldUntil)}, and it returns to where it was if nothing renews that.`
+              : ''
+          }`
+        : `"${touched?.slug ?? query.moved.slice(0, 80)}" matches no column now. Check the layout below.`
+      : undefined;
+    // Assign and tag redirect the same way a move does. They used to redirect
+    // silently, so the only evidence was a chip on a card the person then had
+    // to find again by eye.
+    const doneNotice =
+      query.done && touched
+        ? query.what === 'label'
+          ? `"${touched.slug}" is now tagged ${
+              touched.labels.length > 0 ? touched.labels.map((label) => escapeHtml(label)).join(', ') : 'nothing'
+            }.`
+          : `"${touched.slug}" is ${touched.owner ? `owned by ${escapeHtml(touched.owner)}` : 'unassigned'}.`
+        : undefined;
+    const notice = movedNotice ?? doneNotice;
 
     const boardUrl = `/r/${escapeHtml(readToken)}/board`;
     const body = `
 <h1>${escapeHtml(project.name)}</h1>
 ${project.description ? `<p class="lead">${escapeHtml(project.description)}</p>` : ''}
 <p class="mono" style="color:var(--muted)">${escapeHtml(project._id)} &middot;
-  <a href="/r/${escapeHtml(readToken)}">questions and timeline</a></p>
+  <a href="/r/${escapeHtml(readToken)}">${
+    waiting > 0
+      ? `<b>${waiting} question${waiting === 1 ? '' : 's'} waiting for you</b>`
+      : 'questions and timeline'
+  }</a></p>
 
 ${renderBoard(view, {
   moveAction: `${boardUrl}/move`,
@@ -916,7 +1040,11 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
       note: owner === '' ? 'unassigned' : `assigned to ${owner}`,
       mustExist: true,
     });
-    const params = new URLSearchParams(keptParams(form));
+    const params = new URLSearchParams({
+      done: form.slug,
+      what: 'owner',
+      ...keptParams(form),
+    });
     return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
   });
 
@@ -959,7 +1087,11 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
         add !== '' ? `tagged ${add}` : `untagged ${remove}`,
       );
     }
-    const params = new URLSearchParams(keptParams(form));
+    const params = new URLSearchParams({
+      done: form.slug,
+      what: 'label',
+      ...keptParams(form),
+    });
     return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
   });
 
@@ -1011,10 +1143,16 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
       throw new ServiceError(400, 'bad_status', 'Unknown answer type.');
     }
     await answerEscalation(store, project._id, id, status, (form.answer ?? '').slice(0, 8000));
-    return reply.redirect(`/r/${readToken}`, 303);
+    // Named in the redirect so the page can confirm it. Four buttons that look
+    // alike and a silent reload is how somebody ends up answering twice.
+    return reply.redirect(`/r/${readToken}?answered=${encodeURIComponent(id)}`, 303);
   });
 
   app.post('/r/:readToken/claim', { schema: { hide: true } }, async (request, reply) => {
+    // The only write through a read link that was missing this. It costs a
+    // loopback request to /v1/{project}/claim, so an unlimited one is a small
+    // amplifier pointed at ourselves.
+    if (!limitWrites(request, reply)) return reply;
     const { readToken } = request.params as { readToken: string };
     const form = (request.body ?? {}) as { email?: string; token?: string };
     const project = await store.projects.findOne({ readToken });
@@ -1040,14 +1178,76 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
       layout(
         { title: ok ? 'Check your email' : 'Claim failed' },
         ok
-          ? `<h1>Check your email</h1><p>A six digit code is on its way to
-             ${escapeHtml(form.email ?? '')}. Give it to your agent, or finish the claim yourself:</p>
-             <pre><code>curl -sX POST ${escapeHtml(base)}/v1/${escapeHtml(project._id)}/claim/verify \\
-  -H "authorization: Bearer &lt;token&gt;" -H 'content-type: application/json' \\
-  -d '{"email":"${escapeHtml(form.email ?? '')}","code":"123456"}'</code></pre>
-             <p><a href="/r/${escapeHtml(readToken)}">Back to the project</a></p>`
+          ? `<h1>Check your email</h1>
+             <p>A six digit code is on its way to ${escapeHtml(form.email ?? '')}. It is good for
+             15 minutes and works once.</p>
+             <form method="post" action="/r/${escapeHtml(readToken)}/claim/verify">
+               <input type="hidden" name="email" value="${escapeHtml(form.email ?? '')}">
+               <label>Code
+                 <input name="code" inputmode="numeric" autocomplete="one-time-code" required
+                        pattern="[0-9]{6}" placeholder="123456">
+               </label>
+               <button type="submit">Claim this project</button>
+             </form>
+             <p><a href="/r/${escapeHtml(readToken)}">Back to the project</a>, or give the code to
+             your agent and let it finish with
+             <code>POST /v1/${escapeHtml(project._id)}/claim/verify</code>.</p>`
           : `<h1>Claim failed</h1><p>The token did not match this project, or the address was
              rejected. <a href="/r/${escapeHtml(readToken)}">Try again</a>.</p>`,
+      ),
+    );
+  });
+
+  /**
+   * The second half of a claim, in a browser.
+   *
+   * It asks for no token, and does not need one: the first half already
+   * demanded the project token to have the code sent at all, and the code
+   * itself only reaches the mailbox it was addressed to. Requiring the token
+   * again would only mean rendering it into a hidden field, which is how a
+   * credential ends up in a page.
+   *
+   * Before this existed, the browser path ended at a curl command with a
+   * placeholder in it. The person Muster is asking to take ownership of a board
+   * is not always the person who has a terminal open.
+   */
+  app.post('/r/:readToken/claim/verify', { schema: { hide: true } }, async (request, reply) => {
+    if (!limitWrites(request, reply)) return reply;
+    const { readToken } = request.params as { readToken: string };
+    const form = (request.body ?? {}) as { email?: string; code?: string };
+    const project = await store.projects.findOne({ readToken });
+    if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
+    if (!(await readableBy(store, request, project))) {
+      throw new ServiceError(404, 'not_found', 'No such project.');
+    }
+
+    try {
+      await verifyClaimCode(store, project, form.email ?? '', (form.code ?? '').trim(), config);
+    } catch (error) {
+      const message =
+        error instanceof ServiceError
+          ? error.message
+          : 'Something went wrong finishing the claim.';
+      return reply
+        .code(error instanceof ServiceError ? error.statusCode : 500)
+        .type('text/html; charset=utf-8')
+        .send(
+          layout(
+            { title: 'That code did not work' },
+            `<h1>That code did not work</h1><p>${escapeHtml(message)}</p>
+             <p><a href="/r/${escapeHtml(readToken)}">Back to the project</a> to start again.</p>`,
+          ),
+        );
+    }
+    record(store, 'claim', { door: 'browser', projectId: project._id });
+    return reply.type('text/html; charset=utf-8').send(
+      layout(
+        { title: 'Claimed' },
+        `<h1>This project is yours</h1>
+         <p>It no longer expires, the limits are raised, and it now appears in
+         <a href="/operator">your projects</a> alongside anything else you own. Sign in there with
+         this address whenever you want the whole queue in one page.</p>
+         <p><a href="/r/${escapeHtml(readToken)}">Back to the project</a></p>`,
       ),
     );
   });

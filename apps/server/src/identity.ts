@@ -25,17 +25,30 @@ function hash(value: string): number {
 
 /**
  * Twelve hues, spaced far enough apart to be told apart at chip size, and
- * skipping the ones this palette already spends on meaning: the teal of the
- * accent, the red of a blocked item, the amber of a stale one. A name that
- * borrowed one of those would read as a status.
+ * keeping clear of the ones this palette already spends on meaning: the red of
+ * a blocked item (hue 30), the amber of a stale one (81), the green of a
+ * finished one (156) and the teal of the accent (187). A name that borrowed one
+ * of those would read as a status, which is exactly what happened to a handle
+ * that landed on 30 and sat next to a red BLOCKED chip.
  */
-const HUES = [8, 30, 52, 96, 122, 168, 200, 224, 252, 280, 308, 334];
+const HUES = [4, 55, 100, 120, 138, 210, 232, 254, 276, 298, 320, 342];
+
+/** How much colour a face carries. Constant, so only the hue identifies. */
+const CHROMA = 0.13;
 
 export interface Face {
-  /** The colour, as an `oklch()` string, readable on both grounds. */
-  ink: string;
-  /** The same hue at low chroma, for a chip background. */
-  wash: string;
+  /**
+   * The hue and chroma, as custom properties for the page to build a colour
+   * from. Lightness deliberately is not here: it belongs to the theme.
+   *
+   * The face used to carry a finished `oklch()` with a lightness baked into the
+   * hash, which meant one number had to be readable on white and on near black
+   * at once. It was not: measured against the dark surface, the darkest of the
+   * three variants came out at 2.99:1, under the 4.5 a small chip needs.
+   */
+  vars: string;
+  /** The disc colour, which stays put: white initials sit on it in both themes. */
+  disc: string;
   /** One or two letters, for when there is no room for a picture. */
   initials: string;
 }
@@ -43,12 +56,9 @@ export interface Face {
 export function faceOf(handle: string): Face {
   const h = hash(handle);
   const hue = HUES[h % HUES.length]!;
-  // A little variation inside the hue, so two names that land on the same one
-  // are still not the same colour.
-  const lightness = 0.52 + ((h >>> 8) % 3) * 0.05;
   return {
-    ink: `oklch(${lightness.toFixed(2)} 0.13 ${hue})`,
-    wash: `oklch(${lightness.toFixed(2)} 0.13 ${hue} / 0.16)`,
+    vars: `--who-h:${hue};--who-c:${CHROMA}`,
+    disc: `oklch(0.55 ${CHROMA} ${hue})`,
     initials: initialsOf(handle),
   };
 }
@@ -76,14 +86,14 @@ function escape(value: string): string {
 export function avatar(handle: string, size = 16): string {
   const face = faceOf(handle);
   const half = size / 2;
-  return `<svg class="face" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true" focusable="false"><circle cx="${half}" cy="${half}" r="${half}" fill="${face.ink}"/><text x="${half}" y="${half + size * 0.045}" text-anchor="middle" dominant-baseline="central" font-family="ui-monospace,monospace" font-size="${(size * 0.5).toFixed(1)}" font-weight="600" fill="#fff">${escape(face.initials)}</text></svg>`;
+  return `<svg class="face" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" aria-hidden="true" focusable="false"><circle cx="${half}" cy="${half}" r="${half}" fill="${face.disc}"/><text x="${half}" y="${half + size * 0.045}" text-anchor="middle" dominant-baseline="central" font-family="ui-monospace,monospace" font-size="${(size * 0.5).toFixed(1)}" font-weight="600" fill="#fff">${escape(face.initials)}</text></svg>`;
 }
 
 /** A name with its face, which is how every actor should appear on a page. */
 export function who(handle: string, options: { title?: string; prefix?: string } = {}): string {
   const face = faceOf(handle);
   const title = options.title ? ` title="${escape(options.title)}"` : '';
-  return `<span class="who-chip"${title} style="--who:${face.ink};--who-wash:${face.wash}">${avatar(handle)}<span>${
+  return `<span class="who-chip"${title} style="${face.vars}">${avatar(handle)}<span>${
     options.prefix ? `${escape(options.prefix)} ` : ''
   }${escape(handle)}</span></span>`;
 }

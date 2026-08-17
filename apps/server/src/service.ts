@@ -165,7 +165,19 @@ export interface AuthContext {
 }
 
 export async function authenticate(store: Store, token: string): Promise<AuthContext> {
-  const key = await store.keys.findOne({ hash: hashToken(token), revokedAt: null });
+  const key = await store.keys.findOne({
+    hash: hashToken(token),
+    revokedAt: null,
+    // A key can carry an expiry: the project's, for a demo, or an hour, for one
+    // minted through the OAuth token endpoint. The TTL index deletes the
+    // document eventually, but "eventually" is up to a minute of a dead token
+    // still opening the door, and the door is what this function is.
+    $or: [
+      { expiresAt: null },
+      { expiresAt: { $exists: false } },
+      { expiresAt: { $gt: new Date() } },
+    ],
+  });
   if (!key) {
     throw new ServiceError(401, 'invalid_token', 'Unknown or revoked token.');
   }
@@ -329,6 +341,52 @@ export async function acceptShare(
   return (await store.projects.findOne({ _id: project._id })) as ProjectDoc;
 }
 
+/** How many wrong codes a pending claim survives. */
+export const MAX_CLAIM_ATTEMPTS = 5;
+
+/**
+ * Spend one attempt on a pending claim, and claim the project if it matched.
+ *
+ * Shared by the API route and the browser form, so that the person who started
+ * a claim on the read link can finish it there. The attempt is spent in the
+ * write that reads the code, so several guesses arriving together cannot all
+ * see the same count and slip past the ceiling between them. Expiry is checked
+ * here rather than left to the TTL index, which sweeps on its own schedule and
+ * runs late under load, so a fifteen minute code was quietly good for longer
+ * than the response promised.
+ */
+export async function verifyClaimCode(
+  store: Store,
+  project: ProjectDoc,
+  email: string,
+  code: string,
+  config: Config,
+): Promise<void> {
+  const address = email.trim().toLowerCase();
+  const pending = await store.claimCodes.findOneAndUpdate(
+    {
+      projectId: project._id,
+      email: address,
+      expiresAt: { $gt: new Date() },
+      attempts: { $lt: MAX_CLAIM_ATTEMPTS },
+    },
+    { $inc: { attempts: 1 } },
+    { returnDocument: 'after' },
+  );
+  if (!pending) {
+    throw new ServiceError(
+      404,
+      'no_pending_claim',
+      'No claim is pending for that address, or it expired or ran out of attempts. Start the claim again.',
+    );
+  }
+  if (pending.codeHash !== hashToken(code)) {
+    throw badRequest('bad_code', 'That code does not match.');
+  }
+  await claimProjectWithEmail(store, project, address, config);
+  await store.claimCodes.deleteMany({ projectId: project._id });
+}
+
 export async function claimProjectWithEmail(
   store: Store,
   project: ProjectDoc,
@@ -366,7 +424,11 @@ export async function claimProjectWithEmail(
     store.items.updateMany({ projectId: project._id }, clear),
     store.agents.updateMany({ projectId: project._id }, clear),
     store.escalations.updateMany({ projectId: project._id }, clear),
-    store.keys.updateMany({ projectId: project._id }, clear),
+    // Every key except the ones that expire for a reason of their own. An
+    // access token from the OAuth endpoint carries an hour, and clearing that
+    // here because the project stopped expiring would silently promote it to a
+    // permanent admin credential.
+    store.keys.updateMany({ projectId: project._id, ownExpiry: { $ne: true } }, clear),
   ]);
 }
 
@@ -485,6 +547,17 @@ export interface UpsertItemInput {
    * it is gone.
    */
   mustExist?: boolean;
+  /**
+   * Write the fields only if this call is the one that creates the item.
+   *
+   * For a caller that has already decided an existing item is not theirs to
+   * rewrite, and that reaching one means it lost a race. An anonymous report is
+   * the case: two people filing the same title in the same instant both find
+   * nothing, both create, and without this the loser's payload lands on the
+   * winner's item as an ordinary update. The note still goes on the timeline,
+   * because that part is true either way.
+   */
+  insertOnly?: boolean;
 }
 
 export interface UpsertItemResult {
@@ -569,6 +642,8 @@ export async function upsertItem(
 
   let ownsTransition = false;
   let applyStatus = input.status !== undefined;
+  /** Whose claim closing this item dropped, if it dropped one. */
+  let releasedClaim: string | null = null;
 
   if (!existing) {
     if (input.mustExist) throw notFound(slug);
@@ -604,11 +679,21 @@ export async function upsertItem(
           status: input.status!,
           closedAt: willBeTerminal ? now : null,
           updatedAt: now,
+          // Finished work is not work in progress. A claim outliving the item
+          // it covers puts a done card in the "in progress" column of every
+          // board whose column asks `claimed: true`, and leaves the agent
+          // holding a lease on something nobody can do anything with. It
+          // expires on its own eventually; eventually is up to an hour of a
+          // board saying something false.
+          ...(willBeTerminal ? { claim: null } : {}),
         },
       },
-      { projection: { _id: 1 } },
+      // The document as it was, so the entry below can name whose claim this
+      // dropped rather than saying that one was dropped.
+      { projection: { claim: 1 } },
     );
     ownsTransition = moved !== null;
+    releasedClaim = willBeTerminal ? (moved?.claim?.agent ?? null) : null;
 
     if (!ownsTransition) {
       // Somebody else moved it first, and their status is the one that stands.
@@ -631,6 +716,10 @@ export async function upsertItem(
 
   const assign = <T>(field: string, value: T | undefined, fallback: T): void => {
     if (value === undefined) setOnInsert[field] = fallback;
+    // `$setOnInsert` is what makes insertOnly atomic rather than nearly atomic:
+    // the decision is taken by the write itself, so a caller that loses the
+    // race writes nothing it was not allowed to write.
+    else if (input.insertOnly) setOnInsert[field] = value;
     else set[field] = value;
   };
 
@@ -642,8 +731,10 @@ export async function upsertItem(
   assign('fields', input.fields, {});
   assign('source', input.source, null);
 
-  if (input.title !== undefined) set.titleKey = titleKey(input.title);
-  else setOnInsert.titleKey = '';
+  if (input.title !== undefined) {
+    if (input.insertOnly) setOnInsert.titleKey = titleKey(input.title);
+    else set.titleKey = titleKey(input.title);
+  } else setOnInsert.titleKey = '';
 
   // Any write by an agent is proof of life: it clears the stale flag that the
   // hygiene engine may have set. Hygiene marks, agents unmark, and neither
@@ -686,7 +777,15 @@ export async function upsertItem(
     entries.push(...kept);
   }
   if (!existing) {
-    entries.push({ at: now, by: input.actor, kind: 'created', message: input.note ?? 'created' });
+    entries.push({
+      at: now,
+      by: input.actor,
+      // An insertOnly write may still land on an item somebody else created a
+      // millisecond earlier, and a second "created" on one item is a claim the
+      // record cannot make. A note is true whichever way the race went.
+      kind: input.insertOnly ? 'note' : 'created',
+      message: input.note ?? 'created',
+    });
   } else {
     if (ownsTransition && status !== undefined) {
       entries.push({
@@ -699,6 +798,17 @@ export async function upsertItem(
       entries.push({ at: now, by: input.actor, kind: 'note', message: input.note });
     } else {
       entries.push({ at: now, by: input.actor, kind: 'updated', message: 'updated' });
+    }
+    if (releasedClaim) {
+      entries.push({
+        at: now,
+        by: input.actor,
+        kind: 'released',
+        message:
+          releasedClaim === input.actor
+            ? 'released their own claim on closing this'
+            : `released ${releasedClaim}'s claim on closing this`,
+      });
     }
   }
 
@@ -1455,8 +1565,8 @@ export async function answerEscalation(
 export async function createApiKey(
   store: Store,
   project: ProjectDoc,
-  input: { name?: string; role?: 'write' | 'admin' },
-): Promise<{ key: ApiKeyDoc; token: string }> {
+  input: { name?: string; role?: 'write' | 'admin'; ttlMs?: number },
+): Promise<{ key: ApiKeyDoc; token: string; expiresAt: Date | null }> {
   const token = newToken();
   const now = new Date();
   const key: ApiKeyDoc = {
@@ -1469,8 +1579,17 @@ export async function createApiKey(
     lastUsedAt: null,
     revokedAt: null,
   };
-  await store.keys.insertOne({ ...key, expiresAt: project.expiresAt });
-  return { key, token };
+  // A key given a lifetime of its own still cannot outlive the project it
+  // belongs to, so the two expiries take whichever comes first.
+  const own = input.ttlMs ? new Date(now.getTime() + input.ttlMs) : null;
+  const expiresAt =
+    own && project.expiresAt
+      ? new Date(Math.min(own.getTime(), project.expiresAt.getTime()))
+      : (own ?? project.expiresAt);
+  // Marked, because claiming a project clears the expiry off everything that
+  // was only expiring because the project was. This one is not.
+  await store.keys.insertOne({ ...key, expiresAt, ...(own ? { ownExpiry: true } : {}) });
+  return { key, token, expiresAt };
 }
 
 export async function listApiKeys(store: Store, projectId: string): Promise<ApiKeyDoc[]> {

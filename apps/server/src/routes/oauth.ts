@@ -24,6 +24,9 @@ export interface OAuthDeps {
   limiter: RateLimiter;
 }
 
+/** How long an access token from the token endpoint lives. */
+const TOKEN_TTL_MS = 60 * 60 * 1000;
+
 export function registerOAuth(app: FastifyInstance, deps: OAuthDeps): void {
   const { store, config, limiter } = deps;
 
@@ -153,6 +156,17 @@ export function registerOAuth(app: FastifyInstance, deps: OAuthDeps): void {
           .send({ error: 'invalid_request', error_description: 'client_id and client_secret are required.' });
       }
 
+      // Per source rather than per client: an unknown client_id costs a lookup
+      // and a hash whether or not it exists, so the bucket has to be something
+      // the caller cannot mint a fresh one of for every attempt.
+      const tokenVerdict = limiter.check(`oauth-token:${clientIp(request)}`, config.rateLimits.write);
+      if (!tokenVerdict.ok) {
+        return reply
+          .code(429)
+          .header('retry-after', String(tokenVerdict.retryAfterSeconds))
+          .send({ error: 'slow_down', error_description: 'Too many token requests.' });
+      }
+
       const client = await store.oauthClients.findOne({ _id: clientId });
       if (!client || client.secretHash !== hashToken(clientSecret)) {
         return reply.code(401).send({ error: 'invalid_client' });
@@ -164,16 +178,27 @@ export function registerOAuth(app: FastifyInstance, deps: OAuthDeps): void {
           .send({ error: 'invalid_client', error_description: 'The project behind this client is gone.' });
       }
 
-      const { token } = await createApiKey(store, project, {
+      // An hour, and the key document dies with it.
+      //
+      // This used to hand out a project token that lived as long as the
+      // project. Every refresh a normal OAuth client makes is another one of
+      // those, none of them revocable in practice because nothing distinguishes
+      // them, and an audit found sixty two live admin keys on one project from
+      // sixty two routine refreshes. A token from a token endpoint is supposed
+      // to be short lived; the long lived credential for this project is the
+      // one POST /p handed out, and it is still there.
+      const { token, expiresAt } = await createApiKey(store, project, {
         name: `oauth:${client.name}`.slice(0, 80),
         role: 'admin',
+        ttlMs: TOKEN_TTL_MS,
       });
       return reply.send({
         access_token: token,
         token_type: 'Bearer',
+        expires_in: expiresAt
+          ? Math.max(1, Math.round((expiresAt.getTime() - Date.now()) / 1000))
+          : TOKEN_TTL_MS / 1000,
         scope: `project:${project._id}`,
-        // Deliberately no expires_in: project tokens are long lived and are
-        // revoked explicitly through DELETE /v1/{project}/keys/{id}.
         project: project._id,
         api: `${config.baseUrl}/v1/${project._id}`,
       });

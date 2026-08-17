@@ -23,6 +23,17 @@ after(async () => {
 
 const AGENT_UAS = ['ChatGPT-User/1.0', 'Claude-User/1.0', 'curl/8.4.0'];
 
+/**
+ * The page with the one thing that legitimately differs between two requests
+ * taken out: the demo board is drawn from timestamps relative to now, so its
+ * `datetime` attributes move by the milliseconds between the two calls. The
+ * question being asked here is whether the user agent changes the answer, and
+ * a clock is not a user agent.
+ */
+function withoutTheClock(body: string): string {
+  return body.replace(/\d{4}-\d{2}-\d{2}T[\d:.]+Z/g, '<when>');
+}
+
 describe('A. discovery', () => {
   it('answers a plain request from an agent user agent exactly like a browser', async () => {
     const browser = await harness.server.inject({
@@ -39,7 +50,11 @@ describe('A. discovery', () => {
         headers: { 'user-agent': ua },
       });
       assert.equal(agent.statusCode, 200, ua);
-      assert.equal(agent.body, browser.body, `${ua} must not be served different content`);
+      assert.equal(
+        withoutTheClock(agent.body),
+        withoutTheClock(browser.body),
+        `${ua} must not be served different content`,
+      );
     }
   });
 

@@ -5,6 +5,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
 import { maybeSweep } from '../hygiene.js';
+import type { Notifier } from '../notify.js';
 import type { RateLimiter } from '../rateLimit.js';
 import { loadBoard, moveItem } from '../board.js';
 import { boardApplyJson, boardJson, escalationJson, itemJson } from '../serialize.js';
@@ -56,6 +57,7 @@ export interface McpDeps {
   store: Store;
   config: Config;
   limiter: RateLimiter;
+  notifier: Notifier;
 }
 
 interface ToolDefinition {
@@ -285,7 +287,7 @@ const TOOLS: ToolDefinition[] = [
 ];
 
 export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
-  const { store, config, limiter } = deps;
+  const { store, config, limiter, notifier } = deps;
 
   app.get('/mcp', { schema: { hide: true } }, async (_request, reply) =>
     // A plain GET is not an MCP handshake. Say what this endpoint is instead of
@@ -593,6 +595,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           priority: args.priority as EscalationPriority | undefined,
           itemSlug: args.item_slug === undefined ? null : str(args.item_slug),
         });
+        await notifier.escalationRaised(project, doc);
         return {
           escalation: escalationJson(doc),
           read_url: `${config.baseUrl}/r/${project.readToken}`,

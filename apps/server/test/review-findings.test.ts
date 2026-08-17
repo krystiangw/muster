@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
+import { claimProjectWithEmail } from '../src/service.js';
 import { authed, createProject, startHarness, type Harness, type Project } from './helper.js';
 
 /**
@@ -528,5 +529,117 @@ describe('the open item cap', () => {
 
     await post(project, '/items', { slug: 'real', status: 'open', actor: 'a' });
     assert.equal((await harness.store.projects.findOne({ _id: project.id }))!.counts.items, 1);
+  });
+});
+
+/**
+ * The audits of 2026-08-17, which read the running deployment rather than the
+ * diff. Same principle as above: each one is a hole that was open.
+ */
+describe('what the audits of the live service found', () => {
+  it('drops the claim when the item it covers is finished', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'work', title: 'work', actor: 'a' });
+    await post(project, '/items/work/claim', { agent: 'a' });
+    assert.ok((await harness.store.items.findOne({ projectId: project.id, slug: 'work' }))!.claim);
+
+    // Closing it by hand from another agent still frees it: the work is over,
+    // and a board whose "in progress" column asks `claimed: true` would
+    // otherwise keep showing a finished card there until the lease ran out.
+    await post(project, '/items', { slug: 'work', status: 'done', actor: 'b' });
+    const closed = await harness.store.items.findOne({ projectId: project.id, slug: 'work' });
+    assert.equal(closed!.claim, null);
+    assert.ok(
+      closed!.timeline.some((entry) => entry.kind === 'released' && entry.message.includes("a's claim")),
+      'and the record says whose claim it was',
+    );
+  });
+
+  it('tells an agent its own question is still waiting', async () => {
+    // An empty inbox used to mean two different things: nobody has answered
+    // yet, and the question was never filed. An agent cannot tell those apart,
+    // and the second is a bug it should not paper over by asking again.
+    const project = await createProject(harness);
+    await post(project, '/escalations', { agent: 'errors-loop', question: 'which route?' });
+
+    const inbox = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/inbox?agent=errors-loop`,
+      headers: authed(project),
+    });
+    assert.deepEqual(inbox.json().answers, []);
+    assert.equal(inbox.json().waiting.length, 1);
+    assert.equal(inbox.json().waiting[0].question, 'which route?');
+  });
+
+  it('hands out an access token that expires, not a permanent admin key', async () => {
+    // The token endpoint minted a key that lived as long as the project, on
+    // every call. A client refreshing on a timer, which is ordinary, left one
+    // live admin credential per refresh and no way to tell them apart.
+    const registered = await harness.server.inject({
+      method: 'POST',
+      url: '/oauth/register',
+      payload: { client_name: 'a client that refreshes' },
+    });
+    const { client_id: clientId, client_secret: clientSecret } = registered.json();
+
+    const issued = await harness.server.inject({
+      method: 'POST',
+      url: '/oauth/token',
+      payload: { grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret },
+    });
+    const granted = issued.json();
+    assert.ok(granted.expires_in > 0 && granted.expires_in <= 3600);
+
+    const project = { id: granted.project, token: granted.access_token, readUrl: '', api: granted.api };
+    assert.equal((await post(project, '/agents', { handle: 'a', scope: ['x'] })).statusCode, 201);
+
+    // And when it is over it is over, whether or not the TTL index has caught
+    // up with the document.
+    await harness.store.keys.updateMany(
+      { projectId: granted.project },
+      { $set: { expiresAt: new Date(Date.now() - 1000) } },
+    );
+    assert.equal((await post(project, '/agents', { handle: 'b', scope: ['x'] })).statusCode, 401);
+  });
+
+  it('does not turn that token permanent when the project is claimed', async () => {
+    // Claiming clears the expiry off everything that was only expiring because
+    // the project was. An hour long access token is not one of those, and
+    // sweeping it up here would promote it to a permanent admin credential on
+    // the very projects that matter, the claimed ones.
+    const registered = await harness.server.inject({
+      method: 'POST',
+      url: '/oauth/register',
+      payload: { client_name: 'a client on a project somebody claims' },
+    });
+    const { client_id: clientId, client_secret: clientSecret } = registered.json();
+    const granted = (
+      await harness.server.inject({
+        method: 'POST',
+        url: '/oauth/token',
+        payload: {
+          grant_type: 'client_credentials',
+          client_id: clientId,
+          client_secret: clientSecret,
+        },
+      })
+    ).json();
+
+    const doc = (await harness.store.projects.findOne({ _id: granted.project }))!;
+    await claimProjectWithEmail(harness.store, doc, 'owner@example.com', harness.config);
+
+    const oauthKey = await harness.store.keys.findOne({
+      projectId: granted.project,
+      ownExpiry: true,
+    });
+    assert.ok(oauthKey?.expiresAt, 'the access token still expires');
+    // While the project token, which expired only because the project did,
+    // correctly stops expiring.
+    const projectKey = await harness.store.keys.findOne({
+      projectId: granted.project,
+      ownExpiry: { $ne: true },
+    });
+    assert.equal(projectKey?.expiresAt ?? null, null);
   });
 });

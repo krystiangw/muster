@@ -321,6 +321,12 @@ export interface ProjectDoc {
   firstWriteAt?: Date;
   claimedBy: string | null;
   claimedAt: Date | null;
+  /**
+   * When this project last mailed its operator that an agent is waiting. The
+   * stamp is the throttle, so it lives next to the project rather than in a
+   * process that a restart would forget.
+   */
+  escalationNotifiedAt?: Date | null;
   /** Unclaimed demo projects are swept by a TTL index. Null once claimed. */
   expiresAt: Date | null;
   createdAt: Date;
@@ -340,6 +346,12 @@ export interface ApiKeyDoc {
   createdAt: Date;
   lastUsedAt: Date | null;
   revokedAt: Date | null;
+  /**
+   * Whether this key's `expiresAt` is its own lifetime rather than the
+   * project's. Claiming a project clears the expiry off everything that only
+   * expired because the project did; a one hour access token is not that.
+   */
+  ownExpiry?: boolean;
 }
 
 /**

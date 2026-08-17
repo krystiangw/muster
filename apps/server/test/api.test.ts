@@ -727,10 +727,21 @@ describe('a report from somebody with no account', () => {
       // The second report said nothing about who sent it, so the last writer is
       // the anonymous one. That is the truth about who touched it last, which
       // is what the field means everywhere else in this system.
-      assert.equal(item.last_actor, 'a passing agent');
+      assert.equal(item.last_actor, 'guest:anonymous');
+      // And a name given by a stranger can never be an agent handle, which is
+      // `[a-z0-9._-]`. Otherwise anybody could sign a report `errors-loop`.
       assert.ok(
-        item.timeline.some((entry: { by: string }) => entry.by === 'kanga-arbitrage'),
+        item.timeline.some((entry: { by: string }) => entry.by === 'guest:kanga-arbitrage'),
         'and the first reporter is still in the record',
+      );
+      // The second report is a note on the first, not a rewrite of it: what
+      // the first reporter wrote survives, which is what the receipt promises.
+      assert.equal(item.body, 'Seen twice on our fleet.');
+      assert.ok(
+        item.timeline.some((entry: { message: string }) =>
+          entry.message.includes('reported again: Third time.'),
+        ),
+        'and the second report is on the record too',
       );
     } finally {
       await nominated.stop();
@@ -771,6 +782,67 @@ describe('a report from somebody with no account', () => {
       ).json().item;
       assert.equal(untouched.title, 'real work');
       assert.deepEqual(untouched.labels, []);
+    } finally {
+      await open.stop();
+    }
+  });
+
+  it('cannot blank the triage somebody wrote onto a report', async () => {
+    // Inside the namespace, a second send used to rewrite the item: same title,
+    // new body, labels reset to ['feedback']. So anybody who could read a
+    // report could delete whatever the operator had recorded about it, by
+    // sending its title back with different words.
+    const seeded = await startHarness();
+    const host = await createProject(seeded, 'triaged inbox');
+    await seeded.stop();
+    const open = await startHarness({
+      MONGODB_DB: seeded.config.mongoDb,
+      FEEDBACK_PROJECT: host.id,
+    });
+    try {
+      const filed = await open.server.inject({
+        method: 'POST',
+        url: '/feedback',
+        payload: { title: 'Claims outlive the process', body: 'what the reporter wrote' },
+      });
+      const slug = filed.json().slug;
+
+      // The operator triages it the way they would triage anything.
+      await open.server.inject({
+        method: 'POST',
+        url: `${host.api}/items`,
+        headers: authed(host),
+        payload: {
+          slug,
+          body: 'confirmed, and here is what we know',
+          labels: ['feedback', 'confirmed'],
+          owner: 'alex',
+          actor: 'operator',
+        },
+      });
+
+      await open.server.inject({
+        method: 'POST',
+        url: '/feedback',
+        payload: { title: 'Claims outlive the process', body: 'OWNED', from: 'errors-loop' },
+      });
+
+      const item = (
+        await open.server.inject({
+          method: 'GET',
+          url: `${host.api}/items/${encodeURIComponent(slug)}`,
+          headers: authed(host),
+        })
+      ).json().item;
+      assert.equal(item.body, 'confirmed, and here is what we know');
+      assert.deepEqual(item.labels, ['feedback', 'confirmed']);
+      assert.equal(item.owner, 'alex');
+      // The new words are not lost, they are just not in charge of the item.
+      assert.ok(
+        item.timeline.some((entry: { message: string }) => entry.message.includes('OWNED')),
+      );
+      // And a stranger claiming an existing handle is still a stranger.
+      assert.equal(item.last_actor, 'guest:errors-loop');
     } finally {
       await open.stop();
     }

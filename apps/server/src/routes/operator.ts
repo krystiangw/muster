@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
 import type { Mailer } from '../email.js';
-import { chip, escapeHtml, formatWhen, layout } from '../html.js';
+import { chip, escapeHtml, layout, when } from '../html.js';
 import { who } from '../identity.js';
 import { hashToken, newId, newOtpCode } from '../ids.js';
 import type { RateLimiter } from '../rateLimit.js';
@@ -419,17 +419,17 @@ and you can end that from the view itself.</p>
       context: string,
       agent: string,
       priority: string,
-      when: Date,
+      at: Date,
     ) => `
 <div class="card">
   <p class="label">${escapeHtml(names.get(projectId) ?? projectId)} &middot; ${escapeHtml(agent)}
-     &middot; ${escapeHtml(formatWhen(when))} ${priority === 'urgent' || priority === 'high' ? chip(priority, 'blocked') : ''}</p>
+     &middot; ${when(at)} ${priority === 'urgent' || priority === 'high' ? chip(priority, 'blocked') : ''}</p>
   <p style="font-size:17px"><b>${escapeHtml(text)}</b></p>
   ${context ? `<p style="color:var(--ink-2);white-space:pre-wrap">${escapeHtml(context)}</p>` : ''}
   <form method="post" action="/operator/escalations/${escapeHtml(id)}">
     ${csrfField(session)}
     <label>Your answer<textarea name="answer" placeholder="The decision, in your words."></textarea></label>
-    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px">
+    <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:8px;align-items:start">
       <button type="submit" name="status" value="answered">Answer</button>
       <button class="ghost" type="submit" name="status" value="resolved">Already handled</button>
       <button class="ghost" type="submit" name="status" value="wont_do">Won't do</button>
@@ -460,7 +460,7 @@ ${offers
     const project = offeredById.get(offer.projectId);
     if (!project) return '';
     return `<div class="card">
-  <p class="label">${escapeHtml(offer.offeredBy)} &middot; ${escapeHtml(formatWhen(offer.createdAt))}</p>
+  <p class="label">${escapeHtml(offer.offeredBy)} &middot; ${when(offer.createdAt)}</p>
   <p style="font-size:17px;margin:0 0 4px"><b>${escapeHtml(project.name)}</b></p>
   ${project.description ? `<p style="color:var(--ink-2);margin:0 0 8px">${escapeHtml(project.description)}</p>` : ''}
   ${offer.note ? `<p style="color:var(--ink-2);margin:0 0 8px">${escapeHtml(offer.note)}</p>` : ''}
@@ -493,14 +493,14 @@ lives on.</p>
 ${mine
   .map((item) => {
     const held = item.claim && new Date(item.claim.expiresAt) > new Date();
-    return `<tr><td>${escapeHtml(names.get(item.projectId) ?? item.projectId)}</td>
-       <td>${escapeHtml(item.title || item.slug)}<br>
+    return `<tr><td data-label="Project">${escapeHtml(names.get(item.projectId) ?? item.projectId)}</td>
+       <td data-label="Item">${escapeHtml(item.title || item.slug)}<br>
            <span class="mono" style="color:var(--muted)">${escapeHtml(item.slug)}</span></td>
-       <td>${item.status === 'blocked' ? chip('blocked', 'blocked') : ''}
+       <td data-label="State">${item.status === 'blocked' ? chip('blocked', 'blocked') : ''}
            ${held ? chip(item.claim!.agent, 'claim') : ''}
            ${item.stale ? chip('stale', 'stale') : ''}
            ${item.owner ? chip(item.owner, 'dropped') : ''}</td>
-       <td class="mono">${escapeHtml(formatWhen(item.updatedAt))}</td></tr>`;
+       <td class="mono" data-label="Last touched">${when(item.updatedAt)}</td></tr>`;
   })
   .join('\n')}
 </tbody></table></div>
@@ -522,14 +522,15 @@ page assumes the front of your address means you. Anything else, say so.</p>
 ${projects
   .map(
     (project) =>
-      `<tr><td>${escapeHtml(project.name)}${
+      `<tr><td data-label="Project">${escapeHtml(project.name)}${
         project.description
           ? `<br><span style="color:var(--ink-2);font-size:13.5px">${escapeHtml(project.description)}</span>`
           : ''
       }<br><span class="mono" style="color:var(--muted)">${escapeHtml(project._id)}</span></td>
-       <td class="mono">${project.counts.items}</td><td class="mono">${project.counts.agents}</td>
-       <td class="mono">${waiting.filter((doc) => doc.projectId === project._id).length}</td>
-       <td><a href="/r/${escapeHtml(project.readToken)}/board">board</a><br>
+       <td class="mono" data-label="Open items">${project.counts.items}</td>
+       <td class="mono" data-label="Agents">${project.counts.agents}</td>
+       <td class="mono" data-label="Waiting">${waiting.filter((doc) => doc.projectId === project._id).length}</td>
+       <td data-label="Go to"><a href="/r/${escapeHtml(project.readToken)}/board">board</a><br>
            <a href="/r/${escapeHtml(project.readToken)}">questions</a>
            <form method="post" action="/operator/projects/${escapeHtml(project._id)}/keys"
                  style="margin-top:6px">
@@ -564,9 +565,9 @@ flagged them rather than closing them, because deciding they are dead is your ca
 ${staleItems
   .map(
     (item) =>
-      `<tr><td>${escapeHtml(names.get(item.projectId) ?? item.projectId)}</td>
-       <td class="mono">${escapeHtml(item.slug)}</td>
-       <td class="mono">${escapeHtml(formatWhen(item.staleSince))}</td></tr>`,
+      `<tr><td data-label="Project">${escapeHtml(names.get(item.projectId) ?? item.projectId)}</td>
+       <td class="mono" data-label="Item">${escapeHtml(item.slug)}</td>
+       <td class="mono" data-label="Stale since">${when(item.staleSince)}</td></tr>`,
   )
   .join('\n')}
 </tbody></table></div>`
@@ -589,7 +590,7 @@ ${
         : `<ul class="timeline">${recent
             .map(
               (doc) =>
-                `<li><span class="when">${escapeHtml(formatWhen(doc.answeredAt))}</span>
+                `<li><span class="when">${when(doc.answeredAt)}</span>
                  <span class="who">${escapeHtml(doc.status)}</span>
                  <span>${escapeHtml(doc.question)}${
                    doc.answer ? `<br><span style="color:var(--ink-2)">${escapeHtml(doc.answer)}</span>` : ''
@@ -597,9 +598,7 @@ ${
                    // Whether it landed. This is the page most answers are
                    // written on, so it is the page that owes the answer back.
                    doc.acknowledgedAt
-                     ? `<br><span class="why">${who(doc.acknowledgedBy ?? 'an agent')} acted ${escapeHtml(
-                         formatWhen(doc.acknowledgedAt),
-                       )}${doc.acknowledgedNote ? `: ${escapeHtml(doc.acknowledgedNote)}` : ''}</span>`
+                     ? `<br><span class="why">${who(doc.acknowledgedBy ?? 'an agent')} acted ${when(doc.acknowledgedAt)}${doc.acknowledgedNote ? `: ${escapeHtml(doc.acknowledgedNote)}` : ''}</span>`
                      : ''
                  }</span></li>`,
             )

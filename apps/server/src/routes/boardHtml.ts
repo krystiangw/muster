@@ -1,7 +1,7 @@
 import type { AgentFacet, BoardFacets, BoardFilter, BoardView } from '../board.js';
 import { BOARD_PRESETS, COLUMN_RENDER_LIMIT, applyForColumn } from '../board.js';
 import { boardConfigJson } from '../serialize.js';
-import { chip, escapeHtml, formatWhen } from '../html.js';
+import { chip, escapeHtml, when } from '../html.js';
 import { who } from '../identity.js';
 import type { ItemDoc, ProjectDoc, TimelineEntry } from '../types.js';
 
@@ -114,7 +114,21 @@ function card(item: ItemDoc, now: Date, move: string, agents?: Map<string, strin
     }
     ${item.stale ? chip('stale', 'stale') : ''}
     ${(item.labels ?? []).slice(0, 3).map((label) => chip(label, 'open')).join(' ')}
-    <span class="slug">${escapeHtml(formatWhen(item.updatedAt))}</span>
+  </div>
+  <div class="foot">
+    <span class="slug">${when(item.updatedAt, now)}</span>
+    ${
+      // The number every queue and every column sorts by, and the card did not
+      // show it at all. Signed, because higher is more urgent here and every
+      // other tracker somebody has used numbers the other way round: "+3" and
+      // "-2" carry the direction in the glyph. Zero is ordinary work and says
+      // nothing, so a board that never sets a priority looks no busier.
+      item.priority
+        ? `<span class="prio" title="priority, higher is more urgent, -10 to 10">${
+            item.priority > 0 ? '+' : ''
+          }${item.priority}</span>`
+        : ''
+    }
   </div>
   ${move}
 </article>`;
@@ -150,14 +164,21 @@ function preview(
       ${whoChips(item, claimed, agents)}
       ${item.stale ? chip('stale', 'stale') : ''}
       ${item.source ? chip(`from ${item.source}`, 'note') : ''}
-      ${item.priority ? chip(`priority ${item.priority}`, 'open') : ''}
+      ${
+        item.priority
+          ? `<span class="chip note" title="higher is more urgent, -10 to 10">priority ${
+              item.priority > 0 ? '+' : ''
+            }${item.priority}</span>`
+          : ''
+      }
       ${(item.labels ?? []).map((label) => chip(label, 'open')).join(' ')}
     </div>
     ${item.body ? `<p class="body">${escapeHtml(item.body)}</p>` : '<p class="none">No description. Whoever picks this up should write one.</p>'}
     ${
       claimed
-        ? `<p class="why">Held by ${escapeHtml(item.claim!.agent)}, lease until ${escapeHtml(
-            formatWhen(item.claim!.expiresAt),
+        ? `<p class="why">Held by ${escapeHtml(item.claim!.agent)}, lease expires ${when(
+            item.claim!.expiresAt,
+            now,
           )}.</p>`
         : ''
     }
@@ -166,7 +187,7 @@ function preview(
         ? `<ul class="timeline">
 ${timeline
   .map(
-    (entry) => `      <li><span class="when">${escapeHtml(formatWhen(entry.at))}</span>
+    (entry) => `      <li><span class="when">${when(entry.at, now)}</span>
         <span class="who${entry.by === 'hygiene' ? ' hygiene' : ''}">${
           entry.by === 'hygiene' ? escapeHtml(entry.by) : who(entry.by)
         }</span>
@@ -177,9 +198,7 @@ ${timeline
         : ''
     }
     ${edit}
-    <p class="why">updated ${escapeHtml(formatWhen(item.updatedAt))} &middot; created ${escapeHtml(
-      formatWhen(item.createdAt),
-    )} &middot; ${item.timelineCount} timeline entr${item.timelineCount === 1 ? 'y' : 'ies'}</p>
+    <p class="why">updated ${when(item.updatedAt, now)} &middot; created ${when(item.createdAt, now)} &middot; ${item.timelineCount} timeline entr${item.timelineCount === 1 ? 'y' : 'ies'}</p>
   </div>
 </div>`;
 }
@@ -259,6 +278,16 @@ export interface BoardRenderOptions {
   facets?: BoardFacets;
 }
 
+/** Every narrowing in force, in words, for the line above the board. */
+function narrowedTo(view: BoardView): string[] {
+  return [
+    view.filter.owner ? `owner ${view.filter.owner}` : '',
+    view.filter.agent ? `agent ${view.filter.agent}` : '',
+    view.filter.label ? `label ${view.filter.label}` : '',
+    view.filter.q ? `"${view.filter.q}"` : '',
+  ].filter(Boolean);
+}
+
 export function renderBoard(view: BoardView, options: BoardRenderOptions = {}): string {
   const now = options.now ?? new Date();
   const targets: MoveTarget[] = options.moveAction
@@ -275,15 +304,25 @@ export function renderBoard(view: BoardView, options: BoardRenderOptions = {}): 
   return `${options.notice ? `<p class="notice">${escapeHtml(options.notice)}</p>` : ''}
 ${options.filters ?? ''}
 ${
-    view.filter.owner || view.filter.agent
-      ? `<p class="notice"><b>Narrowed to ${escapeHtml(
-          [
-            view.filter.owner ? `owner ${view.filter.owner}` : '',
-            view.filter.agent ? `agent ${view.filter.agent}` : '',
-          ]
-            .filter(Boolean)
-            .join(' and '),
-        )}.</b> The counts below are of that work, not of the whole board.</p>`
+    // Every way of narrowing, not only two of the four. A search or a label
+    // that matched nothing used to produce four empty columns and no sentence,
+    // which reads as an empty board rather than as an empty result.
+    narrowedTo(view).length > 0
+      ? `<p class="notice"><b>Narrowed to ${escapeHtml(narrowedTo(view).join(' and '))}.</b> ${
+          shown.length === 0
+            ? 'Nothing matches.'
+            : 'The counts below are of that work, not of the whole board.'
+        }</p>`
+      : ''
+  }
+${
+    // What the columns hold, in one line. On a phone the board is a strip two
+    // hundred pixels wide that scrolls sideways, so "is anything blocked" took
+    // three swipes to answer.
+    lanes.length === 1 && lanes[0]!.columns.length > 0
+      ? `<p class="tally">${lanes[0]!.columns
+          .map((cell) => `${escapeHtml(cell.title)} <b>${cell.count}</b>`)
+          .join(' &middot; ')}</p>`
       : ''
   }
 <div class="board">
@@ -484,10 +523,16 @@ export function renderBoardSettings(
   warnings: string[] = [],
 ): string {
   const current = JSON.stringify(boardConfigJson(view.config), null, 2);
-  return `<h2>Layout</h2>
-${warnings
-  .map((warning) => `<div class="notice warn">${escapeHtml(warning)}</div>`)
-  .join('\n')}
+  // Folded shut. The layout is set once in a project's life and the board is
+  // read on every visit, and this section is five screens long on a phone: an
+  // editor, three presets and a reference table, all of it under the board it
+  // configures. A warning about the layout is the exception and stays outside,
+  // because a warning nobody opens is not a warning.
+  return `${warnings
+    .map((warning) => `<div class="notice warn">${escapeHtml(warning)}</div>`)
+    .join('\n')}
+<details class="layout">
+<summary>Layout: columns, swimlanes and presets</summary>
 <p>A column is a name and a filter over what an item already is: its status, its labels, its owner,
 whether somebody holds it, whether it went stale, where it came from. There is deliberately no way
 to invent a status here. That is what keeps a board with six columns from turning into six values
@@ -533,5 +578,6 @@ ${Object.entries(BOARD_PRESETS)
 <p>An item lands in the <b>first</b> column that matches, so order the columns the way you read them.
 Anything that matches nothing is reported above the board rather than hidden.</p>
 <p class="mono" style="color:var(--muted)">Same thing over the API:
-PUT ${escapeHtml(project._id ? `/v1/${project._id}/board` : '/v1/{project}/board')}</p>`;
+PUT ${escapeHtml(project._id ? `/v1/${project._id}/board` : '/v1/{project}/board')}</p>
+</details>`;
 }

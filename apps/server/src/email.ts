@@ -12,10 +12,25 @@ import type { Config } from './config.js';
  */
 export type Delivery = 'sent' | 'logged' | 'discarded';
 
+/** What one notification says about the project it came from. */
+export interface EscalationNotice {
+  projectName: string;
+  agent: string;
+  question: string;
+  /** How many questions on this project are open, this one included. */
+  waiting: number;
+  /** Where to answer it. The read link, or the sign in page for a private project. */
+  readUrl: string;
+  operatorUrl: string;
+  /** Whether that link asks them to sign in first. */
+  needsSignIn: boolean;
+}
+
 export interface Mailer {
   sendClaimCode(to: string, code: string, projectName: string): Promise<Delivery>;
   sendOperatorCode(to: string, code: string): Promise<Delivery>;
   sendOperatorLink(to: string, url: string, projectCount: number): Promise<Delivery>;
+  sendEscalation(to: string, notice: EscalationNotice): Promise<Delivery>;
 }
 
 /** Enough of an address to match it to a report, not enough to be a mailing list. */
@@ -108,6 +123,42 @@ export function createMailer(config: Config, log: (msg: string) => void): Mailer
         'If you did not ask for this, ignore the message. Nothing changed, and',
         'nobody learned anything about this address.',
       ]);
+    },
+    async sendEscalation(to, notice) {
+      // The subject carries the project and the count, because this arrives on
+      // a phone at three in the morning and the decision to open it now or at
+      // breakfast is made from the subject line alone.
+      const others = notice.waiting - 1;
+      return send(
+        to,
+        others > 0
+          ? `${notice.projectName}: ${notice.waiting} questions waiting for you`
+          : `${notice.projectName}: an agent is waiting on you`,
+        [
+          `${notice.agent} stopped and asked:`,
+          '',
+          notice.question,
+          '',
+          `Answer it here: ${notice.readUrl}`,
+          ...(others > 0
+            ? [`${others} other question(s) on this project are open on the same page.`]
+            : []),
+          '',
+          ...(notice.needsSignIn
+            ? [
+                'You narrowed this project to its owner, so that page asks for your',
+                'address and a six digit code first. No account, no password.',
+              ]
+            : [
+                'The page needs no sign in, so anyone holding that link can answer your',
+                'agents on your behalf. Treat it like a password.',
+                '',
+                `Every project you own: ${notice.operatorUrl}`,
+              ]),
+          '',
+          'One message per project per hour, whatever they ask in between.',
+        ],
+      );
     },
     async sendClaimCode(to, code, projectName) {
       // Without an API key the code goes to the log rather than nowhere, so a

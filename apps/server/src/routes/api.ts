@@ -3,6 +3,7 @@ import type { Config } from '../config.js';
 import type { Store } from '../db.js';
 import { maybeSweep, sweepProject } from '../hygiene.js';
 import { hashToken, isValidHandle, newOtpCode, newId, normalizeSlug } from '../ids.js';
+import type { Notifier } from '../notify.js';
 import { RateLimiter } from '../rateLimit.js';
 import { record, recordFirstWrite } from '../events.js';
 import {
@@ -29,7 +30,7 @@ import {
   answerEscalation,
   authenticate,
   claimItem,
-  claimProjectWithEmail,
+  verifyClaimCode,
   createApiKey,
   createEscalation,
   createProject,
@@ -75,10 +76,10 @@ export interface ApiDeps {
   config: Config;
   limiter: RateLimiter;
   mailer: Mailer;
+  notifier: Notifier;
 }
 
 const CLAIM_CODE_TTL_MS = 15 * 60_000;
-const MAX_CLAIM_ATTEMPTS = 5;
 
 function auth(request: FastifyRequest): AuthContext {
   if (!request.auth) {
@@ -114,7 +115,7 @@ export function clientIp(request: FastifyRequest): string {
 }
 
 export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
-  const { store, config, limiter, mailer } = deps;
+  const { store, config, limiter, mailer, notifier } = deps;
 
   // ---------------------------------------------------------------- signup
 
@@ -232,18 +233,47 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       }
 
       const body = request.body as { title: string; body?: string; from?: string; source?: string };
-      const from = (body.from ?? '').trim().slice(0, 48) || 'a passing agent';
+      // `guest:` cannot occur in a registered handle, which is `[a-z0-9._-]`.
+      // Without it, an anonymous reporter names itself `errors-loop` and its
+      // report is signed by an agent that never wrote it.
+      const from = `guest:${(body.from ?? '').trim().slice(0, 40) || 'anonymous'}`;
       // The namespace is not decoration: it is what stops an anonymous write
       // from touching any item that is not a report.
       const slug = `feedback:${normalizeSlug(body.title).slice(0, 80)}`;
-      const result = await upsertItem(store, project, {
-        slug,
-        title: body.title,
-        ...(body.body ? { body: body.body } : {}),
-        labels: ['feedback'],
-        ...(body.source ? { source: body.source.trim().slice(0, 48) } : {}),
-        actor: from,
-      });
+      // A second report of the same title lands as a note on the first, and
+      // touches nothing else. Writing the fields again would let any passer-by
+      // blank the triage somebody wrote into an existing report's body and
+      // labels, simply by sending its title back with different words. It is
+      // also what the receipt below has always claimed happens.
+      const existing = await store.items.findOne(
+        { projectId: project._id, slug },
+        { projection: { _id: 1 } },
+      );
+      const words = (body.body ?? '').trim();
+      const result = existing
+        ? await upsertItem(store, project, {
+            slug,
+            mustExist: true,
+            actor: from,
+            // A timeline entry, so the length that belongs in a report body
+            // does not belong here.
+            note: words
+              ? `reported again: ${words.slice(0, 800)}`
+              : 'reported again, with nothing to add',
+          })
+        : await upsertItem(store, project, {
+            slug,
+            title: body.title,
+            ...(words ? { body: words } : {}),
+            labels: ['feedback'],
+            ...(body.source ? { source: body.source.trim().slice(0, 48) } : {}),
+            actor: from,
+            // The check above is a read, so two reports of the same title in
+            // the same instant both pass it. This makes the write decide: the
+            // one that loses lands as a note and changes nothing else.
+            insertOnly: true,
+            note: words || 'reported',
+          });
       record(store, 'feedback', { door: 'http', projectId: project._id });
       return reply.code(result.created ? 201 : 200).send({
         ok: true,
@@ -923,6 +953,11 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         // After the write, not before: a question the cap refused was never
         // filed, and a log that says otherwise is worse than no log.
         record(store, 'escalate', { door: 'http', projectId: project._id });
+        // Awaited rather than fired off, so that a provider having a bad day
+        // shows up here as a slow escalation instead of an unhandled rejection
+        // in a log nobody reads. The notifier swallows its own failures: an
+        // undelivered message must not turn a filed question into a 500.
+        await notifier.escalationRaised(project, doc);
         return reply.code(201).send({
           escalation: escalationJson(doc),
           read_url: `${config.baseUrl}/r/${project.readToken}`,
@@ -1037,7 +1072,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           tags: ['escalations'],
           summary: 'Answers waiting for this agent',
           description:
-            'Four statuses, four meanings: answered (act on it), resolved (already handled, stop), wont_do (dropped, do not ask again), in_progress (the human is on it, wait).',
+            'Four statuses, four meanings: answered (act on it), resolved (already handled, stop), wont_do (dropped, do not ask again), in_progress (the human is on it, wait). `waiting` carries your own questions that nobody has answered yet, so an agent reading an empty inbox can tell "nothing came back" apart from "I never asked".',
           querystring: {
             type: 'object',
             properties: {
@@ -1069,7 +1104,20 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           .sort({ answeredAt: -1 })
           .limit(50)
           .toArray();
-        return { answers: docs.map((doc) => escalationJson(doc)) };
+        // An agent that read an empty inbox could not tell "the human has not
+        // answered yet" from "my question was never filed", and the second is a
+        // bug it should not paper over by asking again. So the still open ones
+        // come back too, oldest first, because the oldest is the one that has
+        // been holding work up the longest.
+        const waiting = await store.escalations
+          .find({ projectId: project._id, status: 'open', ...(agent ? { agent } : {}) })
+          .sort({ createdAt: 1 })
+          .limit(50)
+          .toArray();
+        return {
+          answers: docs.map((doc) => escalationJson(doc)),
+          waiting: waiting.map((doc) => escalationJson(doc)),
+        };
       },
     );
 
@@ -1403,35 +1451,8 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       async (request) => {
         const { project } = requireAdmin(request);
         const { email, code } = request.body as { email: string; code: string };
-        // The attempt is spent in the write that reads the code, so several
-        // guesses arriving together cannot all see the same count and slip past
-        // the ceiling between them. Expiry is checked here rather than left to
-        // the TTL index, which sweeps on its own schedule and runs late under
-        // load, so a fifteen minute code was quietly good for longer than the
-        // response promised.
-        const pending = await store.claimCodes.findOneAndUpdate(
-          {
-            projectId: project._id,
-            email: email.toLowerCase(),
-            expiresAt: { $gt: new Date() },
-            attempts: { $lt: MAX_CLAIM_ATTEMPTS },
-          },
-          { $inc: { attempts: 1 } },
-          { returnDocument: 'after' },
-        );
-        if (!pending) {
-          throw new ServiceError(
-            404,
-            'no_pending_claim',
-            'No claim is pending for that address, or it expired or ran out of attempts. Start the claim again.',
-          );
-        }
-        if (pending.codeHash !== hashToken(code)) {
-          throw new ServiceError(400, 'bad_code', 'That code does not match.');
-        }
-        await claimProjectWithEmail(store, project, email.toLowerCase(), config);
+        await verifyClaimCode(store, project, email, code, config);
         record(store, 'claim', { door: 'http', projectId: project._id });
-        await store.claimCodes.deleteMany({ projectId: project._id });
         const updated = await store.projects.findOne({ _id: project._id });
         return { ok: true, project: projectJson(updated!, config) };
       },

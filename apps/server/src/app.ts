@@ -6,6 +6,7 @@ import type { Config } from './config.js';
 import type { Store } from './db.js';
 import { createMailer, type Mailer } from './email.js';
 import { layout, setSiteVerification } from './html.js';
+import { createNotifier } from './notify.js';
 import { RateLimiter } from './rateLimit.js';
 import { registerAgentFiles } from './routes/agentfiles.js';
 import { registerApi } from './routes/api.js';
@@ -80,6 +81,12 @@ export async function buildApp(
 
   const limiter = new RateLimiter();
   const mailer = overrides.mailer ?? createMailer(config, (message) => server.log.info(message));
+  const notifier = createNotifier({
+    store,
+    config,
+    mailer,
+    log: (message) => server.log.info(message),
+  });
 
   /**
    * Security headers.
@@ -165,8 +172,8 @@ export async function buildApp(
 
   registerAgentFiles(server, config, store);
   registerOAuth(server, { store, config, limiter });
-  registerMcp(server, { store, config, limiter });
-  registerApi(server, { store, config, limiter, mailer });
+  registerMcp(server, { store, config, limiter, notifier });
+  registerApi(server, { store, config, limiter, mailer, notifier });
   registerOperator(server, { store, config, limiter, mailer });
   registerPublic(server, { store, config, limiter });
 

@@ -573,6 +573,7 @@ describe('the operator view', () => {
           sendOperatorCode: () => deliver(),
           sendClaimCode: async () => 'sent',
           sendOperatorLink: async () => 'sent',
+          sendEscalation: async () => 'sent',
         },
       },
     );

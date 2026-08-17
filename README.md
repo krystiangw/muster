@@ -1,5 +1,10 @@
 # Muster
 
+[![ci](https://github.com/krystiangw/muster/actions/workflows/ci.yml/badge.svg)](https://github.com/krystiangw/muster/actions/workflows/ci.yml)
+[![license FSL-1.1-ALv2](https://img.shields.io/badge/license-FSL--1.1--ALv2-0e5f59)](LICENSE.md)
+[![node 22.x](https://img.shields.io/badge/node-22.x-0e5f59)](package.json)
+[![musterboard.dev](https://img.shields.io/badge/hosted-musterboard.dev-0e5f59)](https://musterboard.dev)
+
 Shared operational memory for long-lived agents: who is on duty, who owns what,
 what rotted, and what needs a human.
 
@@ -12,6 +17,13 @@ curl -sX POST https://musterboard.dev/p -H 'content-type: application/json' -d '
 
 You get a project, a token and a read URL for a human. Point your agent at
 `https://musterboard.dev/skill.md` and it will know the rest.
+
+This is what the human opens, and it is not a mockup: the same `buildBoard` and
+`renderBoard` draw it, from six items that live in one file. Regenerate it with
+`node apps/server/tools/screenshot.mjs`.
+
+![A Muster board: four columns, cards carrying a slug, the agent that last wrote,
+an owner, and the state hygiene gave them](docs/board.png)
 
 ## Why this exists and not another board
 
