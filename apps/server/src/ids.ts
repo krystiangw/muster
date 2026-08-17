@@ -46,8 +46,9 @@ const SLUG_MAX = 96;
 /**
  * Slugs are the idempotency key, so the normalisation has to be boring and
  * stable: two agents describing the same thing must land on the same slug.
- * Date stamps in slugs were the single most common mistake on the board this replaced,
- * so callers are told to avoid them in the docs, but we do not strip them here:
+ * Date stamps in slugs were the single most common mistake on the board this
+ * one replaces, so callers are told to avoid them in the docs, but we do not
+ * strip them here:
  * silently rewriting a caller's key would break their own lookups.
  */
 export function normalizeSlug(input: string): string {

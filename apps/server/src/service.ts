@@ -443,7 +443,7 @@ export async function touchAgent(store: Store, projectId: string, handle: string
 /**
  * Advisory scope matching. A scope token matches an item when it is a prefix of
  * the slug, one of its labels, or its owner. Nothing here blocks a write: the
- * the board this replaced incident that motivated it was solved socially, by making the boundary
+ * incident that motivated it was solved socially, by making the boundary
  * visible, not by locking agents out of each other's tickets.
  */
 export function itemInScope(scope: string[], item: Pick<ItemDoc, 'slug' | 'labels' | 'owner'>): boolean {
@@ -981,8 +981,8 @@ export interface NextResult {
  *
  * Scope first: an agent with a declared scope is offered its own work before
  * anyone else's, and if there is none it is told so rather than handed a
- * neighbour's ticket. That is the whole fix for the scope drift that cost the
- * board this replaced two strikes and an operator escalation.
+ * neighbour's ticket. That is the whole fix for the scope drift that cost two
+ * strikes and an operator escalation on the board this one replaces.
  */
 export async function nextItem(
   store: Store,
@@ -1066,8 +1066,8 @@ export interface ObserveResult {
 /**
  * Reports which items of a mirrored source are still present. Everything else
  * from that source starts, or continues, an absence streak. This is the
- * generic form of the audit-sync it replaced, and the reason the absence rule can be a
- * rule instead of a bespoke service.
+ * generic form of the audit-sync it replaces, and the reason the absence rule
+ * can be a rule instead of a bespoke service.
  */
 export async function observe(
   store: Store,

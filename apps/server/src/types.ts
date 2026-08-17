@@ -2,9 +2,9 @@
  * Domain types.
  *
  * The status enum is deliberately tiny. The audit that led to this project
- * found the opposite on a real board: eleven
- * statuses, nine owner lanes and four action classes, whose enum copies drifted
- * twice and left 63 tickets unroutable. Anything richer than these four values
+ * found the opposite on a real board: eleven statuses, nine owner lanes and
+ * four action classes, whose enum copies drifted twice and left 63 tickets
+ * unroutable. Anything richer than these four values
  * belongs in `fields`, where it cannot break routing.
  *
  * "In progress" is not a status. An item is being worked on when it has a live
@@ -153,8 +153,8 @@ export interface HygieneRules {
   /**
    * Close an item whose source signal has been absent for `observations`
    * consecutive observation rounds AND at least `minHours` of wall clock.
-   * Both guards are required: the board this replaced learned the hard way that either one alone
-   * closes live tickets during a sync blip.
+   * Both guards are required: the board this one replaces learned the hard way
+   * that either one alone closes live tickets during a sync blip.
    */
   absenceResolve: { observations: number; minHours: number } | null;
   /** Drop items that never got a title or body within this many hours. null disables. */

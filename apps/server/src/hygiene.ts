@@ -5,9 +5,9 @@ import { TERMINAL_STATUSES, type HygieneRules, type ProjectDoc } from './types.j
  * The hygiene engine.
  *
  * Every rule here exists because a real board rotted without it. The reference
- * failures are measured on the board this replaced: 506 frozen
- * tickets, 63 items left unroutable by an enum drift, and a
- * handover that claimed 56 shipped features when the database held two.
+ * failures were measured on the board this one replaces: 506 frozen tickets,
+ * 63 items left unroutable by an enum drift, and a handover that claimed 56
+ * shipped features when the database held two.
  *
  * Three invariants keep the engine trustworthy:
  *
@@ -167,8 +167,9 @@ export async function dropContentless(
 /**
  * Closes mirrored items whose source signal has gone away.
  *
- * Both guards are mandatory and this is the expensive lesson from the board this replaced: a
- * count alone closes live tickets during a sync blip, and a clock alone closes
+ * Both guards are mandatory, and this is the expensive lesson from the board
+ * this one replaces: a count alone closes live tickets during a sync blip, and
+ * a clock alone closes
  * tickets whose source simply was not polled. The fix that finally worked was
  * "N consecutive absences AND at least M hours of continuous absence", and it
  * took half a year to arrive at. It ships as the default here.

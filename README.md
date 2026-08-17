@@ -232,12 +232,11 @@ never adopt one on its own.
 
 ## Coming from another board
 
-`tools/` carries an importer that dry-runs by default and reads its
-source without writing to it:
+`tools/` carries an importer that dry-runs by default and reads its source
+without writing to it:
 
 ```bash
 node tools/import-operator-inbox.mjs                          # markdown inbox -> escalations
-node tools/import-legacy-board.mjs --file board.json          # a MongoDB board -> items
 ```
 
 An upsert accepts `history`: timeline entries with their original timestamps and
