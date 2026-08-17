@@ -6,6 +6,7 @@ import {
   DEFAULT_BOARD,
   ITEM_STATUSES,
   MAX_BOARD_COLUMNS,
+  TERMINAL_STATUSES,
   type BoardApply,
   type BoardColumn,
   type BoardConfig,
@@ -274,10 +275,12 @@ export async function moveItem(
     );
   }
 
-  const before = (await store.items.findOne({
-    projectId: project._id,
-    slug: normalizeSlug(options.slug),
-  })) as ItemDoc | null;
+  const slug = normalizeSlug(options.slug);
+  const before = (await store.items.findOne(
+    { projectId: project._id, slug },
+    // The timeline is the big field on an item and no part of a move reads it.
+    { projection: { status: 1, claim: 1 } },
+  )) as Pick<ItemDoc, 'status' | 'claim'> | null;
   if (!before) {
     throw new ServiceError(404, 'not_found', `No item with slug "${options.slug}" in this project.`);
   }
@@ -291,12 +294,34 @@ export async function moveItem(
     );
   }
 
-  const slug = normalizeSlug(options.slug);
   const note = options.note ?? `moved to ${column.title}`;
+  const now = new Date();
 
-  // The claim goes first because it is the only step that can legitimately
-  // fail: somebody else may be holding the item. Failing before anything has
-  // changed is better than a half-applied move.
+  // Refused before anything is written, not after the claim is taken. Moving a
+  // closed item back into a working column reopens it, and reopening costs a
+  // slot like any other open item; discovering that after the claim would leave
+  // a rejected request holding a lease on a closed item.
+  const reopens =
+    apply.status !== undefined &&
+    !TERMINAL_STATUSES.includes(apply.status) &&
+    TERMINAL_STATUSES.includes(before.status);
+  if (reopens && project.counts.items >= project.limits.items) {
+    throw new ServiceError(
+      429,
+      'limit_reached',
+      `This project is at its limit of ${project.limits.items} open items. Close something, or claim the project to lift the caps.`,
+    );
+  }
+
+  // The claim goes first because it is the step most likely to fail on somebody
+  // else's account: they may be holding the item. Anything that fails after it
+  // hands the lease back, so a rejected move leaves nothing behind.
+  const heldByUsAlready =
+    before.claim !== null &&
+    before.claim.agent === options.actor &&
+    new Date(before.claim.expiresAt) > now;
+  let ourClaimAt: Date | null = null;
+
   if (apply.claim) {
     const claimed = await claimItem(store, project, slug, options.actor);
     if (!claimed.ok) {
@@ -306,36 +331,84 @@ export async function moveItem(
         `"${slug}" is held by ${claimed.heldBy}, so it is already in a column for work in progress.`,
       );
     }
+    if (!heldByUsAlready) ourClaimAt = claimed.item?.claim?.claimedAt ?? null;
   }
 
-  const labels =
-    apply.addLabels || apply.removeLabels
-      ? [
-          ...new Set(
-            (before.labels ?? [])
-              .filter((label) => !(apply.removeLabels ?? []).includes(label))
-              .concat(apply.addLabels ?? []),
-          ),
-        ]
-      : undefined;
+  const undoClaim = async (): Promise<void> => {
+    if (!ourClaimAt) return;
+    // Only the lease this move took, and only if it is still exactly that one.
+    await store.items.updateOne(
+      { projectId: project._id, slug, 'claim.agent': options.actor, 'claim.claimedAt': ourClaimAt },
+      { $set: { claim: null } },
+    );
+  };
 
-  const { item } = await upsertItem(store, project, {
-    slug,
-    actor: options.actor,
-    note,
-    ...(apply.status === undefined ? {} : { status: apply.status }),
-    ...(apply.owner === undefined ? {} : { owner: apply.owner }),
-    ...(apply.priority === undefined ? {} : { priority: apply.priority }),
-    ...(labels === undefined ? {} : { labels }),
-  });
+  let current: ItemDoc;
+  try {
+    const result = await upsertItem(store, project, {
+      slug,
+      actor: options.actor,
+      note,
+      mustExist: true,
+      ...(apply.status === undefined ? {} : { status: apply.status }),
+      ...(apply.owner === undefined ? {} : { owner: apply.owner }),
+      ...(apply.priority === undefined ? {} : { priority: apply.priority }),
+    });
+    current = result.item;
+  } catch (error) {
+    await undoClaim();
+    throw error;
+  }
 
-  let current = item;
-  if (apply.release && current.claim) {
+  // Labels are applied in the database, not computed from the snapshot above:
+  // a move adds or removes its own labels and must not overwrite a label
+  // somebody else set while it was in flight.
+  if (apply.addLabels || apply.removeLabels) {
+    const remove = apply.removeLabels ?? [];
+    const add = apply.addLabels ?? [];
+    const relabelled = await store.items.findOneAndUpdate(
+      { projectId: project._id, slug },
+      [
+        {
+          $set: {
+            labels: {
+              $setUnion: [
+                {
+                  $filter: {
+                    input: { $ifNull: ['$labels', []] },
+                    as: 'label',
+                    cond: { $not: [{ $in: ['$$label', remove] }] },
+                  },
+                },
+                add,
+              ],
+            },
+            updatedAt: new Date(),
+          },
+        },
+      ],
+      { returnDocument: 'after' },
+    );
+    if (relabelled) current = relabelled as ItemDoc;
+  }
+
+  if (apply.release && before.claim) {
     // Not releaseItem: that one is an agent letting go of its own lease, and a
     // move out of "in progress" is usually somebody else deciding nobody is on
     // it. Who did it is in the timeline either way.
+    //
+    // Guarded on the lease this move set out to release, read before any of it
+    // ran. An expired claim is free for the taking, so somebody may have
+    // legitimately claimed the item since; clearing a lease that began after
+    // the move did would take work away from an agent that is doing it.
+    const held = before.claim;
     const released = await store.items.findOneAndUpdate(
-      { projectId: project._id, slug },
+      {
+        projectId: project._id,
+        slug,
+        'claim.agent': held.agent,
+        'claim.claimedAt': held.claimedAt,
+      },
       {
         $set: { claim: null, updatedAt: new Date(), touchedAt: new Date() },
         $push: {
@@ -345,7 +418,7 @@ export async function moveItem(
                 at: new Date(),
                 by: options.actor,
                 kind: 'released' as const,
-                message: `${note} (was held by ${current.claim.agent})`,
+                message: `${note} (was held by ${held.agent})`,
               },
             ],
             $slice: -TIMELINE_KEEP,
@@ -358,8 +431,9 @@ export async function moveItem(
     if (released) current = released as ItemDoc;
   }
 
-  const now = new Date();
-  const landed = config.columns.find((candidate) => itemMatches(current, candidate.match, now));
+  const landed = config.columns.find((candidate) =>
+    itemMatches(current, candidate.match, new Date()),
+  );
 
   return {
     item: current,

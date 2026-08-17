@@ -444,6 +444,14 @@ export interface UpsertItemInput {
    * admin-only, because backdating somebody else's words is not a worker's job.
    */
   history?: Array<{ at: string | Date; by?: string; message: string }>;
+  /**
+   * Refuse to create the item, with a 404 instead. Every ordinary write to a
+   * slug means "make this true", and creating it is right. A board move means
+   * "put that card in this column", and if the card was deleted while the move
+   * was in flight, recreating it as a blank item is a worse answer than saying
+   * it is gone.
+   */
+  mustExist?: boolean;
 }
 
 export interface UpsertItemResult {
@@ -530,6 +538,7 @@ export async function upsertItem(
   let applyStatus = input.status !== undefined;
 
   if (!existing) {
+    if (input.mustExist) throw notFound(slug);
     if (!willBeTerminal && atCapacity()) {
       throw limitReached('open items', project.limits.items);
     }
@@ -668,7 +677,11 @@ export async function upsertItem(
         $push: { timeline: { $each: entries, $slice: -TIMELINE_KEEP } },
         $inc: { timelineCount: entries.length },
       },
-      { upsert: true, returnDocument: 'after', includeResultMetadata: true },
+      {
+        upsert: input.mustExist !== true,
+        returnDocument: 'after',
+        includeResultMetadata: true,
+      },
     );
 
   let result;
@@ -684,6 +697,10 @@ export async function upsertItem(
     delete setOnInsert._id;
     result = await write();
   }
+
+  // Only reachable with mustExist: without it the write upserts and always
+  // returns a document. The item was deleted between the lookup above and here.
+  if (!result.value) throw notFound(slug);
 
   const created = !result.lastErrorObject?.updatedExisting;
   const item = result.value as ItemDoc;

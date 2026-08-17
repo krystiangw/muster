@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
+import { moveItem } from '../src/board.js';
 import { authed, createProject, startHarness, type Harness, type Project } from './helper.js';
 
 /**
@@ -513,6 +514,145 @@ describe('moving an item into a column', () => {
       add_labels: ['monitoring'],
       release: true,
     });
+  });
+
+  it('does not leave a lease behind on a move it refuses', async () => {
+    const isolated = await startHarness();
+    try {
+      const project = await createProject(isolated, 'full');
+      const write = (path: string, payload: unknown) =>
+        isolated.server.inject({
+          method: 'POST',
+          url: `${project.api}${path}`,
+          headers: authed(project),
+          payload: payload as Record<string, unknown>,
+        });
+
+      // Fill the project to its cap, then close one item so there is something
+      // to move back in without a slot to put it in.
+      const limits = (await isolated.store.projects.findOne({ _id: project.id }))!.limits.items;
+      for (let index = 0; index < limits; index += 1) {
+        await write('/items', { slug: `fill-${index}`, title: 'fill', actor: 'a' });
+      }
+      await write('/items', { slug: 'fill-0', title: 'fill', status: 'done', actor: 'a' });
+      for (let index = limits; index < limits + 1; index += 1) {
+        await write('/items', { slug: `fill-${index}`, title: 'fill', actor: 'a' });
+      }
+
+      const refused = await write('/items/fill-0/move', { column: 'doing', actor: 'worker' });
+      assert.equal(refused.statusCode, 429, 'reopening at the cap is refused');
+
+      const item = await isolated.store.items.findOne({ projectId: project.id, slug: 'fill-0' });
+      assert.equal(item!.claim, null, 'and the refused move holds nothing');
+      assert.equal(item!.status, 'done', 'and changed nothing');
+    } finally {
+      await isolated.stop();
+    }
+  });
+
+  it('keeps a label another writer added while the move was in flight', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'shared', title: 'shared', labels: ['triage'], actor: 'a' });
+    await put(project, '/board', {
+      columns: [
+        {
+          key: 'watching',
+          title: 'Watching',
+          match: { labels: ['monitoring'] },
+          apply: { add_labels: ['monitoring'], remove_labels: ['triage'] },
+        },
+        { key: 'rest', title: 'Rest', match: {} },
+      ],
+    });
+
+    // Somebody adds an unrelated label after the move read the item. Computing
+    // the whole array from a snapshot would drop it.
+    await harness.store.items.updateOne(
+      { projectId: project.id, slug: 'shared' },
+      { $push: { labels: 'urgent' } },
+    );
+
+    const moved = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items/shared/move`,
+      headers: authed(project),
+      payload: { column: 'watching', actor: 'mover' },
+    });
+    const labels = moved.json().item.labels as string[];
+    assert.ok(labels.includes('monitoring'), 'the move added its own label');
+    assert.ok(!labels.includes('triage'), 'and removed its own');
+    assert.ok(labels.includes('urgent'), 'and left the other writer’s alone');
+  });
+
+  it('reports an item deleted mid-move as gone instead of recreating it', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'vanishing', title: 'vanishing', actor: 'a' });
+    await harness.store.items.deleteOne({ projectId: project.id, slug: 'vanishing' });
+
+    const moved = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items/vanishing/move`,
+      headers: authed(project),
+      payload: { column: 'done', actor: 'mover' },
+    });
+    assert.equal(moved.statusCode, 404);
+    assert.equal(
+      await harness.store.items.countDocuments({ projectId: project.id, slug: 'vanishing' }),
+      0,
+      'a blank item was not conjured in its place',
+    );
+  });
+
+  it('does not revoke a claim taken after it read the item', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'contested', title: 'contested', actor: 'a' });
+    await post(project, '/items/contested/claim', { agent: 'first', ttl_minutes: 30 });
+    const doc = (await harness.store.projects.findOne({ _id: project.id }))!;
+
+    // Somebody claims the item in the instant after the move has read it, which
+    // is exactly what happens when the previous lease had expired and another
+    // agent picked the work up. That interleaving is the whole point of the
+    // guard and cannot be produced from outside the process, so the store hands
+    // the move its snapshot and then lets the other agent in.
+    let swapped = false;
+    const items = new Proxy(harness.store.items, {
+      get(target, prop, receiver) {
+        const value = Reflect.get(target, prop, receiver);
+        if (prop !== 'findOne') {
+          return typeof value === 'function' ? (value as Function).bind(target) : value;
+        }
+        return async (...args: unknown[]) => {
+          const found = await (value as Function).apply(target, args);
+          if (!swapped) {
+            swapped = true;
+            await harness.store.items.updateOne(
+              { projectId: project.id, slug: 'contested' },
+              {
+                $set: {
+                  claim: {
+                    agent: 'second',
+                    claimedAt: new Date(),
+                    heartbeatAt: new Date(),
+                    expiresAt: new Date(Date.now() + 1_800_000),
+                  },
+                },
+              },
+            );
+          }
+          return found;
+        };
+      },
+    });
+
+    const result = await moveItem({ ...harness.store, items }, doc, {
+      slug: 'contested',
+      column: 'todo',
+      actor: 'mover',
+    });
+
+    const item = await harness.store.items.findOne({ projectId: project.id, slug: 'contested' });
+    assert.equal(item!.claim?.agent, 'second', 'the newer holder keeps the item');
+    assert.equal(result.landedIn, 'doing', 'and the board says where it really is');
   });
 
   it('rate limits writes through a read link, which is a shareable capability', async () => {
