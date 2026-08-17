@@ -312,6 +312,74 @@ describe('the operator view', () => {
     assert.equal((await guess('123456')).statusCode, 400, 'the right code no longer helps');
   });
 
+  it('issues a new token to the owner when an agent loses one', async () => {
+    const project = await createProject(harness, 'lost the token');
+    await claimFor(project, 'owner@example.com');
+    const session = await signIn(harness, 'owner@example.com');
+
+    const issued = await harness.server.inject({
+      method: 'POST',
+      url: `/operator/projects/${project.id}/keys`,
+      payload: session.form({}),
+      headers: session.headers,
+    });
+    assert.equal(issued.statusCode, 200);
+    const token = issued.body.match(/<code>(mk_[a-z0-9]+)<\/code>/)?.[1];
+    assert.ok(token, 'the token is shown once, here');
+
+    // It works, and it is an admin key: the point is to be able to run the
+    // project again, not to get a second worker credential.
+    const used = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/keys`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+    assert.equal(used.statusCode, 200);
+
+    // The one that was merely lost still works. Somebody here because a key
+    // leaked revokes it explicitly instead.
+    const old = await harness.server.inject({
+      method: 'GET',
+      url: project.api,
+      headers: authed(project),
+    });
+    assert.equal(old.statusCode, 200);
+  });
+
+  it('will not issue a token for somebody else’s project', async () => {
+    const mine = await createProject(harness, 'mine');
+    const theirs = await createProject(harness, 'theirs');
+    await claimFor(mine, 'me@example.com');
+    await claimFor(theirs, 'them@example.com');
+    const session = await signIn(harness, 'me@example.com');
+
+    const attempt = await harness.server.inject({
+      method: 'POST',
+      url: `/operator/projects/${theirs.id}/keys`,
+      payload: session.form({}),
+      headers: session.headers,
+    });
+    assert.equal(attempt.statusCode, 404, 'and it does not say whether that project exists');
+
+    const unclaimed = await createProject(harness, 'nobody owns this');
+    const orphan = await harness.server.inject({
+      method: 'POST',
+      url: `/operator/projects/${unclaimed.id}/keys`,
+      payload: session.form({}),
+      headers: session.headers,
+    });
+    assert.equal(orphan.statusCode, 404, 'owning nothing is not owning everything');
+
+    // And a signed out browser gets nowhere near it.
+    const anonymous = await harness.server.inject({
+      method: 'POST',
+      url: `/operator/projects/${mine.id}/keys`,
+      payload: 'csrf=whatever',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    assert.equal(anonymous.statusCode, 401);
+  });
+
   it('does not reveal whether an address owns anything', async () => {
     const unknown = await harness.server.inject({
       method: 'POST',

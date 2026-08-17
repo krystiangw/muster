@@ -18,10 +18,10 @@ Watchdog czyta ten plik i podejmuje pierwszą niezaznaczoną pozycję.
   - [x] 1d. Token CSRF na każdym formularzu operatorskim (sesja w ciasteczku przywraca tę powierzchnię)
   - [x] 1e. Wylogowanie i "zakończ wszystkie sesje"
   - [x] 1f. Testy: logowanie kodem, wygasanie, CSRF odrzucane, brak enumeracji adresu
-- [ ] 2. Odzyskanie tokena projektu z widoku operatora
-  - [ ] 2a. `POST /operator/projects/:id/keys` wystawia nowy token admina właścicielowi
-  - [ ] 2b. Widoczne w widoku operatora per projekt, z ostrzeżeniem że token pokazuje się raz
-  - [ ] 2c. Testy: tylko właściciel, tylko z sesją, stare klucze nietknięte
+- [x] 2. Odzyskanie tokena projektu z widoku operatora
+  - [x] 2a. `POST /operator/projects/:id/keys` wystawia nowy token admina właścicielowi
+  - [x] 2b. Widoczne w widoku operatora per projekt, z ostrzeżeniem że token pokazuje się raz
+  - [x] 2c. Testy: tylko właściciel, tylko z sesją, stare klucze nietknięte
 - [ ] 3. Prywatność projektu po przejęciu
   - [ ] 3a. `visibility: 'link' | 'owner'` na projekcie, domyślnie `link`
   - [ ] 3b. `owner` wymaga sesji z adresem równym `claimedBy` na `/r/<token>` i `/r/<token>/board`

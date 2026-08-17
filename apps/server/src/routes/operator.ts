@@ -5,7 +5,7 @@ import type { Mailer } from '../email.js';
 import { chip, escapeHtml, formatWhen, layout } from '../html.js';
 import { hashToken, newId, newOtpCode } from '../ids.js';
 import type { RateLimiter } from '../rateLimit.js';
-import { ServiceError, acceptShare, answerEscalation } from '../service.js';
+import { ServiceError, acceptShare, answerEscalation, createApiKey } from '../service.js';
 import {
   checkCsrf,
   csrfField,
@@ -357,7 +357,13 @@ ${projects
        <td class="mono">${project.counts.items}</td><td class="mono">${project.counts.agents}</td>
        <td class="mono">${waiting.filter((doc) => doc.projectId === project._id).length}</td>
        <td><a href="/r/${escapeHtml(project.readToken)}/board">board</a><br>
-           <a href="/r/${escapeHtml(project.readToken)}">questions</a></td></tr>`,
+           <a href="/r/${escapeHtml(project.readToken)}">questions</a>
+           <form method="post" action="/operator/projects/${escapeHtml(project._id)}/keys"
+                 style="margin-top:6px">
+             ${csrfField(session)}
+             <button class="ghost" type="submit"
+                     title="For an agent that lost its token">new token</button>
+           </form></td></tr>`,
   )
   .join('\n')}
 </tbody></table></div>
@@ -424,6 +430,47 @@ ${
     }
     await acceptShare(store, config, session.email, id);
     return reply.redirect('/operator', 303);
+  });
+
+  /**
+   * A new admin token for a project this person owns.
+   *
+   * Until now, losing the token was final: the agent that held it could no
+   * longer write, and there was no path from owning a project back to a
+   * credential for it. Ownership was already proved by email, so the only
+   * missing piece was a button. Existing keys are left alone, because the usual
+   * reason to be here is that one was lost rather than leaked; revoking the
+   * others is a separate, deliberate act on the keys endpoint.
+   */
+  app.post('/operator/projects/:id/keys', { schema: { hide: true } }, async (request, reply) => {
+    const session = await requireSession(request, reply);
+    if (!session) return reply;
+    checkCsrf(session, request.body);
+
+    const { id } = request.params as { id: string };
+    const project = await store.projects.findOne({ _id: id, claimedBy: session.email });
+    if (!project) {
+      throw new ServiceError(404, 'not_found', 'No project of yours with that id.');
+    }
+    const { token } = await createApiKey(store, project, {
+      name: `issued from the operator view on ${new Date().toISOString().slice(0, 10)}`,
+      role: 'admin',
+    });
+
+    return html(
+      reply,
+      'A new token',
+      `<h1>A new token for ${escapeHtml(project.name)}</h1>
+       <div class="notice"><b>Copy it now.</b> It is shown once and stored only as a hash.</div>
+       <div class="card"><p class="label">token</p><pre><code>${escapeHtml(token)}</code></pre></div>
+       <p>Give it to the agent that lost the old one. Every key that already worked still works;
+       if the old one leaked rather than got lost, revoke it explicitly:</p>
+       <pre><code>curl -s ${escapeHtml(config.baseUrl)}/v1/${escapeHtml(project._id)}/keys \\
+  -H "authorization: Bearer ${escapeHtml(token)}"
+curl -sX DELETE ${escapeHtml(config.baseUrl)}/v1/${escapeHtml(project._id)}/keys/$KEY_ID \\
+  -H "authorization: Bearer ${escapeHtml(token)}"</code></pre>
+       <p><a href="/operator">Back to your projects</a></p>`,
+    );
   });
 
   app.post('/operator/escalations/:id', { schema: { hide: true } }, async (request, reply) => {
