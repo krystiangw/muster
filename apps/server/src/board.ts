@@ -231,7 +231,14 @@ export async function loadBoard(
     narrowed.agent = options.agent;
     // Holding it counts, and so does having been the last to write to it. An
     // agent that finished a piece of work an hour ago still wants to find it.
-    query.$or = [{ 'claim.agent': options.agent }, { lastActor: options.agent }];
+    //
+    // The claim has to be live. An expired one is not a claim anywhere else in
+    // this system, and counting it here would put somebody else's item on an
+    // agent's board hours after its lease ran out.
+    query.$or = [
+      { 'claim.agent': options.agent, 'claim.expiresAt': { $gt: new Date() } },
+      { lastActor: options.agent },
+    ];
   }
 
   const items = (await store.items

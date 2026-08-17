@@ -1,4 +1,4 @@
-import type { BoardView } from '../board.js';
+import type { BoardFilter, BoardView } from '../board.js';
 import { BOARD_PRESETS, COLUMN_RENDER_LIMIT, applyForColumn } from '../board.js';
 import { boardConfigJson } from '../serialize.js';
 import { chip, escapeHtml, formatWhen } from '../html.js';
@@ -21,11 +21,24 @@ import type { ItemDoc, ProjectDoc, TimelineEntry } from '../types.js';
  * in them: a column that is a pure view has nothing to apply, so offering it
  * here would only produce an error.
  */
-function moveForm(item: ItemDoc, from: string, targets: MoveTarget[], action: string): string {
+function moveForm(
+  item: ItemDoc,
+  from: string,
+  targets: MoveTarget[],
+  action: string,
+  keep: BoardFilter,
+): string {
   const options = targets.filter((target) => target.key !== from);
   if (options.length === 0) return '';
   return `<form class="move" method="post" action="${escapeHtml(action)}">
     <input type="hidden" name="slug" value="${escapeHtml(item.slug)}">
+    ${
+      // Moving a card off a narrowed board must not throw the narrowing away:
+      // somebody looking at one agent's work wants to still be there afterwards.
+      keep.owner ? `<input type="hidden" name="owner" value="${escapeHtml(keep.owner)}">` : ''
+    }${
+      keep.agent ? `<input type="hidden" name="agent" value="${escapeHtml(keep.agent)}">` : ''
+    }
     <label class="sr-only" for="mv-${escapeHtml(from)}-${escapeHtml(item.slug)}">Move ${escapeHtml(item.slug)} to</label>
     <select id="mv-${escapeHtml(from)}-${escapeHtml(item.slug)}" name="column">
 ${options
@@ -44,15 +57,24 @@ ${options
  * writer is the next best one, marked as a past tense so the two do not read
  * the same.
  */
-function whoChips(item: ItemDoc, claimed: boolean): string {
+function whoChips(item: ItemDoc, claimed: boolean, agents?: Map<string, string>): string {
   const parts: string[] = [];
-  if (claimed) parts.push(chip(item.claim!.agent, 'claim'));
-  else if (item.lastActor) parts.push(chip(`last: ${item.lastActor}`, 'note'));
+  // A handle says which agent; its registered description says what that agent
+  // is for, which is the thing somebody reading the board actually wants and
+  // which nobody should have to look up in another view.
+  const named = (handle: string, text: string, kind: string): string => {
+    const about = agents?.get(handle);
+    return about
+      ? `<span title="${escapeHtml(about)}">${chip(text, kind)}</span>`
+      : chip(text, kind);
+  };
+  if (claimed) parts.push(named(item.claim!.agent, item.claim!.agent, 'claim'));
+  else if (item.lastActor) parts.push(named(item.lastActor, `last: ${item.lastActor}`, 'note'));
   if (item.owner) parts.push(chip(`owner: ${item.owner}`, 'dropped'));
   return parts.join(' ');
 }
 
-function card(item: ItemDoc, now: Date, move: string): string {
+function card(item: ItemDoc, now: Date, move: string, agents?: Map<string, string>): string {
   const claimed = item.claim !== null && new Date(item.claim.expiresAt) > now;
   const classes = ['card', item.stale ? 'is-stale' : '', claimed ? 'is-claimed' : '']
     .filter(Boolean)
@@ -65,7 +87,7 @@ function card(item: ItemDoc, now: Date, move: string): string {
     <span class="t">${escapeHtml(item.title || '(no title)')}</span>
   </a>
   <div class="meta">
-    ${whoChips(item, claimed)}
+    ${whoChips(item, claimed, agents)}
     ${item.stale ? chip('stale', 'stale') : ''}
     ${(item.labels ?? []).slice(0, 3).map((label) => chip(label, 'open')).join(' ')}
     <span class="slug">${escapeHtml(formatWhen(item.updatedAt))}</span>
@@ -83,7 +105,12 @@ function card(item: ItemDoc, now: Date, move: string): string {
  * a real title, and truncating without anywhere to read the rest is a board
  * that hides what it is about.
  */
-function preview(item: ItemDoc, now: Date, timeline: TimelineEntry[]): string {
+function preview(
+  item: ItemDoc,
+  now: Date,
+  timeline: TimelineEntry[],
+  agents?: Map<string, string>,
+): string {
   const claimed = item.claim !== null && new Date(item.claim.expiresAt) > now;
   return `<div class="peeked" id="${escapeHtml(item._id)}">
   <a class="scrim" href="#" aria-label="Close"></a>
@@ -95,7 +122,7 @@ function preview(item: ItemDoc, now: Date, timeline: TimelineEntry[]): string {
     <h3>${escapeHtml(item.title || '(no title)')}</h3>
     <div class="meta">
       ${chip(item.status, item.status)}
-      ${whoChips(item, claimed)}
+      ${whoChips(item, claimed, agents)}
       ${item.stale ? chip('stale', 'stale') : ''}
       ${item.source ? chip(`from ${item.source}`, 'note') : ''}
       ${item.priority ? chip(`priority ${item.priority}`, 'open') : ''}
@@ -144,6 +171,8 @@ export interface BoardRenderOptions {
   timelines?: Map<string, TimelineEntry[]>;
   /** Rendered above the board when it can be narrowed by owner or agent. */
   filters?: string;
+  /** Agent handle to its registered description, shown on the handle itself. */
+  agents?: Map<string, string>;
 }
 
 export function renderBoard(view: BoardView, options: BoardRenderOptions = {}): string {
@@ -193,7 +222,10 @@ ${lane.columns
                 card(
                   item,
                   now,
-                  options.moveAction ? moveForm(item, cell.key, targets, options.moveAction) : '',
+                  options.moveAction
+                    ? moveForm(item, cell.key, targets, options.moveAction, view.filter)
+                    : '',
+                  options.agents,
                 ),
               )
               .join('\n')
@@ -222,7 +254,9 @@ ${
       ? '<p class="notice warn">This board has more items than one page reads, so the counts are partial.</p>'
       : ''
   }
-${shown.map((item) => preview(item, now, options.timelines?.get(item._id) ?? [])).join('\n')}`;
+${shown
+  .map((item) => preview(item, now, options.timelines?.get(item._id) ?? [], options.agents))
+  .join('\n')}`;
 }
 
 /**

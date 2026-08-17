@@ -775,11 +775,22 @@ describe('a board many agents write to', () => {
     assert.equal(todo.claim, null);
     assert.equal(todo.last_actor, 'scoring-loop', 'the last writer is on an item nobody holds');
 
+    await post(project, '/agents', {
+      handle: 'errors-loop',
+      scope: ['errors:'],
+      description: 'classifies runtime errors',
+    });
+
     const readToken = project.readUrl.split('/r/')[1]!;
     const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
     assert.match(page.body, /errors-loop/i);
     assert.match(page.body, /last: scoring-loop/i);
     assert.match(page.body, /owner:/i, 'owners are labelled as owners, not left bare');
+    assert.match(
+      page.body,
+      /title="classifies runtime errors"/,
+      'a handle carries what that agent is for, so nobody looks it up elsewhere',
+    );
   });
 
   it('does not let hygiene claim to be the last one working', async () => {
@@ -829,6 +840,50 @@ describe('a board many agents write to', () => {
 
     const whole = await board(project);
     assert.deepEqual(whole.filter, {}, 'an unfiltered board says so rather than staying silent');
+  });
+
+  it('drops an agent’s items from their board once the lease lapses', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'lapsing', title: 'lapsing', actor: 'somebody-else' });
+    await post(project, '/items/lapsing/claim', { agent: 'errors-loop', ttl_minutes: 30 });
+    // Another agent writes after the claim, so lastActor is no longer the holder.
+    await post(project, '/items/lapsing/timeline', { actor: 'somebody-else', message: 'looked' });
+
+    const held = await board(project, '?agent=errors-loop');
+    assert.equal(held.rows[0].columns.flatMap((c: { items: unknown[] }) => c.items).length, 1);
+
+    await harness.store.items.updateOne(
+      { projectId: project.id, slug: 'lapsing' },
+      { $set: { 'claim.expiresAt': new Date(Date.now() - 60_000) } },
+    );
+
+    const lapsed = await board(project, '?agent=errors-loop');
+    assert.equal(
+      lapsed.rows[0].columns.flatMap((c: { items: unknown[] }) => c.items).length,
+      0,
+      'an expired claim is not a claim here either',
+    );
+  });
+
+  it('stays on the same narrowed board after moving a card', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'mine', title: 'mine', owner: 'alex', actor: 'a' });
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    const page = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?owner=alex`,
+    });
+    assert.match(page.body, /<input type="hidden" name="owner" value="alex">/);
+
+    const moved = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/move`,
+      payload: 'slug=mine&column=done&owner=alex',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    assert.equal(moved.statusCode, 303);
+    assert.match(moved.headers.location as string, /owner=alex/);
   });
 
   it('offers only names that have work behind them', async () => {

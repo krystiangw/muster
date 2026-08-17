@@ -596,13 +596,21 @@ ${
       owner?: string;
       agent?: string;
     };
-    const [view, facets] = await Promise.all([
+    const [view, facets, registered] = await Promise.all([
       loadBoard(store, project, {
         ...(query.owner ? { owner: query.owner.slice(0, 48) } : {}),
         ...(query.agent ? { agent: query.agent.slice(0, 48) } : {}),
       }),
       boardFacets(store, project),
+      store.agents.find({ projectId: project._id }).limit(50).toArray(),
     ]);
+    // A handle is which agent; the description it registered is what that agent
+    // is for. Carrying it onto the card means nobody has to look it up.
+    const agents = new Map(
+      registered
+        .filter((agent) => agent.description)
+        .map((agent) => [agent.handle, agent.description] as const),
+    );
 
     // A move redirects back here saying what it did. The message is built from
     // the board's own columns rather than carried in the URL, so a crafted link
@@ -625,6 +633,7 @@ ${renderBoard(view, {
   moveAction: `${boardUrl}/move`,
   filters: renderBoardFilters(view, facets, boardUrl),
   timelines: await recentTimelines(store, project._id, view),
+  agents,
   ...(notice ? { notice } : {}),
 })}
 
@@ -696,7 +705,12 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`)}
   app.post('/r/:readToken/board/move', { schema: { hide: true } }, async (request, reply) => {
     if (!limitWrites(request, reply)) return reply;
     const { readToken } = request.params as { readToken: string };
-    const form = (request.body ?? {}) as { slug?: string; column?: string };
+    const form = (request.body ?? {}) as {
+      slug?: string;
+      column?: string;
+      owner?: string;
+      agent?: string;
+    };
     const project = await store.projects.findOne({ readToken });
     if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
     if (!form.slug || !form.column) {
@@ -708,9 +722,13 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`)}
       column: form.column,
       actor: 'operator',
     });
+    // Back to the board they were actually looking at. Somebody working through
+    // one agent's queue should not be thrown to the whole board by moving a card.
     const params = new URLSearchParams({
       moved: result.item.slug,
       landed: result.landedIn ?? '',
+      ...(form.owner ? { owner: form.owner.slice(0, 48) } : {}),
+      ...(form.agent ? { agent: form.agent.slice(0, 48) } : {}),
     });
     return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
   });
