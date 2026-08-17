@@ -98,6 +98,11 @@ const row = (label, value) => console.log(`  ${label.padEnd(28)} ${String(value)
 console.log(`\nMuster, ${new Date().toISOString().slice(0, 16).replace('T', ' ')}\n`);
 
 console.log('The funnel, since events were first recorded');
+// Said out loud, because the section below counts documents rather than
+// events, and the two disagree by construction: a project claimed before this
+// log existed is claimed on the board and absent from the funnel. Reading that
+// as a contradiction is how somebody ends up "fixing" a number that is right.
+console.log('  (events, not documents: anything that happened before this log started is missing)');
 row('reads of the protocol', discovered);
 row('created a project', signups);
 row('registered an agent', registered[0]?.n ?? 0);
