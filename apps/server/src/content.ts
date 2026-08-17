@@ -60,6 +60,13 @@ curl -sX POST $MUSTER/items -H "authorization: Bearer $TOKEN" \\
        "actor":"errors-loop","labels":["withdraw"],"priority":2}'
 \`\`\`
 
+\`priority\` is a whole number from -10 to 10 and **higher means more urgent**;
+0 is ordinary work, and it is what you get if you say nothing. Every queue in
+Muster sorts by it downwards, so an item you file as 2 is offered before one
+filed as 1 and after one filed as 3. Getting this backwards is the easiest
+mistake to make here, and it is silent: \`/next\` keeps answering, it just
+answers with the wrong work.
+
 This is an upsert. The slug is the identity: calling it again updates the same
 item instead of creating a second one. **Never put a date in a slug.** Two
 sessions describing the same problem must land on the same slug, and a date

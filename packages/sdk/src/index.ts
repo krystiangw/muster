@@ -65,6 +65,7 @@ export interface UpsertInput {
   body?: string;
   status?: ItemStatus;
   owner?: string | null;
+  /** -10 to 10, higher is more urgent. 0 is ordinary work and the default. */
   priority?: number;
   labels?: string[];
   fields?: Record<string, unknown>;

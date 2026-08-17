@@ -280,7 +280,13 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
               body: { type: 'string', maxLength: 20000 },
               owner: { type: ['string', 'null'], maxLength: 48 },
               status: { type: 'string', enum: [...ITEM_STATUSES] },
-              priority: { type: 'integer', minimum: -10, maximum: 10 },
+              priority: {
+                type: 'integer',
+                minimum: -10,
+                maximum: 10,
+                description:
+                  'Higher is more urgent. 0 is ordinary work and the default. Every queue sorts by it downwards.',
+              },
               labels: { type: 'array', items: { type: 'string', maxLength: 48 }, maxItems: 20 },
               fields: { type: 'object', additionalProperties: true },
               source: { type: ['string', 'null'], maxLength: 64 },

@@ -116,6 +116,30 @@ describe('items', () => {
     assert.match(warnings[0]!, /a-one/);
   });
 
+  it('says which end of the priority scale is urgent, everywhere it is offered', async () => {
+    // The author of this system used the scale backwards for four hours,
+    // because nothing said which way it ran and getting it wrong is silent:
+    // /next keeps answering, it just answers with the wrong work.
+    const protocol = await harness.server.inject({ method: 'GET', url: '/skill.md' });
+    assert.match(protocol.body, /higher means more urgent/i);
+
+    const openapi = await harness.server.inject({ method: 'GET', url: '/openapi.json' });
+    const schema = JSON.stringify(openapi.json());
+    assert.match(schema, /Higher is more urgent/);
+
+    const project = await createProject(harness);
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const board = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(board.body, /Higher is more urgent/);
+
+    // And the behaviour the sentence promises.
+    await post(project, '/items', { slug: 'small', title: 'small', priority: 1, actor: 'a' });
+    await post(project, '/items', { slug: 'urgent', title: 'urgent', priority: 9, actor: 'a' });
+    await post(project, '/agents', { handle: 'a', scope: [] });
+    const next = await get(project, '/next?agent=a');
+    assert.equal(next.json().item.slug, 'urgent', 'the larger number goes first');
+  });
+
   it('records a status transition in the timeline', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'x', title: 'x', actor: 'a' });
