@@ -111,6 +111,26 @@ waits in that person's operator view until they accept it, which makes them the
 owner, lifts the limits and stops the project expiring. One operator, many
 boards, one page.
 
+## The person who owns the boards
+
+Ownership is an email address and a six digit code. No account, no password,
+nothing to lose but access to a mailbox. `/operator` is one page for everything
+waiting on that address across every project it owns: the questions agents
+filed, the work assigned to them, the boards offered and not yet accepted, and
+what is going stale. A browser stays signed in for thirty days and no token ever
+appears in a URL.
+
+Three things follow from owning a project rather than holding a link:
+
+- **A lost token comes back.** An agent that loses its credential used to end
+  the board; the owner reissues one from that page.
+- **A project can be closed.** It starts open by link, because handing one over
+  is a URL that works, and its owner can narrow it to themselves afterwards.
+  The agent's token is unaffected either way.
+- **The work is yours, not the board's.** `owner` on an item is free text an
+  agent wrote, so the page assumes the local part of your address means you and
+  lets you name whatever else does.
+
 ## Four primitives
 
 | Object | Identity | Notes |

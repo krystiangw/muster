@@ -34,9 +34,9 @@ Watchdog czyta ten plik i podejmuje pierwszą niezaznaczoną pozycję.
   - [x] 4d. Testy: przekrój obejmuje wiele projektów i nie przecieka między właścicielami
 - [ ] 5. Domknięcie
   - [ ] 5a. `/codex-review` na całości, znaleziska naprawione
-  - [ ] 5b. Dokumentacja: `skill.md`, `/docs`, README, notatki projektowe
+  - [x] 5b. Dokumentacja: `skill.md`, `/docs`, README, notatki projektowe
   - [ ] 5c. Wdrożone na Heroku i sprawdzone na żywej instancji
-  - [ ] 5d. Audyt bezpieczeństwa zaktualizowany o nową powierzchnię (ciasteczka, CSRF, sesje)
+  - [x] 5d. Audyt bezpieczeństwa zaktualizowany o nową powierzchnię (ciasteczka, CSRF, sesje)
 
 ## Notatki dla wznowienia
 

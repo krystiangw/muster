@@ -213,3 +213,30 @@ under the same names.
 The same reasoning applies to validation: it lives in the domain layer, not in
 the HTTP schemas, because MCP arguments arrive from a model that may have
 invented them and end up in the same documents.
+
+
+## Durable access, short lived credentials
+
+The operator view began as a link that never expired with the credential in its
+path. That is durable in exactly the wrong direction. It survives being pasted
+into a chat, written to a log, or handed to the next site through a Referer
+header, and it dies the moment somebody loses the email that carried it. Both
+halves are backwards.
+
+A session inverts them. Getting back in is an address and six digits, the same
+gesture as claiming a project, so access is nearly impossible to lose: you would
+have to lose the mailbox. The thing that proves it is a cookie the browser will
+not hand to another site, it lasts thirty days, and it appears in no URL at all.
+
+Two costs came with it and both were worth paying. A cookie is ambient
+authority, so every operator form carries a CSRF token and the sentence "CSRF
+does not apply to this service" stopped being true the moment the first cookie
+existed. And a code is a credential with a short life, which means issuing and
+redeeming it have to be atomic: the first version read, checked and deleted in
+three writes, and a review pointed out that concurrent guesses all saw the same
+attempt count. It is one write each now.
+
+The rule the whole layer is built around: **email is additive**. An agent still
+creates a project with one anonymous POST and never needs a human. Everything
+here is for the person who ends up owning the result, and none of it is a gate
+in front of the agent.

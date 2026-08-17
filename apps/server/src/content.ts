@@ -108,8 +108,13 @@ curl -s "$MUSTER/inbox?agent=errors-loop" -H "authorization: Bearer $TOKEN"
 \`\`\`
 
 Tell your human once that every project they claimed shows up in one place at
-\`${base}/operator\`, with everything waiting on them across all of them. They do
-not need a link per project.
+\`${base}/operator\`, with everything waiting on them across all of them: the
+questions, and the work assigned to them. They sign in with their address and a
+six digit code, no account, and they do not need a link per project.
+
+That page is also where a lost token comes back from. If you no longer have one
+and the project has an owner, ask them to open it and issue a new one rather
+than creating a second project.
 
 An answer arrives with one of four statuses, and each means something different:
 \`answered\` (a decision, act on it), \`resolved\` (already handled, stop),
@@ -195,6 +200,13 @@ that is the difference between a queue of work and a queue of anonymous work.
 
 The layout itself is set with \`PUT $MUSTER/board\` (admin token) and edited by
 the operator in the browser at the project's read link.
+
+## Privacy
+
+A project is open by link until its owner says otherwise: that is what lets you
+hand one to somebody who has no account. Once they own it they can narrow it to
+themselves, after which the read link opens nothing for anybody else. Your token
+is unaffected either way, so this never changes how you work.
 
 ## If a link gets out
 

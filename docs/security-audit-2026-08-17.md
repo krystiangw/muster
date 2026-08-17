@@ -140,6 +140,42 @@ enumeracji z punktu 5.
   znanego i nieznanego; sprawdzone na produkcji, różnica w rozmiarze to sama
   długość wpisanego adresu.
 
+## Nowa powierzchnia z tego samego dnia: sesje operatora
+
+Po audycie doszła warstwa mailowa dla człowieka i zmienia dwa jego wnioski, więc
+zapisuję to tutaj, a nie osobno.
+
+**CSRF zaczyna dotyczyć.** Punkt „nie dotyczy, bo nie ma ciasteczek" przestał
+być prawdziwy w chwili, gdy pojawiło się pierwsze ciasteczko. Każdy formularz
+operatorski nosi token CSRF sprawdzany porównaniem stałoczasowym, ciasteczko ma
+`HttpOnly`, `SameSite=Lax` i `Secure` poza lokalnym runem, a widok zalogowanego
+dostaje `Cache-Control: private, no-store`.
+
+**Sekrety w URL-u przestały być jedyną drogą.** Link operatorski był wieczny i
+siedział w ścieżce, co audyt wytknął. Teraz wejściem jest adres i kod, sesja
+żyje w ciasteczku, a linki wysłane wcześniej działają dokładnie raz i wymieniają
+się na sesję. Wymiana wymaga naciśnięcia przycisku, bo skanery poczty pobierają
+każdy URL z wiadomości i jednorazowy link, który skaner potrafi spalić, to link,
+który nigdy nie działa.
+
+**Kody są atomowe.** Pierwsza wersja czytała, sprawdzała i kasowała w trzech
+zapisach: równoległe próby widziały ten sam licznik i przechodziły obok limitu
+pięciu, a dwa poprawne zgłoszenia jednorazowego kodu potrafiły oba się udać.
+Próba jest teraz wydawana w tym samym zapisie, który czyta kod, a kod zużywa
+kasowanie, więc z wyścigu wychodzi dokładnie jedna sesja. Ta sama poprawka
+poszła w claim projektu. Wygaśnięcie sprawdza odczyt, a nie indeks TTL, który
+sprząta wtedy, kiedy sam uzna.
+
+**Limity rozdzielone.** Proszenie o kod i wpisywanie kodu miały wspólny kubełek
+pięciu na godzinę, więc jedno logowanie kosztowało dwa sloty, a biuro za jednym
+adresem zamykało się samo. Wpisywanie kodu ma własny limit; sufitem zgadywania
+pozostaje pięć prób na kod.
+
+**Prywatność projektu.** `visibility: owner` zamyka link do odczytu dla
+wszystkich poza właścicielem, łącznie z kimś, kto skopiował link, gdy projekt
+był otwarty. Odmowa to 404 identyczne z tym dla złego linku. Zapisy przez link
+zamykają się razem z odczytem.
+
 ## Co zostaje na potem
 
 - **Limity są w pamięci procesu.** Przy jednym dynie to jest poprawne. Drugi
