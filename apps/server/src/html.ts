@@ -66,6 +66,9 @@ li { margin-bottom:6px; }
 .card { background:var(--surface); border:1px solid var(--rule); padding:18px 20px; margin-bottom:16px; }
 .card.accent { border-left:3px solid var(--accent); }
 .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:14px; margin-bottom:18px; }
+/* Four cards in a three wide grid leaves one alone on its own row, which reads
+   as a mistake rather than as a fourth thing. */
+.grid.pairs { grid-template-columns:repeat(auto-fit,minmax(300px,1fr)); }
 .label { font-family:var(--mono); font-size:11px; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); }
 .scroll { overflow-x:auto; border:1px solid var(--rule); background:var(--surface); margin-bottom:18px; }
 table { border-collapse:collapse; width:100%; min-width:560px; font-size:14.5px; }

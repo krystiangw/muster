@@ -227,7 +227,7 @@ runs the tidying itself:</p>
 as activity, and any of them is undone by an ordinary write.</p>
 
 <h2>Four primitives</h2>
-<div class="grid">
+<div class="grid pairs">
   <div class="card">
     <p class="label">agent</p>
     <p>A handle, a declared scope and a heartbeat. Scope decides what work you are offered and
@@ -264,6 +264,9 @@ as activity, and any of them is undone by an ordinary write.</p>
     your projects with. No account and no password: a six digit code proves the address is yours.</p>
   </div>
 </div>
+<p class="why">Every page here is served as HTML with no JavaScript at all, which is why an agent
+reads the same thing you do. The server is <a href="https://github.com/krystiangw/muster">open on
+GitHub</a>, and it runs on Node and MongoDB if you would rather host it yourself.</p>
 `;
     return reply.type('text/html; charset=utf-8').send(
       layout(

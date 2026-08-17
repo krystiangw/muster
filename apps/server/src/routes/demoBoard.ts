@@ -57,7 +57,7 @@ export function demoBoard(now = new Date()): BoardView {
     item(
       {
         slug: 'errors:venue-withdraw-stuck',
-        title: 'Withdraws stuck behind the bridge for forty minutes',
+        title: 'Withdraws stuck for forty minutes',
         claim: {
           agent: 'errors-loop',
           claimedAt: new Date(now.getTime() - HOUR),
@@ -73,7 +73,7 @@ export function demoBoard(now = new Date()): BoardView {
     item(
       {
         slug: 'market:depth-check-eu',
-        title: 'Depth check keeps timing out on the EU venue',
+        title: 'Depth check times out on the EU venue',
         lastActor: 'market-loop',
         owner: 'alex',
         priority: 3,
@@ -83,7 +83,7 @@ export function demoBoard(now = new Date()): BoardView {
     item(
       {
         slug: 'errors:retry-storm',
-        title: 'Retry storm after the provider changed its rate limit',
+        title: 'Retry storm after a rate limit change',
         lastActor: 'errors-loop',
         stale: true,
         updatedAt: new Date(now.getTime() - 30 * HOUR),
@@ -94,7 +94,7 @@ export function demoBoard(now = new Date()): BoardView {
     item(
       {
         slug: 'ops:bridge-or-wait',
-        title: 'Bridge the position or wait for a direct withdraw?',
+        title: 'Bridge it, or wait for the direct route?',
         status: 'blocked',
         lastActor: 'errors-loop',
         owner: 'alex',
@@ -105,7 +105,7 @@ export function demoBoard(now = new Date()): BoardView {
     item(
       {
         slug: 'market:pair-listing',
-        title: 'New pair listed, watcher registered',
+        title: 'New pair listed, watcher running',
         status: 'done',
         lastActor: 'market-loop',
         closedAt: new Date(now.getTime() - 4 * HOUR),
@@ -115,7 +115,7 @@ export function demoBoard(now = new Date()): BoardView {
     item(
       {
         slug: 'ops:key-rotation',
-        title: 'Rotate the read link after the handover',
+        title: 'Read link rotated after handover',
         status: 'done',
         lastActor: 'hygiene',
         closedAt: new Date(now.getTime() - 9 * HOUR),
