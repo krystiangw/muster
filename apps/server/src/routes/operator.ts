@@ -114,7 +114,7 @@ and you can end that from the view itself.</p>
   // ------------------------------------------------------------- signing in
 
   app.get('/operator', { schema: { hide: true } }, async (request, reply) => {
-    recordView(store, 'operator', request.headers['user-agent']);
+    recordView(store, 'operator', request);
     const session = await readSession(store, request);
     if (!session) return html(reply, 'Sign in to Muster', signInForm());
     return html(reply, 'Your Muster projects', await renderView(session), 200, true);
@@ -306,6 +306,9 @@ and you can end that from the view itself.</p>
     const { token } = request.params as { token: string };
     const record = await store.operatorTokens.findOne({ hash: hashToken(token) });
     if (!record) return noSuchLink(reply);
+
+    // The same page under an older door, so it counts under the same name.
+    recordView(store, 'operator', request);
 
     // Deliberately not spent by this GET. Mail security scanners and link
     // preview crawlers fetch every URL in a message before the person does, and

@@ -271,6 +271,29 @@ describe('counting the people, not the agents', () => {
     }
   });
 
+  it('counts a page only when somebody was shown one', async () => {
+    const project = await createProject(harness, 'guarded');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const before = await insights(harness.store);
+
+    // A stale bookmark and a token probe both end in a 404. Nobody read a page.
+    await harness.server.inject({ method: 'GET', url: '/r/r_does_not_exist' });
+    await harness.server.inject({ method: 'GET', url: '/r/r_does_not_exist/board' });
+    // Fastify answers HEAD from the same handler, and a HEAD carries no body.
+    await harness.server.inject({ method: 'HEAD', url: '/' });
+    await harness.server.inject({ method: 'HEAD', url: `/r/${readToken}` });
+    await flushEvents();
+
+    const quiet = await insights(harness.store);
+    assert.equal(quiet.pages.project ?? 0, before.pages.project ?? 0, 'a 404 is not a view');
+    assert.equal(quiet.pages.board ?? 0, before.pages.board ?? 0);
+    assert.equal(quiet.pages.landing ?? 0, before.pages.landing ?? 0, 'and neither is a HEAD');
+
+    await harness.server.inject({ method: 'GET', url: `/r/${readToken}` });
+    await flushEvents();
+    assert.equal((await insights(harness.store)).pages.project ?? 0, (before.pages.project ?? 0) + 1);
+  });
+
   it('does not count a crawler as a person', async () => {
     const before = (await insights(harness.store)).pages.signup ?? 0;
     for (const ua of ['Googlebot/2.1 (+http://www.google.com/bot.html)', 'curl/8.4.0', 'Bingbot']) {

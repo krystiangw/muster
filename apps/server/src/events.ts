@@ -156,8 +156,20 @@ export function record(
  * nothing. Crawlers are dropped rather than counted, because "how often are we
  * indexed" is a different question from "how many people looked".
  */
-export function recordView(store: Store, page: Viewable, userAgent: string | undefined): void {
-  if (isCrawler(userAgent)) return;
+/**
+ * Enough of a request to decide whether a person saw a page. Structural rather
+ * than the framework's type, so this file stays free of the web layer.
+ */
+export interface ViewedRequest {
+  method: string;
+  headers: { 'user-agent'?: string | undefined };
+}
+
+export function recordView(store: Store, page: Viewable, request: ViewedRequest): void {
+  // Fastify answers HEAD from the same handler as GET, so a probe that never
+  // received a body would otherwise read as somebody looking at the page.
+  if (request.method !== 'GET') return;
+  if (isCrawler(request.headers['user-agent'])) return;
   record(store, 'view', { door: 'browser', detail: page });
 }
 

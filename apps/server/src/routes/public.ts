@@ -147,7 +147,7 @@ export function registerPublic(app: FastifyInstance, deps: PublicDeps): void {
   // ------------------------------------------------------------- landing
 
   app.get('/', { schema: { hide: true } }, async (request, reply) => {
-    recordView(store, 'landing', request.headers['user-agent']);
+    recordView(store, 'landing', request);
     const body = `
 <h1>Shared operational memory for agents that outlive their sessions</h1>
 <p class="lead">Muster remembers who is on duty, who owns what, what rotted and what needs a
@@ -229,7 +229,7 @@ as activity, and any of them is undone by an ordinary write.</p>
   // ---------------------------------------------------------------- docs
 
   app.get('/docs', { schema: { hide: true } }, async (request, reply) => {
-    recordView(store, 'docs', request.headers['user-agent']);
+    recordView(store, 'docs', request);
     const body = `
 <h1>Docs</h1>
 <p class="lead">Everything below is served as plain HTML, with no JavaScript, because an agent
@@ -386,7 +386,7 @@ also how an existing inbox gets imported:</p>
   });
 
   app.get('/docs/keys', { schema: { hide: true } }, async (request, reply) => {
-    recordView(store, 'docs/keys', request.headers['user-agent']);
+    recordView(store, 'docs/keys', request);
     const body = `
 <h1>Keys and access</h1>
 <p class="lead">Every call is authenticated with a bearer token that belongs to exactly one
@@ -435,7 +435,7 @@ There is no authorization code flow, because there is no end user to ask for con
   });
 
   app.get('/pricing', { schema: { hide: true } }, async (request, reply) => {
-    recordView(store, 'pricing', request.headers['user-agent']);
+    recordView(store, 'pricing', request);
     const { demo, free } = config.tiers;
     const body = `
 <h1>Pricing</h1>
@@ -485,7 +485,7 @@ want us to run it under an agreement, and the free tier stays.</p>
   // -------------------------------------------------------------- signup
 
   app.get('/signup', { schema: { hide: true } }, async (request, reply) => {
-    recordView(store, 'signup', request.headers['user-agent']);
+    recordView(store, 'signup', request);
     const body = `
 <h1>Create a project</h1>
 <p class="lead">One field, no account. You will get a token and a link. An agent can do this same
@@ -551,7 +551,6 @@ address. Claiming is free and raises the limits:</p>
   // ----------------------------------------------------------- read view
 
   app.get('/r/:readToken', { schema: { hide: true } }, async (request, reply) => {
-    recordView(store, 'project', request.headers['user-agent']);
     const { readToken } = request.params as { readToken: string };
     const project = await store.projects.findOne({ readToken });
     if (!project) {
@@ -560,6 +559,9 @@ address. Claiming is free and raises the limits:</p>
     if (!(await readableBy(store, request, project))) {
       return reply.code(404).type('text/html; charset=utf-8').send(noSuchProject());
     }
+    // Counted once the page is actually going to be drawn. A stale bookmark and
+    // a token probe both end above this line, and neither is somebody reading.
+    recordView(store, 'project', request);
     void maybeSweep(store, project).catch(() => undefined);
 
     const [items, escalations, agents] = await Promise.all([
@@ -692,7 +694,6 @@ ${
   });
 
   app.get('/r/:readToken/board', { schema: { hide: true } }, async (request, reply) => {
-    recordView(store, 'board', request.headers['user-agent']);
     const { readToken } = request.params as { readToken: string };
     const project = await store.projects.findOne({ readToken });
     if (!project) {
@@ -701,6 +702,9 @@ ${
     if (!(await readableBy(store, request, project))) {
       return reply.code(404).type('text/html; charset=utf-8').send(noSuchProject());
     }
+    // Counted once the page is actually going to be drawn. A stale bookmark and
+    // a token probe both end above this line, and neither is somebody reading.
+    recordView(store, 'board', request);
     void maybeSweep(store, project).catch(() => undefined);
     const query = request.query as {
       moved?: string;
