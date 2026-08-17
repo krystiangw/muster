@@ -515,7 +515,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
         method: 'GET',
         url: `${base}/v1/{project}/board/facets`,
         notes:
-          'The owners and agents the board can be narrowed to with ?owner= or ?agent=, read from the items themselves.',
+          'The owners and agents the board can be narrowed to with ?owner= or ?agent=: every agent registered here, whether or not it has written anything yet, plus the names read off the items. agentsDescribed says what each one is for.',
       },
       {
         name: 'move',

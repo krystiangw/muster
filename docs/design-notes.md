@@ -76,8 +76,20 @@ That one field is also what makes the board answerable in two directions.
 `owner` is who a piece of work is assigned to; `agent` is who is actually on it,
 which is the claim holder or, for an item nobody holds, the last writer. They
 are different questions and a board that answers only one of them answers the
-wrong one about half the time. The names on offer are read from the items
-themselves, so a filter never offers a name with nothing behind it.
+wrong one about half the time.
+
+The names on offer are every agent registered in the project, followed by the
+names read off the items, in two groups so the difference is visible. A
+registered agent is offered before it has written anything, because registering
+is an agent saying it is here; a claim that lapsed is a leftover and its holder
+is not. Each registered name carries what the agent said it is for, since
+`loop-3` is a line number rather than a name, and the list is capped well above
+every plan's agent cap, so "all the agents" means all of them. Where a ceiling
+does bite, the page says how many it left out: a filter that silently drops
+names teaches people the same distrust as one that offers empty ones. And the
+name currently being filtered by is always in the list, even when nothing has
+work behind it any more, because a control that forgets its own value is worse
+than no control.
 
 ### A card is a summary, so the preview is the rest
 
