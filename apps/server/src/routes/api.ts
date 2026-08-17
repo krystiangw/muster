@@ -459,9 +459,15 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
               limit: { type: 'integer', minimum: 1, maximum: 200 },
               order: {
                 type: 'string',
-                enum: ['urgency', 'id'],
+                enum: ['urgency', 'id', 'recent'],
                 description:
-                  'urgency (default) is most urgent first. id is a stable order for reading everything back: priority and updatedAt change while you page, and an item that moves behind the cursor is an item your export never saw.',
+                  'urgency (default) is most urgent first. id is a stable order for reading everything back: priority and updatedAt change while you page, and an item that moves behind the cursor is one your export never saw. recent is the change feed: whatever happened last, first, and it is what `since` is for.',
+              },
+              since: {
+                type: 'string',
+                format: 'date-time',
+                description:
+                  'Only what changed at or after this moment. Pass back the as_of from your previous read rather than your own clock, which is not the one that stamped these rows.',
               },
               cursor: {
                 type: 'string',
@@ -477,7 +483,15 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         const { project } = auth(request);
         const query = request.query as Record<string, unknown>;
         const limit = Math.min(Math.max((query.limit as number | undefined) ?? 50, 1), 200);
-        const order: ItemOrder = query.order === 'id' ? 'id' : 'urgency';
+        const order: ItemOrder =
+          query.order === 'id' ? 'id' : query.order === 'recent' ? 'recent' : 'urgency';
+        const since = query.since ? new Date(String(query.since)) : undefined;
+        if (since && Number.isNaN(since.getTime())) {
+          throw new ServiceError(400, 'bad_since', 'since must be an ISO timestamp.');
+        }
+        // Stamped before the read, never after: anything written while this
+        // query ran must fall inside the next window rather than between them.
+        const asOf = new Date();
         const items = await listItems(store, project._id, {
           status: query.status as ItemStatus | undefined,
           owner: query.owner as string | undefined,
@@ -488,6 +502,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           limit,
           order,
           cursor: query.cursor as string | undefined,
+          ...(since ? { since } : {}),
         });
         return {
           items: items.map((item) => itemJson(item)),
@@ -495,6 +510,9 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           // spending one more request to find out.
           next_cursor:
             items.length === limit ? itemCursor(items[items.length - 1]!, order) : null,
+          // Hand this back as `since` next time. A poller using its own clock
+          // loses every row written in the gap between the two machines.
+          as_of: asOf.toISOString(),
         };
       },
     );
@@ -924,6 +942,11 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
             properties: {
               status: { type: 'string', enum: [...ESCALATION_STATUSES] },
               agent: { type: 'string' },
+              acknowledged: {
+                type: 'boolean',
+                description:
+                  'false is every answer nobody has acted on yet, whatever its status. That is the question a job asking "what is new for me" is actually asking.',
+              },
               limit: { type: 'integer', minimum: 1, maximum: 200 },
               cursor: {
                 type: 'string',
@@ -941,6 +964,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           agent?: string;
           limit?: number;
           cursor?: string;
+          acknowledged?: boolean;
         };
         const docs = await listEscalations(store, project._id, query);
         return {

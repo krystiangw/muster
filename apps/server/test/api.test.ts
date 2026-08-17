@@ -776,3 +776,77 @@ describe('a report from somebody with no account', () => {
     }
   });
 });
+
+describe('asking what changed', () => {
+  it('gives a window, an as_of to hand back, and does not lose the ties', async () => {
+    const project = await createProject(harness, 'changing');
+    await post(project, '/items', { slug: 'old', title: 'written before', actor: 'a' });
+
+    const first = (await get(project, '/items?order=recent&limit=50')).json();
+    assert.ok(first.as_of, 'the server stamps the window, not the caller');
+    const mark = first.as_of;
+
+    // Several writes in the same millisecond: a cursor on the timestamp alone
+    // would drop all but one, and in a change feed that is work never seen.
+    await Promise.all(
+      Array.from({ length: 8 }, (_, n) =>
+        post(project, '/items', { slug: `after-${n}`, title: `after ${n}`, actor: 'a' }),
+      ),
+    );
+
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const page: { items: Array<{ slug: string }>; next_cursor: string | null } = (
+        await get(
+          project,
+          `/items?order=recent&limit=3&since=${encodeURIComponent(mark)}${
+            cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''
+          }`,
+        )
+      ).json();
+      seen.push(...page.items.map((item) => item.slug));
+      cursor = page.next_cursor;
+    } while (cursor);
+
+    assert.equal(new Set(seen).size, 8, 'every change in the window, once');
+    assert.ok(!seen.includes('old'), 'and nothing from before it');
+  });
+
+  it('refuses a since it cannot read rather than answering with everything', async () => {
+    const project = await createProject(harness);
+    // Whichever guard catches it, the answer is a refusal and not the whole
+    // board: a poller that gets everything back thinks everything changed.
+    for (const bad of ['yesterday', '2026-13-45T99:99:99Z', '']) {
+      const answer = await get(project, `/items?order=recent&since=${encodeURIComponent(bad)}`);
+      assert.equal(answer.statusCode, 400, `since=${bad}`);
+    }
+  });
+
+  it('lists the answers nobody has acted on, whatever the operator decided', async () => {
+    const project = await createProject(harness, 'acted or not');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const ids: string[] = [];
+    for (const question of ['one', 'two']) {
+      ids.push(
+        (await post(project, '/escalations', { agent: 'a', question })).json().escalation.id,
+      );
+    }
+    for (const id of ids) {
+      await harness.server.inject({
+        method: 'POST',
+        url: `/r/${readToken}/escalations/${id}`,
+        payload: new URLSearchParams({ status: 'answered', answer: 'go' }).toString(),
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      });
+    }
+    await post(project, `/escalations/${ids[0]}/ack`, { agent: 'a' });
+
+    const waiting = (await get(project, '/escalations?acknowledged=false')).json().escalations;
+    assert.deepEqual(
+      waiting.map((e: { id: string }) => e.id),
+      [ids[1]],
+      'only the one nobody has acted on',
+    );
+  });
+});

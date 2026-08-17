@@ -12,19 +12,43 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "README.md", "LICENSE"],
-  "keywords": ["agents", "mcp", "coordination", "task", "memory", "multi-agent"],
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "agents",
+    "mcp",
+    "coordination",
+    "task",
+    "memory",
+    "multi-agent"
+  ],
   "engines": {
     "node": ">=20"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --import tsx --test test/*.test.ts"
+    "prepublishOnly": "npm run build"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/krystiangw/muster.git",
+    "directory": "packages/sdk"
+  },
+  "homepage": "https://musterboard.dev",
+  "bugs": {
+    "url": "https://github.com/krystiangw/muster/issues"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

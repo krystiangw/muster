@@ -927,8 +927,11 @@ export async function deleteItem(
   }
 }
 
-/** Most urgent first, or an order that cannot move under a long read. */
-export type ItemOrder = 'urgency' | 'id';
+/**
+ * Most urgent first, an order that cannot move under a long read, or the order
+ * a change feed needs: whatever happened last, first.
+ */
+export type ItemOrder = 'urgency' | 'id' | 'recent';
 
 export interface ListItemsQuery {
   status?: ItemStatus;
@@ -942,6 +945,11 @@ export interface ListItemsQuery {
   order?: ItemOrder;
   /** From a previous page's `next_cursor`, read in the same order. */
   cursor?: string;
+  /**
+   * Only what changed at or after this moment. Pass back the `as_of` from the
+   * previous read: your own clock is not the one that stamped these rows.
+   */
+  since?: Date;
 }
 
 /**
@@ -959,12 +967,25 @@ export interface ListItemsQuery {
  *    import nobody can verify is exactly what a migration must not have.
  */
 export function itemCursor(doc: ItemDoc, order: ItemOrder): string {
-  return order === 'id'
-    ? doc._id
-    : `${doc.priority}|${doc.updatedAt.toISOString()}|${doc._id}`;
+  if (order === 'id') return doc._id;
+  if (order === 'recent') return `${doc.updatedAt.toISOString()}|${doc._id}`;
+  return `${doc.priority}|${doc.updatedAt.toISOString()}|${doc._id}`;
 }
 
 function afterCursor(cursor: string, order: ItemOrder): Record<string, unknown> | null {
+  if (order === 'recent') {
+    // Both halves, because several writes land in the same millisecond all the
+    // time and a cursor on the timestamp alone skips every one of them but the
+    // first, which in a change feed means work that silently never arrives.
+    const at = cursor.lastIndexOf('|');
+    if (at === -1) return null;
+    const when = new Date(cursor.slice(0, at));
+    const id = cursor.slice(at + 1);
+    if (Number.isNaN(when.getTime()) || id === '') return null;
+    return {
+      $or: [{ updatedAt: { $lt: when } }, { updatedAt: when, _id: { $lt: id } }],
+    };
+  }
   if (order === 'id') {
     // An id cursor is opaque but not shapeless. Accepting anything here would
     // turn an urgency cursor passed to the wrong order into an empty page,
@@ -1001,7 +1022,10 @@ export async function listItems(
   if (query.claimed === true) filter.claim = { $ne: null };
   if (query.claimed === false) filter.claim = null;
 
-  const order: ItemOrder = query.order === 'id' ? 'id' : 'urgency';
+  const order: ItemOrder =
+    query.order === 'id' ? 'id' : query.order === 'recent' ? 'recent' : 'urgency';
+  const conditions: Record<string, unknown>[] = [];
+  if (query.since) conditions.push({ updatedAt: { $gte: query.since } });
   if (query.cursor) {
     const after = afterCursor(query.cursor, order);
     if (!after) {
@@ -1011,13 +1035,21 @@ export async function listItems(
         'That cursor does not belong to this order. Pass back the next_cursor you were given, with the same order=.',
       );
     }
-    Object.assign(filter, after);
+    conditions.push(after);
   }
+  // Both can constrain updatedAt, so they go side by side rather than one
+  // quietly overwriting the other on the way into the filter.
+  if (conditions.length === 1) Object.assign(filter, conditions[0]);
+  else if (conditions.length > 1) filter.$and = conditions;
 
   const limit = Math.min(Math.max(query.limit ?? 50, 1), 200);
   const projection = query.includeTimeline ? undefined : { timeline: 0 };
   const sort: Record<string, 1 | -1> =
-    order === 'id' ? { _id: 1 } : { priority: -1, updatedAt: -1, _id: -1 };
+    order === 'id'
+      ? { _id: 1 }
+      : order === 'recent'
+        ? { updatedAt: -1, _id: -1 }
+        : { priority: -1, updatedAt: -1, _id: -1 };
   return store.items
     .find(filter, projection ? { projection } : {})
     .sort(sort)
@@ -1318,11 +1350,16 @@ export async function listEscalations(
      * first.
      */
     cursor?: string;
+    acknowledged?: boolean;
   } = {},
 ): Promise<EscalationDoc[]> {
   const query: Record<string, unknown> = { projectId };
   if (filter.status) query.status = filter.status;
   if (filter.agent) query.agent = filter.agent;
+  // Whether anybody acted on it, which is a different question from what the
+  // human decided. A job asking "what is new for me" is asking this one.
+  if (filter.acknowledged === true) query.acknowledgedAt = { $ne: null };
+  if (filter.acknowledged === false) query.acknowledgedAt = null;
 
   if (filter.cursor) {
     const separator = filter.cursor.lastIndexOf('|');

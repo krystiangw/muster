@@ -343,11 +343,17 @@ export class Muster {
        * reading everything back: priority and updatedAt change while you page,
        * so an item that moves behind the cursor is one your export never saw.
        */
-      order?: 'urgency' | 'id';
+      order?: 'urgency' | 'id' | 'recent';
       /** From the previous page's `next_cursor`, in the same order. */
       cursor?: string;
+      /**
+       * Only what changed at or after this moment, as an ISO string. Pass back
+       * the `as_of` from your previous read: your clock is not the one that
+       * stamped these rows.
+       */
+      since?: string;
     } = {},
-  ): Promise<{ items: Item[]; next_cursor: string | null }> {
+  ): Promise<{ items: Item[]; next_cursor: string | null; as_of: string }> {
     return this.request('GET', '/items', undefined, {
       status: query.status,
       owner: query.owner,
@@ -357,6 +363,7 @@ export class Muster {
       limit: query.limit === undefined ? undefined : String(query.limit),
       order: query.order,
       cursor: query.cursor,
+      since: query.since,
     });
   }
 

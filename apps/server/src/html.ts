@@ -104,6 +104,18 @@ td .face { vertical-align:-3px; margin-right:4px; }
 .edit button.tag { font-family:var(--mono); font-size:11px; padding:3px 8px; border-radius:999px; }
 /* A control revealed by hover is a control that does not exist on a phone. */
 @media (hover: none) { .col .card .move { opacity:1; } }
+/* A line above the headline, saying who this page is for before it says what
+   the thing is. Cheap, and it stops the h1 from having to do both jobs. */
+.eyebrow { font-family:var(--mono); font-size:11.5px; letter-spacing:.1em; text-transform:uppercase;
+  color:var(--accent); margin:0 0 10px; }
+/* The board on the front page is a demonstration, not a control surface: it
+   sits in a frame that says "this is a picture of the product", and it never
+   grows past the reading column the way a real board is allowed to. */
+.demo { border:1px solid var(--rule); border-radius:4px; background:var(--surface);
+  padding:14px 14px 4px; margin:0 0 14px; overflow:hidden; }
+.demo .cols { grid-auto-columns:236px; }
+.demo .col { max-height:none; }
+.demo .card { cursor:default; }
 form { display:flex; flex-direction:column; gap:12px; max-width:440px; }
 form.row { flex-direction:row; align-items:flex-end; gap:10px; max-width:none; flex-wrap:wrap; }
 label { display:flex; flex-direction:column; gap:5px; font-size:14px; color:var(--ink-2); }
