@@ -173,6 +173,17 @@ export interface BoardView {
   rows: Array<{ key: string; title: string; columns: BoardCell[] }>;
 }
 
+export interface BoardFacets {
+  /** Every name a board can be narrowed to with `owner=`. */
+  owners: string[];
+  /** Every name a board can be narrowed to with `agent=`. */
+  agents: string[];
+  /** What each agent said it is for. Only the ones that said something. */
+  agentsDescribed: Array<{ handle: string; description: string; registered: boolean }>;
+  /** Names left out for length. Zero on every project anybody actually has. */
+  omitted: { owners: number; agents: number };
+}
+
 export interface MusterOptions {
   project: string;
   token: string;
@@ -489,10 +500,15 @@ export class Muster {
   }
 
   /**
-   * The owners and agents this board can be narrowed to, read from the items
-   * themselves so every name offered has work behind it.
+   * The owners and agents this board can be narrowed to: every agent registered
+   * in the project, whether or not it has written anything yet, plus the names
+   * read off the items.
+   *
+   * Both lists are plain strings, because those are the values that go back in
+   * as `owner=` and `agent=`. What each agent is for is a separate field, and
+   * `omitted` counts the names left out on a project too large to list.
    */
-  async boardFacets(): Promise<{ owners: string[]; agents: string[] }> {
+  async boardFacets(): Promise<BoardFacets> {
     return this.request('GET', '/board/facets');
   }
 

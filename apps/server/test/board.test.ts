@@ -950,6 +950,26 @@ describe('a board many agents write to', () => {
     assert.equal(described.omitted.agents, 0);
   });
 
+  it('lists the whole roster on the project page, each name a filtered board', async () => {
+    const project = await createProject(harness, 'roster');
+    await post(project, '/agents', {
+      handle: 'errors-loop',
+      scope: ['exchange'],
+      description: 'watches the exchange error feed',
+    });
+    await post(project, '/agents', { handle: 'quiet-loop', scope: [], description: '' });
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}` });
+    assert.match(
+      page.body,
+      new RegExp(`<a href="/r/${readToken}/board\\?agent=errors-loop">errors-loop</a>`),
+    );
+    assert.match(page.body, /watches the exchange error feed/);
+    assert.match(page.body, /quiet-loop/, 'a silent agent is still on the roster');
+    assert.match(page.body, /said nothing/);
+  });
+
   it('keeps the agent it is already filtered by in the list', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'one', title: 'one', actor: 'errors-loop' });

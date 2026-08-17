@@ -330,7 +330,13 @@ export function renderBoardFilters(view: BoardView, facets: BoardFacets, action:
     .concat(facets.owners.map((value) => option(value, value, view.filter.owner)))
     .join('\n      ');
 
-  const omitted = facets.omitted.owners + facets.omitted.agents;
+  // Each kind names its own parameter. One combined sentence pointing at
+  // `?agent=` sends somebody looking for a missing owner to a query that
+  // cannot select one.
+  const more = (count: number, kind: string, parameter: string): string =>
+    count === 0
+      ? ''
+      : `<span class="hint">${count} more ${kind}${count === 1 ? '' : 's'} exist; add <code>?${parameter}=</code> to the URL to use one.</span>`;
 
   return `<form class="row filters" method="get" action="${escapeHtml(action)}">
   <label>Owner
@@ -349,11 +355,8 @@ export function renderBoardFilters(view: BoardView, facets: BoardFacets, action:
       ? `<a class="ghost-link" href="${escapeHtml(action)}">whole board</a>`
       : ''
   }
-  ${
-    omitted > 0
-      ? `<span class="hint">${omitted} more name${omitted === 1 ? '' : 's'} exist; add <code>?agent=</code> to the URL to use one.</span>`
-      : ''
-  }
+  ${more(facets.omitted.owners, 'owner', 'owner')}
+  ${more(facets.omitted.agents, 'agent', 'agent')}
 </form>`;
 }
 

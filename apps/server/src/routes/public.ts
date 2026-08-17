@@ -631,16 +631,29 @@ ${items.length === 0 ? '<tr><td colspan="4" class="empty">Nothing yet.</td></tr>
 </tbody></table></div>
 
 <h2>Agents</h2>
+<p>Every handle here is a link to the board narrowed to it: what that agent holds, and what it was
+the last to write to.${
+      agents.length < (project.counts?.agents ?? agents.length)
+        ? ` ${(project.counts?.agents ?? 0) - agents.length} more have registered than fit here;
+these are the ones seen most recently.`
+        : ''
+    }</p>
 <div class="scroll"><table>
-<thead><tr><th>Handle</th><th>Scope</th><th>Last seen</th></tr></thead>
+<thead><tr><th>Handle</th><th>What it is for</th><th>Scope</th><th>Last seen</th></tr></thead>
 <tbody>
 ${
       agents.length === 0
-        ? '<tr><td colspan="3" class="empty">Nobody has registered yet.</td></tr>'
+        ? '<tr><td colspan="4" class="empty">Nobody has registered yet.</td></tr>'
         : agents
             .map(
               (agent) =>
-                `<tr><td class="mono">${escapeHtml(agent.handle)}</td><td class="mono">${escapeHtml(
+                `<tr><td class="mono"><a href="/r/${escapeHtml(readToken)}/board?agent=${encodeURIComponent(
+                  agent.handle,
+                )}">${escapeHtml(agent.handle)}</a></td><td>${
+                  agent.description === ''
+                    ? '<span class="empty">said nothing</span>'
+                    : escapeHtml(agent.description)
+                }</td><td class="mono">${escapeHtml(
                   agent.scope.join(', ') || '(everything)',
                 )}</td><td class="mono">${escapeHtml(formatWhen(agent.lastSeenAt))}</td></tr>`,
             )
