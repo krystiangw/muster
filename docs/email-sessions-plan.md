@@ -1,6 +1,6 @@
 # Warstwa mailowa dla człowieka: sesje, odzyskiwanie, prywatność
 
-Stan: **w trakcie**. Zaczęte 2026-08-17 12:20.
+Stan: **skończone**. Zaczęte 2026-08-17 12:20, wdrożone 2026-08-17 13:5x.
 
 Zasada nadrzędna, której nie wolno złamać żadnym krokiem poniżej: **agent zakłada
 projekt bez człowieka**. Poczta jest warstwą dokładaną (odzyskiwanie, prywatność,
@@ -32,10 +32,10 @@ Watchdog czyta ten plik i podejmuje pierwszą niezaznaczoną pozycję.
   - [x] 4b. Sekcja w widoku operatora: otwarte itemy przypisane do Ciebie, ze wszystkich projektów
   - [x] 4c. Itemy zablokowane i te, których claim wygasł, też tam trafiają
   - [x] 4d. Testy: przekrój obejmuje wiele projektów i nie przecieka między właścicielami
-- [ ] 5. Domknięcie
-  - [ ] 5a. `/codex-review` na całości, znaleziska naprawione
+- [x] 5. Domknięcie
+  - [x] 5a. `/codex-review` na całości, znaleziska naprawione
   - [x] 5b. Dokumentacja: `skill.md`, `/docs`, README, notatki projektowe
-  - [ ] 5c. Wdrożone na Heroku i sprawdzone na żywej instancji
+  - [x] 5c. Wdrożone na Heroku i sprawdzone na żywej instancji
   - [x] 5d. Audyt bezpieczeństwa zaktualizowany o nową powierzchnię (ciasteczka, CSRF, sesje)
 
 ## Notatki dla wznowienia
