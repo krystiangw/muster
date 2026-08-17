@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
-import { claimProjectWithEmail } from '../src/service.js';
-import { authed, createProject, startHarness, type Harness, type Project } from './helper.js';
+import { claimProjectWithEmail, upsertItem } from '../src/service.js';
+import {
+  authed,
+  createProject,
+  signIn,
+  startHarness,
+  type Harness,
+  type Project,
+} from './helper.js';
 
 /**
  * Regressions for the findings of the independent review of the first commit.
@@ -760,6 +767,61 @@ describe('what the verification pass found in the fixes', () => {
     assert.equal(client?.expiresAt ?? null, null, 'the client outlives the demo window');
   });
 
+  it('shows a person the boards they asked for, not only the ones offered to them', async () => {
+    const project = await createProject(harness);
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const session = await signIn(harness, 'asker@example.com');
+    await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/handover`,
+      payload: session.form({ note: 'this fleet is mine' }),
+      headers: session.headers,
+    });
+
+    const page = await harness.server.inject({
+      method: 'GET',
+      url: '/operator',
+      headers: { cookie: session.cookie },
+    });
+    assert.match(page.body, /Boards you asked for/);
+    assert.match(page.body, /this fleet is mine/);
+  });
+
+  it('writes the fields only on the insert when a caller says insertOnly', async () => {
+    // The atomic half of the anonymous report path, exercised directly because
+    // the race that needs it cannot be produced through the rate limited
+    // route. A caller that loses the race must change nothing but the
+    // timeline.
+    const project = await createProject(harness);
+    const doc = (await harness.store.projects.findOne({ _id: project.id }))!;
+    await upsertItem(harness.store, doc, {
+      slug: 'feedback:one',
+      title: 'first',
+      body: 'what the first reporter wrote',
+      labels: ['feedback'],
+      actor: 'guest:one',
+      insertOnly: true,
+      guest: true,
+      note: 'first',
+    });
+
+    const loser = await upsertItem(harness.store, doc, {
+      slug: 'feedback:one',
+      title: 'second',
+      body: 'OWNED',
+      labels: ['spam'],
+      actor: 'guest:two',
+      insertOnly: true,
+      guest: true,
+      note: 'second',
+    });
+    assert.equal(loser.created, false);
+    assert.equal(loser.item.title, 'first');
+    assert.equal(loser.item.body, 'what the first reporter wrote');
+    assert.deepEqual(loser.item.labels, ['feedback']);
+    assert.ok(loser.item.timeline.some((entry) => entry.message === 'second'));
+  });
+
   it('does not let a passer-by keep a report looking fresh', async () => {
     const seeded = await startHarness();
     const host = await createProject(seeded, 'reports');
@@ -790,6 +852,21 @@ describe('what the verification pass found in the fixes', () => {
       const item = (await open.store.items.findOne({ projectId: host.id, slug }))!;
       assert.equal(item.stale, true, 'a stranger repeating themselves is not proof of life');
       assert.equal(item.touchedAt.getTime(), stamp.getTime());
+      // And the first report was born with those fields, rather than without
+      // them: an item created with no touchedAt is one hygiene can never call
+      // stale, which would make every report immortal by omission.
+      const fresh = await open.server.inject({
+        method: 'POST',
+        url: '/feedback',
+        payload: { title: 'A second thing rotted', body: 'first' },
+      });
+      const born = (await open.store.items.findOne({
+        projectId: host.id,
+        slug: fresh.json().slug,
+      }))!;
+      assert.ok(born.touchedAt instanceof Date);
+      assert.equal(born.stale, false);
+      assert.equal(born.staleSince, null);
       assert.ok(
         item.timeline.some((entry) => entry.message.includes('still here')),
         'and the words still land on the timeline',

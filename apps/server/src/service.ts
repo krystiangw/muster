@@ -963,8 +963,14 @@ export async function upsertItem(
   // own liveness belongs to the people who work on it.
   if (input.guest) {
     // Only on the write that creates the item, so a report carries the name of
-    // whoever filed it and nothing later can overwrite that from outside.
+    // whoever filed it and nothing later can overwrite that from outside. The
+    // liveness fields have to be here as well: a document created without
+    // `touchedAt` is a document hygiene can never call stale, which would have
+    // made a guest report immortal by omission rather than by design.
     setOnInsert.lastActor = input.actor;
+    setOnInsert.touchedAt = now;
+    setOnInsert.stale = false;
+    setOnInsert.staleSince = null;
   } else {
     set.stale = false;
     set.staleSince = null;

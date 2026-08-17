@@ -371,6 +371,20 @@ and you can end that from the view itself.</p>
       .toArray();
     const offeredById = new Map(offered.map((project) => [project._id, project]));
 
+    // Boards this person has asked for and not yet been given. Without this
+    // the ask lives only on the read link page, so somebody who asked and then
+    // lost the link has no record of it anywhere, and no way back to the board
+    // they were asking about.
+    const asked = await store.handovers
+      .find({ email: session.email })
+      .sort({ createdAt: -1 })
+      .limit(25)
+      .toArray();
+    const askedFor = await store.projects
+      .find({ _id: { $in: asked.map((request) => request.projectId) } })
+      .toArray();
+    const askedById = new Map(askedFor.map((project) => [project._id, project]));
+
     const aliases = await aliasesFor(session.email);
     const [waiting, recent, staleItems, mine] = await Promise.all([
       store.escalations
@@ -472,6 +486,28 @@ ${offers
     <button type="submit" name="decision" value="accept">Take ownership</button>
     <button class="ghost" type="submit" name="decision" value="ignore">Not mine</button>
   </form>
+</div>`;
+  })
+  .join('')}`
+    }
+
+${
+      asked.length === 0
+        ? ''
+        : `<h2>Boards you asked for</h2>
+<p style="color:var(--ink-2)">You asked the agents on these to hand them over. They see the request
+the next time they read their inbox, and answer it by offering the board, which then appears
+above.</p>
+${asked
+  .map((request) => {
+    const project = askedById.get(request.projectId);
+    if (!project || project.claimedBy) return '';
+    return `<div class="card">
+  <p class="label">asked ${when(request.createdAt)}</p>
+  <p style="font-size:17px;margin:0 0 4px"><b>${escapeHtml(project.name)}</b></p>
+  ${request.note ? `<p style="color:var(--ink-2);margin:0 0 8px">${escapeHtml(request.note)}</p>` : ''}
+  <p class="mono" style="color:var(--muted);margin:0">
+     <a href="/r/${escapeHtml(project.readToken)}">back to the board</a></p>
 </div>`;
   })
   .join('')}`

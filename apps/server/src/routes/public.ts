@@ -1285,6 +1285,26 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     // more thing to go wrong in production and, worse, made the route
     // untestable: the suite's base URL does not resolve, so the check this
     // page exists to enforce was never once exercised by a test.
+    // The per project limit on claim emails, which the loopback used to apply
+    // on our behalf. Without it this form sends at the ordinary write rate, and
+    // each send invalidates the pending code, so a leaked admin token could
+    // both flood an address and keep the real code from ever working.
+    const claimVerdict = limiter.check(`claim:${project._id}`, config.rateLimits.claimEmail);
+    if (!claimVerdict.ok) {
+      return reply
+        .code(429)
+        .header('retry-after', String(claimVerdict.retryAfterSeconds))
+        .type('text/html; charset=utf-8')
+        .send(
+          layout(
+            { title: 'Slow down' },
+            `<h1>Too many codes for this project</h1>
+             <p>Try again in ${claimVerdict.retryAfterSeconds} seconds, or use the code that was
+             already sent.</p>`,
+          ),
+        );
+    }
+
     let ok = false;
     try {
       const { key } = await authenticate(store, form.token ?? '');
@@ -1337,7 +1357,25 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
    * is not always the person who has a terminal open.
    */
   app.post('/r/:readToken/claim/verify', { schema: { hide: true } }, async (request, reply) => {
-    if (!limitWrites(request, reply)) return reply;
+    // The bucket built for typing a code into a form, the same one /operator
+    // uses for its own code field, rather than the ordinary write bucket. The
+    // real ceiling is the five attempts a pending claim carries, but a second
+    // code box in the same service should count against the same limit as the
+    // first.
+    const { readToken: token } = request.params as { readToken: string };
+    const verdict = limiter.check(`verify:${token}`, config.rateLimits.verifyCode);
+    if (!verdict.ok) {
+      return reply
+        .code(429)
+        .header('retry-after', String(verdict.retryAfterSeconds))
+        .type('text/html; charset=utf-8')
+        .send(
+          layout(
+            { title: 'Slow down' },
+            `<h1>Too many tries</h1><p>Try again in ${verdict.retryAfterSeconds} seconds.</p>`,
+          ),
+        );
+    }
     const { readToken } = request.params as { readToken: string };
     const form = (request.body ?? {}) as { email?: string; code?: string };
     const project = await store.projects.findOne({ readToken });
