@@ -30,9 +30,14 @@ import type { ItemDoc, ProjectDoc, TimelineEntry } from '../types.js';
  * whole board on every card they touched.
  */
 function keptFilter(keep: BoardFilter): string {
+  // Prefixed, and that prefix is load bearing. The assign form has a visible
+  // field called owner, and a hidden one of the same name would either be
+  // parsed as two values of one field or, on an unfiltered board, send the
+  // person somewhere new every time they assigned somebody. What is being
+  // edited and where the person was standing are two different things.
   return (['owner', 'agent', 'label', 'q'] as const)
     .filter((name) => keep[name])
-    .map((name) => `<input type="hidden" name="${name}" value="${escapeHtml(keep[name]!)}">`)
+    .map((name) => `<input type="hidden" name="from_${name}" value="${escapeHtml(keep[name]!)}">`)
     .join('');
 }
 
@@ -468,6 +473,7 @@ export function renderBoardFilters(view: BoardView, facets: BoardFacets, action:
   }
   ${more(facets.omitted.owners, 'owner', 'owner')}
   ${more(facets.omitted.agents, 'agent', 'agent')}
+  ${more(facets.omitted.labels, 'label', 'label')}
 </form>`;
 }
 

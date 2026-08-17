@@ -282,7 +282,7 @@ export interface BoardFacets {
   /** Every label in use, so a filter never offers one with nothing behind it. */
   labels: string[];
   /** Names left out for length. Zero on every project anybody actually has. */
-  omitted: { owners: number; agents: number };
+  omitted: { owners: number; agents: number; labels: number };
 }
 
 /**
@@ -361,6 +361,7 @@ export async function boardFacets(store: Store, project: ProjectDoc): Promise<Bo
     omitted: {
       owners: Math.max(0, ownerNames.length - FACET_LIMIT),
       agents: Math.max(0, agents.length - FACET_LIMIT),
+      labels: Math.max(0, names(labels).length - FACET_LIMIT),
     },
   };
 }
@@ -423,6 +424,8 @@ export interface MoveResult {
  * same lesson the move path already learned, so it is the same mechanism,
  * lifted out to be used by both.
  */
+export const MAX_ITEM_LABELS = 20;
+
 export async function relabelItem(
   store: Store,
   project: ProjectDoc,
@@ -431,8 +434,15 @@ export async function relabelItem(
 ): Promise<ItemDoc> {
   const add = change.add ?? [];
   const remove = change.remove ?? [];
+  // The cap is part of the guard, not a check before it: two people tagging a
+  // card that holds nineteen would both read nineteen and both write, and the
+  // item would end up outside the shape every other path enforces.
+  const room =
+    add.length === 0
+      ? {}
+      : { $expr: { $lt: [{ $size: { $ifNull: ['$labels', []] } }, MAX_ITEM_LABELS] } };
   const updated = await store.items.findOneAndUpdate(
-    { projectId: project._id, slug: normalizeSlug(slug) },
+    { projectId: project._id, slug: normalizeSlug(slug), ...room },
     [
       {
         $set: {
@@ -455,6 +465,19 @@ export async function relabelItem(
     { returnDocument: 'after' },
   );
   if (!updated) {
+    // Nothing matched, which is either no such item or a full one. Saying
+    // which costs one read and saves somebody guessing why a tag vanished.
+    const exists = await store.items.findOne(
+      { projectId: project._id, slug: normalizeSlug(slug) },
+      { projection: { labels: 1 } },
+    );
+    if (exists) {
+      throw new ServiceError(
+        409,
+        'too_many_labels',
+        `That item already carries ${MAX_ITEM_LABELS} labels. Remove one before adding another.`,
+      );
+    }
     throw new ServiceError(404, 'not_found', `No item with slug "${slug}" in this project.`);
   }
   return updated as ItemDoc;

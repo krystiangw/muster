@@ -182,7 +182,7 @@ export interface BoardFacets {
   /** What each agent said it is for. Only the ones that said something. */
   agentsDescribed: Array<{ handle: string; description: string; registered: boolean }>;
   /** Names left out for length. Zero on every project anybody actually has. */
-  omitted: { owners: number; agents: number };
+  omitted: { owners: number; agents: number; labels: number };
 }
 
 export interface MusterOptions {

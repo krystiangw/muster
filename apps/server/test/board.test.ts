@@ -878,12 +878,14 @@ describe('a board many agents write to', () => {
       method: 'GET',
       url: `/r/${readToken}/board?owner=alex`,
     });
-    assert.match(page.body, /<input type="hidden" name="owner" value="alex">/);
+    // Prefixed, because a write form can also carry a field of its own called
+    // owner, and the two mean different things.
+    assert.match(page.body, /<input type="hidden" name="from_owner" value="alex">/);
 
     const moved = await harness.server.inject({
       method: 'POST',
       url: `/r/${readToken}/board/move`,
-      payload: 'slug=mine&column=done&owner=alex',
+      payload: 'slug=mine&column=done&from_owner=alex',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
     });
     assert.equal(moved.statusCode, 303);
@@ -1181,10 +1183,50 @@ describe('acting on a card without a script', () => {
   });
 
   it('comes back to the board somebody was actually looking at', async () => {
-    const back = await form('owner', { slug: 'one', owner: 'alex', agent: 'errors-loop', q: 'thing' });
+    const back = await form('owner', {
+      slug: 'one',
+      owner: 'alex',
+      from_agent: 'errors-loop',
+      from_q: 'thing',
+    });
     const location = back.headers.location as string;
     assert.match(location, /agent=errors-loop/);
     assert.match(location, /q=thing/, 'a search survives acting on one of its results');
+  });
+
+  it('does not mistake the person being assigned for the board being viewed', async () => {
+    // The assign form carries an owner because somebody is changing it. Reading
+    // that as the narrowing would drop the operator onto a different board
+    // every single time they assigned anybody.
+    const landed = await form('owner', { slug: 'one', owner: 'kasia' });
+    assert.equal(landed.statusCode, 303);
+    assert.doesNotMatch(landed.headers.location as string, /owner=kasia/);
+
+    // And on a board already narrowed to somebody, the two fields coexist.
+    const filtered = await form('owner', { slug: 'one', owner: 'alex', from_owner: 'kasia' });
+    assert.equal(filtered.statusCode, 303);
+    assert.match(filtered.headers.location as string, /owner=kasia/, 'still on kasia\'s board');
+    const item = (await read(project, '/items/one')).json().item;
+    assert.equal(item.owner, 'alex', 'and alex now owns the card');
+  });
+
+  it('refuses the twenty first label instead of growing past the shape', async () => {
+    await post(project, '/items', { slug: 'tagged', title: 'tagged', actor: 'a' });
+    for (let n = 0; n < 20; n += 1) {
+      const added = await form('labels', { slug: 'tagged', add: `label-${n}` });
+      assert.equal(added.statusCode, 303, `label ${n} should fit`);
+    }
+    const full = await form('labels', { slug: 'tagged', add: 'one-too-many' });
+    assert.equal(full.statusCode, 409);
+    assert.equal(full.json().error, 'too_many_labels');
+    const item = (await read(project, '/items/tagged')).json().item;
+    assert.equal(item.labels.length, 20);
+    assert.ok(!item.labels.includes('one-too-many'));
+
+    // Room again once one goes.
+    await form('labels', { slug: 'tagged', remove: 'label-0' });
+    const fits = await form('labels', { slug: 'tagged', add: 'one-too-many' });
+    assert.equal(fits.statusCode, 303);
   });
 
   it('refuses to invent an item that is not there', async () => {

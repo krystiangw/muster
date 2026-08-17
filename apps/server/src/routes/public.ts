@@ -140,18 +140,37 @@ function noSuchProject(): string {
   );
 }
 
-/** The filter a write came from, on its way back into the redirect. */
-function keptParams(form: {
-  owner?: string;
-  agent?: string;
-  label?: string;
-  q?: string;
-}): Record<string, string> {
+/**
+ * The filter a write came from, on its way back into the redirect.
+ *
+ * Read from `from_*` fields, never from the fields being edited: an assign
+ * form carries an owner because somebody is changing it, and treating that as
+ * the narrowing would drop the person onto a different board every time.
+ */
+interface KeptFilter {
+  from_owner?: string;
+  from_agent?: string;
+  from_label?: string;
+  from_q?: string;
+}
+
+function one(value: unknown): string | undefined {
+  // Fastify hands back an array when a field arrives twice. Nothing here wants
+  // two, and taking the first is the reading that cannot surprise anybody.
+  const first = Array.isArray(value) ? value[0] : value;
+  return typeof first === 'string' && first !== '' ? first : undefined;
+}
+
+function keptParams(form: KeptFilter): Record<string, string> {
   const kept: Record<string, string> = {};
-  if (form.owner) kept.owner = form.owner.slice(0, 48);
-  if (form.agent) kept.agent = form.agent.slice(0, 48);
-  if (form.label) kept.label = form.label.slice(0, 48);
-  if (form.q) kept.q = form.q.slice(0, 80);
+  const owner = one(form.from_owner);
+  const agent = one(form.from_agent);
+  const label = one(form.from_label);
+  const q = one(form.from_q);
+  if (owner) kept.owner = owner.slice(0, 48);
+  if (agent) kept.agent = agent.slice(0, 48);
+  if (label) kept.label = label.slice(0, 48);
+  if (q) kept.q = q.slice(0, 80);
   return kept;
 }
 
@@ -851,13 +870,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`)}
   app.post('/r/:readToken/board/owner', { schema: { hide: true } }, async (request, reply) => {
     if (!limitWrites(request, reply)) return reply;
     const { readToken } = request.params as { readToken: string };
-    const form = (request.body ?? {}) as {
-      slug?: string;
-      owner?: string;
-      agent?: string;
-      label?: string;
-      q?: string;
-    };
+    const form = (request.body ?? {}) as { slug?: string; owner?: string } & KeptFilter;
     const project = await store.projects.findOne({ readToken });
     if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
     if (!(await readableBy(store, request, project))) {
@@ -865,7 +878,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`)}
     }
     if (!form.slug) throw new ServiceError(400, 'bad_request', 'Which item?');
 
-    const owner = (form.owner ?? '').trim().slice(0, 48);
+    const owner = (one(form.owner) ?? '').trim().slice(0, 48);
     await upsertItem(store, project, {
       slug: form.slug,
       owner: owner === '' ? null : owner,
@@ -891,11 +904,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`)}
       slug?: string;
       add?: string;
       remove?: string;
-      owner?: string;
-      agent?: string;
-      label?: string;
-      q?: string;
-    };
+    } & KeptFilter;
     const project = await store.projects.findOne({ readToken });
     if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
     if (!(await readableBy(store, request, project))) {
@@ -903,8 +912,8 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`)}
     }
     if (!form.slug) throw new ServiceError(400, 'bad_request', 'Which item?');
 
-    const add = (form.add ?? '').trim().slice(0, 48);
-    const remove = (form.remove ?? '').trim().slice(0, 48);
+    const add = (one(form.add) ?? '').trim().slice(0, 48);
+    const remove = (one(form.remove) ?? '').trim().slice(0, 48);
     if (add !== '' || remove !== '') {
       await relabelItem(store, project, form.slug, {
         ...(add !== '' ? { add: [add] } : {}),
@@ -927,14 +936,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`)}
   app.post('/r/:readToken/board/move', { schema: { hide: true } }, async (request, reply) => {
     if (!limitWrites(request, reply)) return reply;
     const { readToken } = request.params as { readToken: string };
-    const form = (request.body ?? {}) as {
-      slug?: string;
-      column?: string;
-      owner?: string;
-      agent?: string;
-      label?: string;
-      q?: string;
-    };
+    const form = (request.body ?? {}) as { slug?: string; column?: string } & KeptFilter;
     const project = await store.projects.findOne({ readToken });
     if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
     // Writing through the link is exactly what the link is for, so a project
