@@ -5,7 +5,7 @@ import type { Mailer } from '../email.js';
 import { chip, escapeHtml, layout, when } from '../html.js';
 import { who } from '../identity.js';
 import { hashToken, newId, newOtpCode } from '../ids.js';
-import type { RateLimiter } from '../rateLimit.js';
+import { codeAttemptKey, type RateLimiter } from '../rateLimit.js';
 import {
   ServiceError,
   acceptShare,
@@ -242,7 +242,7 @@ and you can end that from the view itself.</p>
     // single sign in spent two of five slots an hour, so a household or an
     // office behind one address locked itself out by signing in twice.
     const verdict = limiter.check(
-      `operator-verify:${clientIp(request)}`,
+      codeAttemptKey(clientIp(request)),
       config.rateLimits.verifyCode,
     );
     if (!verdict.ok) {

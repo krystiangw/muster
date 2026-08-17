@@ -633,6 +633,24 @@ describe('a read link can ask for a project and never take one', () => {
     const untouched = await harness.store.items.findOne({ projectId: project.id, slug: 'work' });
     assert.equal(untouched?.owner ?? null, null);
 
+    // A spelling of our own origin that a browser would canonicalise is still
+    // our own origin: comparing the strings would answer 403 to every form on
+    // a deployment whose BASE_URL carries a default port or a capital letter.
+    const canonical = new URL(harness.config.baseUrl);
+    const shouted = `${canonical.protocol}//${canonical.host.toUpperCase()}${
+      canonical.protocol === 'https:' ? ':443' : ':80'
+    }`;
+    const fromUsShouting = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/owner`,
+      payload: 'slug=work&owner=alex',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        origin: shouted,
+      },
+    });
+    assert.equal(fromUsShouting.statusCode, 303, shouted);
+
     // Our own page still works, and so does a caller that sends no Origin at
     // all, which is every agent using curl.
     const fromUs = await harness.server.inject({

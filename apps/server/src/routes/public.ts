@@ -20,7 +20,7 @@ import { avatar, who } from '../identity.js';
 import { renderBoard, renderBoardFilters, renderBoardSettings } from './boardHtml.js';
 import { DEMO_AGENTS, demoBoard } from './demoBoard.js';
 import { maybeSweep } from '../hygiene.js';
-import type { RateLimiter } from '../rateLimit.js';
+import { codeAttemptKey, type RateLimiter } from '../rateLimit.js';
 import {
   ServiceError,
   answerEscalation,
@@ -1021,9 +1021,28 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
    * An absent Origin is allowed on purpose. Every browser sends one on a form
    * post; curl sends none, and refusing those would break the agents.
    */
+  // Compared as parsed origins, not as strings. A deployment whose BASE_URL is
+  // spelled `https://Example.com:443` is the same site as the `https://example.com`
+  // a browser puts in the header, and a string comparison would answer 403 to
+  // every form on it.
+  const ourOrigin = (() => {
+    try {
+      return new URL(config.baseUrl).origin;
+    } catch {
+      return config.baseUrl;
+    }
+  })();
+
   const sameOrigin = (request: FastifyRequest, reply: FastifyReply): boolean => {
     const origin = request.headers.origin;
-    if (typeof origin !== 'string' || origin === '' || origin === config.baseUrl) return true;
+    if (typeof origin !== 'string' || origin === '') return true;
+    let sent = origin;
+    try {
+      sent = new URL(origin).origin;
+    } catch {
+      // Not a URL at all. Nothing a browser sends, so it is refused below.
+    }
+    if (sent === ourOrigin) return true;
     void reply
       .code(403)
       .type('text/html; charset=utf-8')
@@ -1317,7 +1336,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     // untestable: the suite's base URL does not resolve, so the check this
     // page exists to enforce was never once exercised by a test.
     let ok = false;
-    let flooded = false;
+    let floodedFor: number | null = null;
     try {
       const { key } = await authenticate(store, form.token ?? '');
       if (key.projectId === project._id && key.role === 'admin') {
@@ -1330,7 +1349,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
         // budget on five wrong tokens, which blocks the real claim from the
         // browser and from the API alike.
         const verdict = limiter.check(`claim:${project._id}`, config.rateLimits.claimEmail);
-        if (!verdict.ok) flooded = true;
+        if (!verdict.ok) floodedFor = verdict.retryAfterSeconds;
         else {
           const started = await startEmailClaim(store, project, form.email ?? '', config, mailer);
           ok = started.alreadyClaimedBy === null;
@@ -1343,14 +1362,18 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
       // which of their guesses was close.
       ok = false;
     }
-    if (flooded) {
-      return reply.code(429).type('text/html; charset=utf-8').send(
-        layout(
-          { title: 'Slow down' },
-          `<h1>Too many codes for this project</h1>
-           <p>Use the code that was already sent, or try again in an hour.</p>`,
-        ),
-      );
+    if (floodedFor !== null) {
+      return reply
+        .code(429)
+        .header('retry-after', String(floodedFor))
+        .type('text/html; charset=utf-8')
+        .send(
+          layout(
+            { title: 'Slow down' },
+            `<h1>Too many codes for this project</h1>
+             <p>Use the code that was already sent, or try again in ${floodedFor} seconds.</p>`,
+          ),
+        );
     }
     return reply.type('text/html; charset=utf-8').send(
       layout(
@@ -1399,7 +1422,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     // bucket on the token would let one of them spend the whole allowance and
     // lock out the person the code was actually sent to. The real ceiling on
     // guessing is the five attempts a pending claim carries.
-    const verdict = limiter.check(`verify:${clientIp(request)}`, config.rateLimits.verifyCode);
+    const verdict = limiter.check(codeAttemptKey(clientIp(request)), config.rateLimits.verifyCode);
     if (!verdict.ok) {
       return reply
         .code(429)

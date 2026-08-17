@@ -68,3 +68,15 @@ export class RateLimiter {
     clearInterval(this.timer);
   }
 }
+
+/**
+ * The bucket a six digit code is typed into, whichever form it is.
+ *
+ * There are two of those forms now, one on the operator sign in and one on the
+ * read link after a claim, and they were counting separately: a caller got the
+ * configured allowance twice over, which is exactly the thing a shared comment
+ * in both files claimed was not happening.
+ */
+export function codeAttemptKey(ip: string): string {
+  return `code-attempt:${ip}`;
+}
