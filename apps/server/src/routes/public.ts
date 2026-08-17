@@ -801,7 +801,7 @@ ${open.length === 0 ? '<p class="empty">Nothing. The agents are unblocked.</p>' 
 ${open.map((doc) => escalationForm(doc as EscalationDoc)).join('')}
 
 <h2>Items</h2>
-<div class="scroll"><table>
+<div class="scroll cards"><table class="cards">
 <thead><tr><th>Slug</th><th>Title and last note</th><th>State</th><th>Updated</th></tr></thead>
 <tbody>
 ${items.length === 0 ? '<tr><td colspan="4" class="empty">Nothing yet.</td></tr>' : items.map((item) => itemRow(item as ItemDoc)).join('\n')}
@@ -815,7 +815,7 @@ the last to write to.${
 these are the ones seen most recently.`
         : ''
     }</p>
-<div class="scroll"><table>
+<div class="scroll cards"><table class="cards">
 <thead><tr><th>Handle</th><th>What it is for</th><th>Scope</th><th>Last seen</th></tr></thead>
 <tbody>
 ${

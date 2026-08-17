@@ -63,7 +63,10 @@ header.top { display:flex; align-items:baseline; gap:16px; flex-wrap:wrap;
   border-bottom:1px solid var(--rule); padding-bottom:14px; margin-bottom:32px; }
 header.top a.brand { font-family:var(--serif); font-size:22px; font-weight:600;
   color:var(--ink); text-decoration:none; letter-spacing:-.01em; }
-header.top nav { display:flex; gap:14px; font-family:var(--mono); font-size:12.5px; }
+/* Wrapping, because five links plus the wordmark are wider than a phone: the
+   row did not wrap, so the document came out wider than the viewport and every
+   page scrolled sideways by the width of the last link. */
+header.top nav { display:flex; flex-wrap:wrap; gap:8px 14px; font-family:var(--mono); font-size:12.5px; }
 h1 { font-family:var(--serif); font-weight:600; font-size:clamp(30px,5vw,44px);
   line-height:1.08; letter-spacing:-.015em; margin:0 0 14px; text-wrap:balance; }
 h2 { font-family:var(--serif); font-weight:600; font-size:clamp(21px,3vw,27px);
@@ -274,17 +277,25 @@ details.layout[open] > summary { margin-bottom:10px; }
      and the column that goes first is the last one: the links. Nothing on the
      page said it scrolled sideways, so on the operator's own list of projects
      the only way into any of them was invisible. Below 560 each row becomes a
-     small card and every cell carries its own heading. */
-  .scroll { overflow-x:visible; border:0; background:none; }
-  table { min-width:0; display:block; }
-  thead { display:none; }
-  tbody, tr, td { display:block; }
-  tbody tr { background:var(--surface); border:1px solid var(--rule); border-radius:3px;
-    padding:8px 11px; margin-bottom:10px; }
-  td { border-bottom:0; padding:3px 0; }
-  tbody tr:last-child { margin-bottom:0; }
-  td[data-label]::before { content:attr(data-label); display:block; font-family:var(--mono);
-    font-size:10px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+     small card and every cell carries its own heading.
+
+     Only the tables that asked for it, by carrying the cards class and a
+     data-label on every cell. A reference table turned into unlabelled cards
+     is worse than one that scrolls: the pricing table rendered for a while as
+     "50", "5", "20" with nothing to say which number was which. Everything
+     else keeps its own horizontal scrolling, because a wide child with
+     nowhere to go pushes the whole page sideways instead. */
+  .scroll.cards { overflow-x:visible; border:0; background:none; }
+  table.cards { min-width:0; display:block; }
+  table.cards thead { display:none; }
+  table.cards tbody, table.cards tr, table.cards td { display:block; }
+  table.cards tbody tr { background:var(--surface); border:1px solid var(--rule);
+    border-radius:3px; padding:8px 11px; margin-bottom:10px; }
+  table.cards td { border-bottom:0; padding:3px 0; }
+  table.cards tbody tr:last-child { margin-bottom:0; }
+  table.cards td[data-label]::before { content:attr(data-label); display:block;
+    font-family:var(--mono); font-size:10px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--muted); }
 }
 `;
 

@@ -487,7 +487,7 @@ is you.</p>`
 <p style="color:var(--ink-2)">Assigned to ${escapeHtml(aliases.join(', '))}, or blocked and waiting
 for somebody to unblock it. Across every project, because the work does not care which board it
 lives on.</p>
-<div class="scroll"><table>
+<div class="scroll cards"><table class="cards">
 <thead><tr><th>Project</th><th>Item</th><th>State</th><th>Last touched</th></tr></thead>
 <tbody>
 ${mine
@@ -516,7 +516,7 @@ page assumes the front of your address means you. Anything else, say so.</p>
 </form>
 
 <h2>Projects</h2>
-<div class="scroll"><table>
+<div class="scroll cards"><table class="cards">
 <thead><tr><th>Project</th><th class="mono">open</th><th class="mono">agents</th><th>Waiting</th><th></th></tr></thead>
 <tbody>
 ${projects
@@ -559,7 +559,7 @@ ${
         ? `<h2>Going stale</h2>
 <p style="color:var(--ink-2)">Nobody has touched these, and no agent has claimed them. Hygiene
 flagged them rather than closing them, because deciding they are dead is your call.</p>
-<div class="scroll"><table>
+<div class="scroll cards"><table class="cards">
 <thead><tr><th>Project</th><th>Item</th><th>Stale since</th></tr></thead>
 <tbody>
 ${staleItems
