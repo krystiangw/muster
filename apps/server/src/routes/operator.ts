@@ -197,8 +197,12 @@ and you can end that from the view itself.</p>
           // having been delivered. Guarded on the hash so a code somebody else
           // successfully issued in the meantime is left alone.
           request.log.error({ err: error }, 'operator code delivery failed');
+          // Matched on this issuance, not just on its digits. A send that hangs
+          // past the reissue window can outlive its own code, and six digits
+          // collide once in a million, which is often enough to eventually
+          // delete somebody's working code instead of this dead one.
           await store.operatorCodes
-            .deleteOne({ email, codeHash: hashToken(code) })
+            .deleteOne({ email, codeHash: hashToken(code), createdAt: now })
             .catch(() => undefined);
         }
       }
