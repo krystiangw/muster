@@ -4,8 +4,7 @@
   "private": true,
   "description": "Shared operational memory for long-lived agents: who is on duty, who owns what, what rotted and what needs a human.",
   "engines": {
-    "node": "22.x",
-    "pnpm": "10.x"
+    "node": "22.x"
   },
   "packageManager": "pnpm@10.33.2",
   "scripts": {
@@ -21,6 +20,9 @@
     "typescript": "^5.7.3"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["esbuild", "mongodb-memory-server"]
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "mongodb-memory-server"
+    ]
   }
 }
