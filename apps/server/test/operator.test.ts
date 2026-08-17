@@ -558,6 +558,55 @@ describe('the operator view', () => {
     assert.equal(await harness.store.operatorCodes.countDocuments({ email: 'twice@example.com' }), 1);
   });
 
+  it('does not hold a cooldown for a code it failed to send', async () => {
+    // Resend rejecting the message is the ordinary failure here. Leaving the
+    // code stored would make the minute long cooldown refuse the retry, and the
+    // one after that, until the hourly limit ran out, without a single message
+    // having been delivered.
+    let deliver: () => Promise<'sent'> = async () => {
+      throw new Error('resend said no');
+    };
+    const isolated = await startHarness(
+      { LIMIT_CLAIM_EMAILS_PER_HOUR: '100' },
+      {
+        mailer: {
+          sendOperatorCode: () => deliver(),
+          sendClaimCode: async () => 'sent',
+          sendOperatorLink: async () => 'sent',
+        },
+      },
+    );
+    try {
+      const ask = () =>
+        isolated.server.inject({
+          method: 'POST',
+          url: '/operator',
+          payload: 'email=bounces@example.com',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        });
+
+      const failed = await ask();
+      // The person is told the same thing either way: a delivery failure that
+      // reads differently from an unknown address is an account probe.
+      assert.equal(failed.statusCode, 200);
+      assert.equal(
+        await isolated.store.operatorCodes.countDocuments({ email: 'bounces@example.com' }),
+        0,
+        'a code nobody received is not a code',
+      );
+
+      // So the retry, inside the cooldown, still sends.
+      deliver = async () => 'sent';
+      await ask();
+      assert.equal(
+        await isolated.store.operatorCodes.countDocuments({ email: 'bounces@example.com' }),
+        1,
+      );
+    } finally {
+      await isolated.stop();
+    }
+  });
+
   it('does not reveal whether an address owns anything', async () => {
     const unknown = await harness.server.inject({
       method: 'POST',

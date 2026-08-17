@@ -4,7 +4,7 @@ import swagger from '@fastify/swagger';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import type { Config } from './config.js';
 import type { Store } from './db.js';
-import { createMailer } from './email.js';
+import { createMailer, type Mailer } from './email.js';
 import { layout } from './html.js';
 import { RateLimiter } from './rateLimit.js';
 import { registerAgentFiles } from './routes/agentfiles.js';
@@ -30,7 +30,21 @@ export function redactCapabilities(url: string): string {
     .replace(/\/operator\/[^/?#]+/g, '/operator/[redacted]');
 }
 
-export async function buildApp(config: Config, store: Store): Promise<App> {
+/**
+ * Overrides for a test that needs to make a dependency behave badly on purpose.
+ * The mailer is the only one so far: a delivery that fails has a code path of
+ * its own, and reaching it by pointing the real client at a real provider with
+ * a wrong key would be a network call, not a test.
+ */
+export interface BuildOverrides {
+  mailer?: Mailer;
+}
+
+export async function buildApp(
+  config: Config,
+  store: Store,
+  overrides: BuildOverrides = {},
+): Promise<App> {
   const server = Fastify({
     logger: {
       level: config.logLevel,
@@ -63,7 +77,7 @@ export async function buildApp(config: Config, store: Store): Promise<App> {
   });
 
   const limiter = new RateLimiter();
-  const mailer = createMailer(config, (message) => server.log.info(message));
+  const mailer = overrides.mailer ?? createMailer(config, (message) => server.log.info(message));
 
   /**
    * Security headers.

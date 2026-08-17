@@ -190,8 +190,16 @@ and you can end that from the view itself.</p>
           await mailer.sendOperatorCode(email, code);
         } catch (error) {
           // A bounced send must not answer differently from an address nobody
-          // has ever used, or the failure itself becomes the account probe.
+          // has ever used, or the failure itself becomes the account probe. It
+          // must also not leave the code sitting there: the minute long
+          // cooldown would then refuse the retry, and the retry after that,
+          // until the hourly limit runs out, all without a single message
+          // having been delivered. Guarded on the hash so a code somebody else
+          // successfully issued in the meantime is left alone.
           request.log.error({ err: error }, 'operator code delivery failed');
+          await store.operatorCodes
+            .deleteOne({ email, codeHash: hashToken(code) })
+            .catch(() => undefined);
         }
       }
     }

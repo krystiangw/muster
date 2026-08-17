@@ -1,6 +1,6 @@
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import type { FastifyInstance } from 'fastify';
-import { buildApp } from '../src/app.js';
+import { buildApp, type BuildOverrides } from '../src/app.js';
 import { loadConfig, type Config } from '../src/config.js';
 import { createStore, type Store } from '../src/db.js';
 import { hashToken } from '../src/ids.js';
@@ -39,7 +39,10 @@ async function releaseMongo(): Promise<void> {
   await mongo.stop();
 }
 
-export async function startHarness(overrides: NodeJS.ProcessEnv = {}): Promise<Harness> {
+export async function startHarness(
+  overrides: NodeJS.ProcessEnv = {},
+  build: BuildOverrides = {},
+): Promise<Harness> {
   const mongo = await sharedMongo();
   const config = loadConfig({
     MONGODB_URI: mongo.getUri(),
@@ -54,7 +57,7 @@ export async function startHarness(overrides: NodeJS.ProcessEnv = {}): Promise<H
     ...overrides,
   });
   const store = await createStore(config.mongoUri, config.mongoDb);
-  const { server, limiter } = await buildApp(config, store);
+  const { server, limiter } = await buildApp(config, store, build);
   await server.ready();
 
   return {
