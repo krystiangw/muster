@@ -522,9 +522,9 @@ ${projects
              <button class="ghost" type="submit"
                      title="${
                        (project.visibility ?? 'link') === 'owner'
-                         ? 'Anybody holding the read link can open this board again'
-                         : 'The read link stops working for everybody but you'
-                     }">${(project.visibility ?? 'link') === 'owner' ? 'private' : 'open by link'}</button>
+                         ? 'Private now. Pressing this lets anybody holding the read link open it again.'
+                         : 'Open by link now. Pressing this stops the link working for everybody but you.'
+                     }">${(project.visibility ?? 'link') === 'owner' ? 'open it up' : 'make private'}</button>
            </form></td></tr>`,
   )
   .join('\n')}
