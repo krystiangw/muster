@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
-import { insights } from '../src/events.js';
+import { runMigrations } from '../src/db.js';
+import { flushEvents, insights } from '../src/events.js';
 import { authed, createProject, startHarness, type Harness, type Project } from './helper.js';
 
 /**
@@ -40,6 +41,8 @@ describe('what the service knows about its own use', () => {
     // A second item is not a second activation.
     await post(project, '/items', { slug: 'second', title: 'second thing', actor: 'errors-loop' });
 
+    await flushEvents();
+
     const report = await insights(harness.store);
     assert.ok(report.funnel.discovered >= 2, 'reading the protocol is visible');
     assert.ok(report.funnel.signups >= 1);
@@ -73,8 +76,12 @@ describe('what the service knows about its own use', () => {
       },
     });
 
+    await flushEvents();
+
     const report = await insights(harness.store);
     assert.ok(report.doors.mcp >= 1, 'an agent arriving over MCP is not the same as one over curl');
+
+    await flushEvents();
 
     const written = await harness.store.events.findOne({ kind: 'first_write', projectId: id });
     assert.equal(written?.door, 'mcp');
@@ -88,6 +95,8 @@ describe('what the service knows about its own use', () => {
     await post(project, '/items', { slug: 'b', title: 'b', actor: 'x' });
     await post(project, '/items', { slug: 'c', title: 'c', actor: 'x' });
 
+    await flushEvents();
+
     const written = await harness.store.events.countDocuments({
       kind: 'first_write',
       projectId: project.id,
@@ -100,6 +109,7 @@ describe('what the service knows about its own use', () => {
       post(racing, '/items', { slug: 'one', title: 'one', actor: 'x' }),
       post(racing, '/items', { slug: 'two', title: 'two', actor: 'x' }),
     ]);
+    await flushEvents();
     assert.equal(
       await harness.store.events.countDocuments({ kind: 'first_write', projectId: racing.id }),
       1,
@@ -112,7 +122,10 @@ describe('what the service knows about its own use', () => {
       await post(project, '/agents', { handle, scope: [] });
     }
 
+    await flushEvents();
+
     const report = await insights(harness.store);
+    await flushEvents();
     const registrations = await harness.store.events.countDocuments({
       kind: 'register',
       projectId: project.id,
@@ -132,6 +145,8 @@ describe('what the service knows about its own use', () => {
     const refused = await post(project, '/escalations', { agent: 'a', question: 'second' });
     assert.ok(refused.statusCode >= 400);
 
+    await flushEvents();
+
     assert.equal(
       await harness.store.events.countDocuments({ kind: 'escalate', projectId: project.id }),
       1,
@@ -140,6 +155,7 @@ describe('what the service knows about its own use', () => {
   });
 
   it('says how many answers its median is taken over', async () => {
+    await flushEvents();
     const report = await insights(harness.store);
     assert.equal(typeof report.behaviour.answersSampled, 'number');
     if (report.behaviour.medianAnswerHours !== null) {
@@ -147,8 +163,32 @@ describe('what the service knows about its own use', () => {
     }
   });
 
+  it('does not count a project that predates the marker as newly activated', async () => {
+    const project = await createProject(harness, 'from before');
+    await post(project, '/items', { slug: 'old', title: 'written long ago', actor: 'x' });
+
+    // The state a project deployed before this field was in: it has work, and
+    // no marker. Without a backfill its next item records a second activation.
+    await harness.store.projects.updateOne({ _id: project.id }, { $unset: { firstWriteAt: '' } });
+    await harness.store.events.deleteMany({ kind: 'first_write', projectId: project.id });
+
+    await runMigrations(harness.store);
+    await post(project, '/items', { slug: 'new', title: 'written today', actor: 'x' });
+
+    await flushEvents();
+
+    assert.equal(
+      await harness.store.events.countDocuments({ kind: 'first_write', projectId: project.id }),
+      0,
+      'a project activated before the marker existed is not activated again',
+    );
+    const doc = await harness.store.projects.findOne({ _id: project.id });
+    assert.ok(doc?.firstWriteAt, 'and it carries the marker afterwards');
+  });
+
   it('holds nothing about a person', async () => {
     await harness.server.inject({ method: 'GET', url: '/skill.md' });
+    await flushEvents();
     const events = await harness.store.events.find({}).limit(50).toArray();
     assert.ok(events.length > 0);
 

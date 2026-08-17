@@ -1,3 +1,4 @@
+import { flushEvents } from './events.js';
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { createStore } from './db.js';
@@ -50,6 +51,10 @@ async function main(): Promise<void> {
     clearInterval(sweeper);
     limiter.stop();
     await server.close();
+    // Nothing on a request path waits for a recorded moment, so a dyno cycling
+    // would otherwise drop the last few writes. Closing the client under them
+    // would also log an error for something nobody was waiting on.
+    await flushEvents();
     await store.close();
     process.exit(0);
   };

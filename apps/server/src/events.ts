@@ -58,6 +58,23 @@ const KEEP_DAYS = 90;
 export const ANSWER_SAMPLE = 500;
 
 /**
+ * Writes in flight. Nothing on a request path waits for these, but two things
+ * need to: a test that wants to assert what was recorded, and a shutdown that
+ * would otherwise drop the last few on the floor.
+ */
+const inFlight = new Set<Promise<unknown>>();
+
+/**
+ * Waits for everything started so far. Loops, because one of these writes can
+ * start another: the activation guard reads the project, then records.
+ */
+export async function flushEvents(): Promise<void> {
+  for (let round = 0; round < 5 && inFlight.size > 0; round += 1) {
+    await Promise.allSettled([...inFlight]);
+  }
+}
+
+/**
  * Records a moment. Never awaited on a request path, and never able to fail one:
  * telemetry that can break the thing it measures is worse than no telemetry.
  */
@@ -67,7 +84,7 @@ export function record(
   options: { door: EventDoor; detail?: string; projectId?: string } = { door: 'http' },
 ): void {
   const now = new Date();
-  void store.events
+  const write = store.events
     .insertOne({
       _id: newId('e'),
       at: now,
@@ -77,7 +94,9 @@ export function record(
       projectId: options.projectId ?? null,
       expiresAt: new Date(now.getTime() + KEEP_DAYS * 86_400_000),
     })
-    .catch(() => undefined);
+    .catch(() => undefined)
+    .finally(() => inFlight.delete(write));
+  inFlight.add(write);
 }
 
 /**
@@ -89,20 +108,18 @@ export function record(
  * both read the same zero. A guarded write to the project is the only thing
  * that can answer "has this ever happened" once.
  */
-export async function recordFirstWrite(
-  store: Store,
-  projectId: string,
-  door: EventDoor,
-): Promise<void> {
-  try {
+export function recordFirstWrite(store: Store, projectId: string, door: EventDoor): void {
+  const work = (async () => {
     const flagged = await store.projects.updateOne(
       { _id: projectId, firstWriteAt: { $exists: false } },
       { $set: { firstWriteAt: new Date() } },
     );
     if (flagged.modifiedCount === 1) record(store, 'first_write', { door, projectId });
-  } catch {
+  })()
     // Same rule as the rest of this file: measuring never breaks the request.
-  }
+    .catch(() => undefined)
+    .finally(() => inFlight.delete(work));
+  inFlight.add(work);
 }
 
 export interface Insights {

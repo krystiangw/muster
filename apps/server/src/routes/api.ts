@@ -325,7 +325,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           history: body.history as UpsertItemInput['history'],
           actor,
         });
-        if (result.created) void recordFirstWrite(store, project._id, 'http');
+        if (result.created) recordFirstWrite(store, project._id, 'http');
 
         const warnings = [...result.warnings];
         if (project.rules.scopeWarnings && actor !== 'unknown-agent') {

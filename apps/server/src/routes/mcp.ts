@@ -534,7 +534,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           note: args.note === undefined ? undefined : str(args.note),
           actor,
         });
-        if (result.created) void recordFirstWrite(store, project._id, 'mcp');
+        if (result.created) recordFirstWrite(store, project._id, 'mcp');
         void maybeSweep(store, project).catch(() => undefined);
         return {
           item: itemJson(result.item),

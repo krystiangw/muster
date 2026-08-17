@@ -160,6 +160,27 @@ export async function runMigrations(store: Store): Promise<void> {
       },
     },
   ]);
+
+  /**
+   * A project that already holds work was activated before the marker existed.
+   *
+   * Without this, every project that predates the field looks unactivated, and
+   * its next new item records a second activation years after the first. The
+   * marker answers "has this happened", not "exactly when", so a backfilled one
+   * carries the project's own creation time; only its presence is ever read.
+   *
+   * Cheap after the first run: only projects still missing the marker are
+   * considered, which by then is the ones created since boot with no items yet.
+   */
+  const unmarked = await store.projects.distinct('_id', { firstWriteAt: { $exists: false } });
+  if (unmarked.length > 0) {
+    const written = await store.items.distinct('projectId', { projectId: { $in: unmarked } });
+    if (written.length > 0) {
+      await store.projects.updateMany({ _id: { $in: written } }, [
+        { $set: { firstWriteAt: '$createdAt' } },
+      ]);
+    }
+  }
 }
 
 /**
