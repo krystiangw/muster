@@ -1027,3 +1027,24 @@ Two layers now. The tool arguments are read through something that refuses a
 non-string instead of substituting one, and the service checks the handful of
 values that land in a filter, so a third door tomorrow starts from the same
 floor rather than from whatever its author remembered.
+
+## Ten loops, one item, nine losers, 2026-08-18
+
+`/next` does not claim, on purpose: reading what is next and taking it are
+different decisions, and an agent that only wants to look should not have to
+release afterwards. Firing ten concurrent asks at a local copy showed what that
+costs a fleet: all ten were offered the same item, one won the claim that
+followed and nine spent a round trip losing.
+
+`claim=true` does both. The first shape of it offered and then claimed, with a
+retry on losing, and three of ten still came back empty after losing three times
+in a row. The gap between choosing and taking was the whole problem, so there is
+no gap now: the selection filter and the sort go into the same
+`findOneAndUpdate` that writes the lease, and MongoDB hands ten callers ten
+different items. The claim write itself is one function used by both callers,
+because two copies of it would drift, and the copy that stopped signing the item
+or clearing its stale flag is the kind of difference nobody notices until a
+board reads wrong.
+
+The plain call is unchanged and still does not claim, which is what makes it
+safe to poll.

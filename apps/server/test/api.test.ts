@@ -523,6 +523,62 @@ describe('items', () => {
     assert.equal(fine.json().result.structuredContent.items.length, 1);
   });
 
+  it('hands a fleet distinct work when it asks for the claim in the same call', async () => {
+    // `/next` deliberately does not claim, and the cost of that shows up on a
+    // fleet: ten loops asking at once are all offered the same item, one wins
+    // the claim that follows and nine spend a round trip losing. Measured
+    // against a local copy before this existed: ten asks, one item, nine 409s.
+    const project = await createProject(harness);
+    for (let n = 0; n < 10; n += 1) {
+      await post(project, '/items', { slug: `work-${n}`, title: `work ${n}`, actor: 'filer' });
+    }
+
+    const asked = await Promise.all(
+      Array.from({ length: 10 }, (_, n) =>
+        harness.server.inject({
+          method: 'GET',
+          url: `${project.api}/next?agent=loop-${n}&claim=true`,
+          headers: authed(project),
+        }),
+      ),
+    );
+    const handed = asked.map((answer) => answer.json()).filter((body) => body.item);
+    const slugs = handed.map((body) => body.item.slug);
+    assert.equal(new Set(slugs).size, slugs.length, `two loops got the same item: ${slugs.join()}`);
+    // All ten, not most of them: selecting and claiming are one update now, so
+    // there is no gap for two loops to read the same item out of. An earlier
+    // version offered and then claimed, and three of ten came back with
+    // nothing after losing the race three times.
+    assert.equal(slugs.length, 10, `only ${slugs.length} of ten were served: ${slugs.join()}`);
+    for (const body of handed) {
+      assert.equal(body.claimed, true);
+      assert.ok(body.item.claim, 'and it comes back already held');
+    }
+
+    // The lease belongs to whoever asked, not to whoever asked first.
+    for (const body of handed) {
+      const item = await harness.store.items.findOne({ projectId: project.id, slug: body.item.slug });
+      assert.equal(item?.claim?.agent, body.item.claim.agent);
+    }
+
+    // Without the flag it stays a look, which is what makes it safe to poll.
+    const looked = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/next?agent=looker`,
+      headers: authed(project),
+    });
+    assert.equal(looked.json().claimed, undefined);
+
+    // And claiming needs a name to claim for.
+    const nameless = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/next?claim=true`,
+      headers: authed(project),
+    });
+    assert.equal(nameless.statusCode, 400);
+    assert.equal(nameless.json().error, 'bad_agent');
+  });
+
   it('enforces the project item cap', async () => {
     const project = await createProject(harness);
     await harness.store.projects.updateOne(
@@ -640,7 +696,8 @@ describe('next', () => {
     await post(project, '/items', { slug: 'errors:one', status: 'done', actor: 'errors-loop' });
     const empty = await get(project, '/next?agent=errors-loop');
     assert.equal(empty.json().item, null);
-    assert.match(empty.json().reason, /belong to other scopes/);
+    // Singular or plural, because one item is one item.
+    assert.match(empty.json().reason, /1 open item belongs to other scopes/);
   });
 
   it('hands a restarted agent back its own claim before anything else', async () => {

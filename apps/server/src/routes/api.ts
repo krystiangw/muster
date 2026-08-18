@@ -56,6 +56,7 @@ import {
   readInbox,
   readItems,
   nextItem,
+  nextItemHeld,
   observe,
   registerAgent,
   releaseItem,
@@ -1060,16 +1061,30 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           summary: 'What this agent should pick up next',
           querystring: {
             type: 'object',
-            properties: { agent: { type: 'string', maxLength: 48 } },
+            properties: {
+              agent: { type: 'string', maxLength: 48 },
+              claim: {
+                type: 'boolean',
+                description:
+                  'Take the lease in the same call. Without it, a fleet asking at once is offered the same item and all but one lose the claim that follows.',
+              },
+              ttl_minutes: { type: 'integer', minimum: 1, maximum: 1440 },
+            },
             additionalProperties: false,
           },
         },
       },
       async (request) => {
         const { project } = auth(request);
-        const { agent } = request.query as { agent?: string };
+        const { agent, claim, ttl_minutes: ttl } = request.query as {
+          agent?: string;
+          claim?: boolean;
+          ttl_minutes?: number;
+        };
         void maybeSweep(store, project).catch(() => undefined);
-        const result = await nextItem(store, project, agent ?? '');
+        const result = claim
+          ? await nextItemHeld(store, project, agent ?? '', ttl)
+          : await nextItem(store, project, agent ?? '');
         // The earliest moment a mistyped handle can be caught: an agent asking
         // for work under a name nobody registered is offered everything, since
         // there is no scope to narrow by, and it never finds out why.
@@ -1077,6 +1092,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         return {
           item: result.item ? itemJson(result.item, true) : null,
           reason: result.reason,
+          ...(result.claimed === undefined ? {} : { claimed: result.claimed }),
           ...(named.length > 0 ? { warnings: named } : {}),
         };
       },

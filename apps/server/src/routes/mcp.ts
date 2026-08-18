@@ -20,6 +20,7 @@ import {
   readInbox,
   readItems,
   nextItem,
+  nextItemHeld,
   observe,
   registerAgent,
   shareProject,
@@ -218,7 +219,15 @@ const TOOLS: ToolDefinition[] = [
       'The oldest unclaimed open item inside your declared scope. If there is none you are told so, rather than handed somebody else’s work.',
     inputSchema: {
       type: 'object',
-      properties: { agent: { type: 'string' } },
+      properties: {
+        agent: { type: 'string' },
+        claim: {
+          type: 'boolean',
+          description:
+            'Take the lease in the same call. Without it, a fleet asking at once is offered the same item and all but one lose the claim that follows.',
+        },
+        ttl_minutes: { type: 'integer', minimum: 1, maximum: 1440 },
+      },
     },
     requiresProject: true,
   },
@@ -691,11 +700,20 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
       case 'next_item': {
         void maybeSweep(store, project).catch(() => undefined);
         const asked = text(args.agent, 'agent') ?? '';
-        const result = await nextItem(store, project, asked);
+        const result =
+          args.claim === true
+            ? await nextItemHeld(
+                store,
+                project,
+                asked,
+                typeof args.ttl_minutes === 'number' ? args.ttl_minutes : undefined,
+              )
+            : await nextItem(store, project, asked);
         const warnings = asked ? await writeWarnings(store, project, asked) : [];
         return {
           item: result.item ? itemJson(result.item, true) : null,
           reason: result.reason,
+          ...(result.claimed === undefined ? {} : { claimed: result.claimed }),
           ...(warnings.length > 0 ? { warnings } : {}),
         };
       }

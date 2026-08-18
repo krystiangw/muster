@@ -1471,6 +1471,34 @@ export interface ClaimResult {
   expiresAt?: Date;
 }
 
+/**
+ * The write that takes a lease, in one place.
+ *
+ * Two callers do it: claiming a card by name, and asking for the next one and
+ * taking it in the same breath. Written twice they would drift, and the second
+ * of them would stop marking an item as touched or stop signing it, which is
+ * exactly the class of difference nobody notices until a board reads wrong.
+ */
+function takingIt(agent: string, now: Date, ttl: number, expiresAt: Date) {
+  return {
+    $set: {
+      claim: { agent, claimedAt: now, heartbeatAt: now, expiresAt },
+      updatedAt: now,
+      touchedAt: now,
+      stale: false,
+      staleSince: null,
+      lastActor: agent,
+    },
+    $push: {
+      timeline: {
+        $each: [{ at: now, by: agent, kind: 'claimed' as const, message: `claimed for ${ttl}m` }],
+        $slice: -TIMELINE_KEEP,
+      },
+    },
+    $inc: { timelineCount: 1 },
+  };
+}
+
 export async function claimItem(
   store: Store,
   project: ProjectDoc,
@@ -1499,23 +1527,7 @@ export async function claimItem(
         { 'claim.agent': agent },
       ],
     },
-    {
-      $set: {
-        claim: { agent, claimedAt: now, heartbeatAt: now, expiresAt },
-        updatedAt: now,
-        touchedAt: now,
-        stale: false,
-        staleSince: null,
-        lastActor: agent,
-      },
-      $push: {
-        timeline: {
-          $each: [{ at: now, by: agent, kind: 'claimed' as const, message: `claimed for ${ttl}m` }],
-          $slice: -TIMELINE_KEEP,
-        },
-      },
-      $inc: { timelineCount: 1 },
-    },
+    takingIt(agent, now, ttl, expiresAt),
     { returnDocument: 'after' },
   );
 
@@ -2049,6 +2061,99 @@ export async function getItem(
 export interface NextResult {
   item: ItemDoc | null;
   reason: string;
+  /** Whether this call also took the lease, when it was asked to. */
+  claimed?: boolean;
+}
+
+/**
+ * The same offer, held for whoever asked.
+ *
+ * `/next` deliberately does not claim, because reading what is next and taking
+ * it are different decisions and an agent that only wants to look should not
+ * have to release afterwards. The cost shows up on a fleet: ten loops asking at
+ * once are all offered the same item, one wins the claim that follows and nine
+ * spend a round trip losing. This does both in one call, and on losing the race
+ * it asks again rather than handing back a refusal, because the item it would
+ * refuse with is one somebody else is already working.
+ */
+export async function nextItemHeld(
+  store: Store,
+  project: ProjectDoc,
+  handle: string,
+  ttlMinutes?: number,
+): Promise<NextResult> {
+  if (typeof handle !== 'string' || handle === '') {
+    throw badRequest('bad_agent', 'Claiming what comes next needs the handle it is for.');
+  }
+  const now = new Date();
+  const ttl = Math.min(Math.max(ttlMinutes ?? project.rules.claimTtlMinutes, 1), 1440);
+  const expiresAt = new Date(now.getTime() + ttl * 60_000);
+
+  // Held already, and handed back rather than claimed again: a session that
+  // restarts must be given the work it took, or it abandons it for an hour.
+  const own = await store.items.findOne({
+    projectId: project._id,
+    status: 'open',
+    'claim.agent': handle,
+    'claim.expiresAt': { $gt: now },
+  });
+  if (own) {
+    return { item: own as ItemDoc, reason: 'you already hold this claim, finish or release it', claimed: true };
+  }
+
+  const agent = await store.agents.findOne({ projectId: project._id, handle });
+  const free = {
+    projectId: project._id,
+    status: 'open' as const,
+    $or: [{ claim: null }, { 'claim.expiresAt': { $lte: now } }],
+  };
+  // The selection and the claim are one update, sorted the way the offer is
+  // sorted. Choosing and then taking was two round trips with a gap in the
+  // middle, and ten loops asking at the same moment all read the same item out
+  // of that gap: one took it and nine lost, which is the round trip this call
+  // exists to save.
+  const take = (filter: Record<string, unknown>) =>
+    store.items.findOneAndUpdate(filter, takingIt(handle, now, ttl, expiresAt), {
+      sort: { priority: -1, touchedAt: 1 },
+      returnDocument: 'after',
+    });
+
+  const scope = agent?.scope ?? [];
+  if (scope.length > 0) {
+    const scoped = await take({
+      ...free,
+      $and: [
+        {
+          $or: [
+            { labels: { $in: scope } },
+            { owner: { $in: scope } },
+            { slug: { $in: scope } },
+            ...scope.map((token) => ({ slug: { $regex: `^${escapeRegex(token)}` } })),
+          ],
+        },
+      ],
+    });
+    if (scoped) {
+      void touchAgent(store, project._id, handle);
+      return { item: scoped as ItemDoc, reason: 'in your declared scope', claimed: true };
+    }
+    const otherCount = await store.items.countDocuments(free, { limit: 50 });
+    return {
+      item: null,
+      claimed: false,
+      reason:
+        otherCount > 0
+          ? `nothing open in your scope; ${otherCount} open ${otherCount === 1 ? 'item belongs' : 'items belong'} to other scopes. Widen your scope on purpose, or leave them alone.`
+          : 'nothing open in this project',
+    };
+  }
+
+  const any = await take(free);
+  if (any) {
+    void touchAgent(store, project._id, handle);
+    return { item: any as ItemDoc, reason: 'oldest untouched open item', claimed: true };
+  }
+  return { item: null, claimed: false, reason: 'nothing open in this project' };
 }
 
 /**
@@ -2121,7 +2226,7 @@ export async function nextItem(
       item: null,
       reason:
         otherCount > 0
-          ? `nothing open in your scope; ${otherCount} open item(s) belong to other scopes. Widen your scope on purpose, or leave them alone.`
+          ? `nothing open in your scope; ${otherCount} open ${otherCount === 1 ? 'item belongs' : 'items belong'} to other scopes. Widen your scope on purpose, or leave them alone.`
           : 'nothing open in this project',
     };
   }
