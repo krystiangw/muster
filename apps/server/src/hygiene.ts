@@ -328,6 +328,13 @@ export async function correctOvercount(store: Store, projectId: string): Promise
     store.items.countDocuments({ projectId, status: { $nin: [...TERMINAL_STATUSES] } }),
     store.escalations.countDocuments({ projectId, status: 'open' }),
   ]);
+  // Only worth asking when something is actually going to be written: on a
+  // project whose counters are already right, which is nearly all of them
+  // nearly all of the time, this is two queries for nothing.
+  const wouldRepair =
+    before.counts.items > openItems || before.counts.escalations > openEscalations;
+  if (!wouldRepair) return false;
+
   const [itemsMoved, escalationsMoved] = await Promise.all([
     store.items.countDocuments({ projectId, updatedAt: { $gte: mark } }),
     store.escalations.countDocuments({ projectId, updatedAt: { $gte: mark } }),
