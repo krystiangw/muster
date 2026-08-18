@@ -89,7 +89,20 @@ export function registerOAuth(app: FastifyInstance, deps: OAuthDeps): void {
           .send({ error: 'slow_down', error_description: 'Too many registrations.' });
       }
 
-      const body = (request.body ?? {}) as { client_name?: string };
+      const body = (request.body ?? {}) as { client_name?: string; grant_types?: string[] };
+      // RFC 7591 says to refuse metadata the server cannot honour rather than
+      // register something else and let the client find out at the token
+      // endpoint. There is no end-user here to send through an authorization
+      // code flow, so a client that asks only for one is asking for something
+      // this deployment will never do.
+      const asked = Array.isArray(body.grant_types) ? body.grant_types : [];
+      if (asked.length > 0 && !asked.includes('client_credentials')) {
+        return reply.code(400).send({
+          error: 'invalid_client_metadata',
+          error_description:
+            'This server issues tokens with client_credentials only: a project belongs to whoever created it, and the one human moment is claiming it by email afterwards. See /agent-signup.md.',
+        });
+      }
       const { project } = await createProject(store, config, { name: body.client_name });
       record(store, 'signup', { door: 'oauth', projectId: project._id });
       const clientId = newId('client');
@@ -107,7 +120,14 @@ export function registerOAuth(app: FastifyInstance, deps: OAuthDeps): void {
         client_id: clientId,
         client_secret: clientSecret,
         client_id_issued_at: Math.floor(Date.now() / 1000),
-        client_secret_expires_at: 0,
+        // 0 means "never" in RFC 7591, and this credential dies with the
+        // project it was made for: an unclaimed one is deleted, and the client
+        // document carries that same date. Saying never would have been a
+        // promise the seventh day breaks. A human claiming the project by email
+        // clears both.
+        client_secret_expires_at: project.expiresAt
+          ? Math.floor(project.expiresAt.getTime() / 1000)
+          : 0,
         client_name: body.client_name ?? 'unnamed client',
         grant_types: ['client_credentials'],
         token_endpoint_auth_method: 'client_secret_post',

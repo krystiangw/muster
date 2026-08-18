@@ -186,6 +186,30 @@ describe('B. agent entry', () => {
     const { client_id, client_secret } = registered.json();
     assert.ok(client_id && client_secret);
 
+    // The credential dies with the project it was made for, and 0 in RFC 7591
+    // means never, so an unclaimed project may not answer 0.
+    const expiresAt = registered.json().client_secret_expires_at;
+    assert.ok(expiresAt > Math.floor(Date.now() / 1000), 'a real date, in the future');
+
+    // A client that can only do authorization_code is asking for something no
+    // deployment of this will ever do, and it should hear that here rather
+    // than at the token endpoint.
+    const wrongGrant = await harness.server.inject({
+      method: 'POST',
+      url: '/oauth/register',
+      payload: { client_name: 'browser-thing', grant_types: ['authorization_code'] },
+    });
+    assert.equal(wrongGrant.statusCode, 400);
+    assert.equal(wrongGrant.json().error, 'invalid_client_metadata');
+
+    // Asking for both is fine: the one it gets is the one it can use.
+    const both = await harness.server.inject({
+      method: 'POST',
+      url: '/oauth/register',
+      payload: { grant_types: ['authorization_code', 'client_credentials'] },
+    });
+    assert.equal(both.statusCode, 201);
+
     const token = await harness.server.inject({
       method: 'POST',
       url: '/oauth/token',
