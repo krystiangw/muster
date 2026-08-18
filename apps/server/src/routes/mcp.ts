@@ -192,7 +192,11 @@ const TOOLS: ToolDefinition[] = [
         label: { type: 'string' },
         source: { type: 'string' },
         stale: { type: 'boolean' },
-        claimed: { type: 'boolean' },
+        claimed: {
+          type: 'boolean',
+          description:
+            'true for items somebody holds right now, false for free ones. An expired lease counts as free.',
+        },
         limit: { type: 'integer', minimum: 1, maximum: 200 },
         order: {
           type: 'string',

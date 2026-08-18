@@ -498,7 +498,11 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
               label: { type: 'string' },
               source: { type: 'string' },
               stale: { type: 'boolean' },
-              claimed: { type: 'boolean' },
+              claimed: {
+                type: 'boolean',
+                description:
+                  'true for items somebody holds right now, false for free ones. A lease that has expired counts as free, the same way the board reads it, whether or not hygiene has cleared it yet.',
+              },
               limit: { type: 'integer', minimum: 1, maximum: 200 },
               order: {
                 type: 'string',
