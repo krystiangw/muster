@@ -135,6 +135,28 @@ sessions describing the same problem must land on the same slug, and a date
 guarantees they will not. If an item with the same title already exists under a
 different slug, the response says so in \`warnings\`.
 
+### 2b. Rewriting something you just read
+
+Two loops correcting the same card is ordinary here, and the second one to write
+wins with no idea it overwrote anything. Send what you last saw and the write
+refuses instead:
+
+\`\`\`bash
+curl -sX POST $MUSTER/items -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"slug":"errors:venue-withdraw-stuck","body":"Corrected: the signer, not the venue.",
+       "expect":{"body":"A large position is parked behind a bridge."},
+       "must_exist":true,"actor":"errors-loop"}'
+\`\`\`
+
+A mismatch is **409 \`changed_underneath\`** and nothing is written: re-read the
+item, decide again, and write again. The check is part of the write rather than
+a look before it, because between a read and an update there is room for exactly
+the change this is trying not to lose. \`must_exist\` refuses to create, which is
+what you want when a new card would be wrong. A guarded write cannot also move
+the status; that transition has its own guard, so send the correction and then
+the move.
+
 ### 3. Claim it before you work on it
 
 \`\`\`bash

@@ -334,6 +334,78 @@ describe('items', () => {
     assert.equal(item.timeline[1].message, 'second');
   });
 
+  it('refuses a write over a change it did not see', async () => {
+    // The browser's edit form has written guarded since it existed and the
+    // door this product is for could not: the mechanism sat in the domain,
+    // reachable from one side only. Two loops correcting the same card is
+    // ordinary, and the second one to write used to win silently.
+    const project = await createProject(harness);
+    await post(project, '/items', {
+      slug: 'errors:withdraw',
+      title: 'Withdraws stuck',
+      body: 'Parked behind a bridge.',
+      actor: 'errors-loop',
+    });
+    // Somebody else got there in between.
+    await post(project, '/items', { slug: 'errors:withdraw', body: 'The signer, not the venue.', actor: 'ops-loop' });
+
+    const stale = await post(project, '/items', {
+      slug: 'errors:withdraw',
+      body: 'Corrected from what I read.',
+      expect: { body: 'Parked behind a bridge.' },
+      must_exist: true,
+      actor: 'errors-loop',
+    });
+    assert.equal(stale.statusCode, 409);
+    assert.equal(stale.json().error, 'changed_underneath');
+    assert.equal(
+      (await harness.store.items.findOne({ projectId: project.id, slug: 'errors:withdraw' }))?.body,
+      'The signer, not the venue.',
+      'and nothing was written',
+    );
+
+    const fresh = await post(project, '/items', {
+      slug: 'errors:withdraw',
+      body: 'Corrected: the signer.',
+      expect: { body: 'The signer, not the venue.' },
+      must_exist: true,
+      actor: 'errors-loop',
+    });
+    assert.equal(fresh.statusCode, 200, fresh.body);
+
+    // A card that is not there is not created by a guarded write.
+    const absent = await post(project, '/items', {
+      slug: 'errors:never-filed',
+      title: 'x',
+      must_exist: true,
+      actor: 'errors-loop',
+    });
+    assert.equal(absent.statusCode, 404);
+
+    // And the same guard over the other door, because two doors mean one
+    // behaviour or they mean nothing.
+    const overMcp = await harness.server.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: authed(project),
+      payload: {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'upsert_item',
+          arguments: {
+            slug: 'errors:withdraw',
+            body: 'Written blind.',
+            expect: { body: 'Parked behind a bridge.' },
+            actor: 'errors-loop',
+          },
+        },
+      },
+    });
+    assert.match(JSON.stringify(overMcp.json()), /changed_underneath/);
+  });
+
   it('enforces the project item cap', async () => {
     const project = await createProject(harness);
     await harness.store.projects.updateOne(

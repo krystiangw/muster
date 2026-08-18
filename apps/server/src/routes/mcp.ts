@@ -133,6 +133,18 @@ const TOOLS: ToolDefinition[] = [
         },
         note: { type: 'string', description: 'Timeline entry describing this change' },
         actor: { type: 'string', description: 'Your agent handle' },
+        expect: {
+          type: 'object',
+          description:
+            'Write only if the item still says this. Between reading a card and writing it there is room for exactly the change this is trying not to lose; a mismatch refuses with changed_underneath and writes nothing. Not with status, which has its own guard.',
+          properties: { title: { type: 'string' }, body: { type: 'string' } },
+          additionalProperties: false,
+        },
+        must_exist: {
+          type: 'boolean',
+          description:
+            'Refuse to create. Send it when you mean to change something that is already there and a new card would be wrong.',
+        },
       },
     },
     requiresProject: true,
@@ -460,12 +472,17 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
     } catch (error) {
       const status = error instanceof ServiceError ? error.statusCode : 500;
       const text = error instanceof Error ? error.message : 'Unexpected error';
+      // The code as well as the sentence. The sentence is for whoever reads the
+      // transcript; the code is what a loop branches on, and over HTTP it has
+      // always been there. Without it this door left an agent matching prose to
+      // tell "somebody wrote to it first" from "you are over the cap".
+      const code = error instanceof ServiceError ? error.code : 'internal';
       return {
         jsonrpc: '2.0',
         id,
         result: {
-          content: [{ type: 'text', text: `${status}: ${text}` }],
-          structuredContent: { error: text, status },
+          content: [{ type: 'text', text: `${status} ${code}: ${text}` }],
+          structuredContent: { error: text, code, status },
           isError: true,
         },
       };
@@ -596,6 +613,13 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
               ? (args.fields as Record<string, unknown>)
               : undefined,
           note: args.note === undefined ? undefined : str(args.note),
+          // Both doors, same behaviour: a guarded write was reachable from the
+          // browser's edit form and from nowhere an agent could call.
+          expect:
+            args.expect && typeof args.expect === 'object' && !Array.isArray(args.expect)
+              ? (args.expect as { title?: string; body?: string })
+              : undefined,
+          mustExist: args.must_exist === true,
           actor,
         });
         if (result.created) recordFirstWrite(store, project._id, 'mcp');

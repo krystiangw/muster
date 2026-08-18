@@ -585,6 +585,21 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
               source: { type: ['string', 'null'], maxLength: 64 },
               note: { type: 'string', maxLength: 2000 },
               actor: { type: 'string', maxLength: 48 },
+              expect: {
+                type: 'object',
+                description:
+                  'Write only if the item still says this. For a read, a decision and a write: between reading a card and writing it there is room for exactly the change this is trying not to lose. A mismatch answers 409 changed_underneath and writes nothing. Cannot be combined with status, which has its own guard.',
+                properties: {
+                  title: { type: 'string', maxLength: 300 },
+                  body: { type: 'string', maxLength: 20000 },
+                },
+                additionalProperties: false,
+              },
+              must_exist: {
+                type: 'boolean',
+                description:
+                  'Refuse to create. This call is an upsert, which is what makes it safe to retry; send this when you mean to change something that is already there and a new card would be wrong.',
+              },
               history: {
                 type: 'array',
                 maxItems: 200,
@@ -622,6 +637,11 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           source: body.source as string | null | undefined,
           note: body.note as string | undefined,
           history: body.history as UpsertItemInput['history'],
+          // The browser's edit form has written guarded since it existed, and
+          // the door this product is for could not: the mechanism was in the
+          // domain and reachable from one side only.
+          expect: body.expect as UpsertItemInput['expect'],
+          mustExist: body.must_exist as boolean | undefined,
           actor,
         });
         if (result.created) recordFirstWrite(store, project._id, 'http');
