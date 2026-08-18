@@ -41,21 +41,31 @@ const json = async (url, options = {}) => {
   return { status: response.status, body };
 };
 
-// What a client reads before it does anything, and the only description of this
-// server it is entitled to trust.
+/**
+ * What a client reads before it does anything.
+ *
+ * Checked before anything is sent, and fatally, not through `step`: everything
+ * below posts a client secret to the address this document names, so a failure
+ * here has to stop the run rather than be counted and passed over. A document
+ * that advertised an endpoint on another host would otherwise have been handed
+ * the credentials it asked for.
+ */
+const stop = (why) => {
+  console.log(`FAIL  authorization server metadata ${why}`);
+  process.exit(1);
+};
 const metadata = (await json('/.well-known/oauth-authorization-server')).body;
-await step('authorization server metadata', async () => {
-  for (const field of ['issuer', 'registration_endpoint', 'token_endpoint', 'grant_types_supported']) {
-    if (!metadata?.[field]) throw new Error(`no ${field}`);
-  }
-  if (!metadata.grant_types_supported.includes('client_credentials')) {
-    throw new Error('client_credentials is not offered, which is the only grant this server has');
-  }
-  for (const endpoint of [metadata.registration_endpoint, metadata.token_endpoint]) {
-    if (!endpoint.startsWith(base)) throw new Error(`${endpoint} is not on this deployment`);
-  }
-  return `issuer ${metadata.issuer}, grants ${metadata.grant_types_supported.join(',')}`;
-});
+if (!metadata) stop('is not JSON');
+for (const field of ['issuer', 'registration_endpoint', 'token_endpoint', 'grant_types_supported']) {
+  if (!metadata[field]) stop(`has no ${field}`);
+}
+if (!metadata.grant_types_supported.includes('client_credentials')) {
+  stop('does not offer client_credentials, which is the only grant this server has');
+}
+for (const endpoint of [metadata.registration_endpoint, metadata.token_endpoint]) {
+  if (!endpoint.startsWith(`${base}/`)) stop(`advertises ${endpoint}, which is not on this deployment`);
+}
+console.log(`ok    authorization server metadata issuer ${metadata.issuer}, grants ${metadata.grant_types_supported.join(',')}`);
 
 // Everything below goes through the addresses the metadata published, not
 // through the ones this file knows. A client follows the document; a check that
@@ -127,7 +137,16 @@ const ask = (who) =>
 let client = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8'))[key] : null;
 let issued = client ? await ask(client) : null;
 if (client && issued.status !== 200) {
-  console.log(`the saved registration is gone (${issued.status}), registering again`);
+  // `invalid_client` is the server saying this registration is finished: an
+  // unknown client, or a project that expired under it. Anything else, a 429 or
+  // a bad minute on the dyno, is the failure this tool is here to report, and
+  // registering around it would provision a project for the privilege of hiding
+  // it.
+  if (issued.body?.error !== 'invalid_client') {
+    console.log(`FAIL  client_credentials ${issued.status}: ${JSON.stringify(issued.body).slice(0, 160)}`);
+    process.exit(1);
+  }
+  console.log(`the saved registration is finished (${issued.body.error}), registering again`);
   client = await register();
   issued = await ask(client);
 } else if (!client) {
