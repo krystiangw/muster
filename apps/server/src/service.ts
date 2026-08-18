@@ -1368,7 +1368,10 @@ export async function upsertItem(
       throw new ServiceError(
         409,
         'changed_underneath',
-        `Somebody wrote to "${slug}" while this was open, so nothing was saved: writing your copy back would have thrown their words away. Open it again and redo the change on what it says now.`,
+        // Neutral about who is reading it: this refusal used to reach a person
+        // with a form open and now reaches a loop that read the item a second
+        // ago, and "open it again" is not something a loop does.
+        `Somebody wrote to "${slug}" after you read it, so nothing was saved: writing your copy back would have thrown their words away. Read it again and redo the change on what it says now.`,
       );
     }
     throw notFound(slug);
