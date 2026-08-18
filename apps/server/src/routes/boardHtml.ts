@@ -501,16 +501,30 @@ ${shown
  * because on most boards the hygiene rule drops an item nobody described.
  */
 export function renderNewItem(action: string, requireBodyAfterHours: number | null): string {
-  return `<form class="newitem" method="post" action="${escapeHtml(action)}/new">
-  <label for="new-title">Add an item</label>
-  <input id="new-title" name="title" size="40" maxlength="200" required
-    placeholder="What needs doing">
-  <textarea name="body" rows="2" maxlength="4000"
-    placeholder="What it is, in enough words that whoever picks it up knows${
-      requireBodyAfterHours === null ? '' : `. Left empty, this board drops it after ${requireBodyAfterHours}h`
-    }"></textarea>
-  <button type="submit">add</button>
-</form>`;
+  return `<p class="addcard"><a href="#new-item">Add an item</a></p>
+<div class="peeked" id="new-item">
+  <a class="scrim" href="#" aria-label="Close"></a>
+  <div class="sheet">
+    <div class="sheet-top">
+      <span class="slug">new item</span>
+      <a class="close" href="#">close</a>
+    </div>
+    <h3>Add an item</h3>
+    <form class="newitem" method="post" action="${escapeHtml(action)}/new">
+      <label for="new-title">Title</label>
+      <input id="new-title" name="title" maxlength="200" required placeholder="What needs doing">
+      <label for="new-body">Description</label>
+      <textarea id="new-body" name="body" rows="4" maxlength="4000"
+        placeholder="What it is, in enough words that whoever picks it up knows."></textarea>
+      ${
+        requireBodyAfterHours === null
+          ? ''
+          : `<p class="why">Left without a description, this board drops it after ${requireBodyAfterHours}h.</p>`
+      }
+      <button type="submit">add</button>
+    </form>
+  </div>
+</div>`;
 }
 
 /**
@@ -571,7 +585,21 @@ function agentOptions(agents: AgentFacet[], selected: string | undefined): strin
     .join('\n      ');
 }
 
-export function renderBoardFilters(view: BoardView, facets: BoardFacets, action: string): string {
+/**
+ * The narrowing controls, and the one control that is not a narrowing.
+ *
+ * "Keep up" reloads the page every minute, for the case this board is for:
+ * agents writing while somebody watches. It is off unless asked for, and it
+ * lives in the URL like every filter here, so it survives a reload and can be
+ * kept as a bookmark. Off by default because a page that reloads under
+ * somebody's hands throws away the note they were half way through typing.
+ */
+export function renderBoardFilters(
+  view: BoardView,
+  facets: BoardFacets,
+  action: string,
+  live = false,
+): string {
   if (facets.owners.length === 0 && facets.agents.length === 0 && facets.labels.length === 0) {
     return '';
   }
@@ -625,10 +653,12 @@ export function renderBoardFilters(view: BoardView, facets: BoardFacets, action:
     <input type="search" name="q" value="${escapeHtml(view.filter.q ?? '')}"
       placeholder="slug or title" size="16">
   </label>
+  <label class="live"><input type="checkbox" name="live" value="1"${live ? ' checked' : ''}>
+    Keep up</label>
   <button type="submit">Show</button>
   ${
     view.filter.owner || view.filter.agent || view.filter.label || view.filter.q
-      ? `<a class="ghost-link" href="${escapeHtml(action)}">whole board</a>`
+      ? `<a class="ghost-link" href="${escapeHtml(action)}${live ? '?live=1' : ''}">whole board</a>`
       : ''
   }
   ${more(facets.omitted.owners, 'owner', 'owner')}

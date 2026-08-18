@@ -705,6 +705,30 @@ describe('moving an item into a column', () => {
     );
   });
 
+  it('keeps up with the agents only when asked to', async () => {
+    // A board is watched while loops write to it, and a page that never
+    // changes is a page somebody reloads by hand. A page that reloads itself
+    // under their hands is worse, so it is a switch and it lives in the URL.
+    const project = await createProject(harness, 'watched');
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'card', title: 'card', actor: 'a' },
+    });
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    const still = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.ok(!still.body.includes('http-equiv="refresh"'), 'off unless asked');
+
+    const watching = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?live=1`,
+    });
+    assert.match(watching.body, /<meta http-equiv="refresh" content="60">/);
+    assert.match(watching.body, /name="live" value="1" checked/, 'and the switch says so');
+  });
+
   it('files a card from the board, and never on top of one already there', async () => {
     // Asked in a browser: there was no way to add an item except curl. Nobody
     // decided that a person may not file work, it was never built.
@@ -748,6 +772,23 @@ describe('moving an item into a column', () => {
     // A title is the one thing it cannot do without.
     const empty = await file('   ');
     assert.equal(empty.statusCode, 400);
+
+    // Filed at the same instant, both keep their words. The lookup cannot see
+    // that race; the write settles it, and the loser gets another name.
+    const together = await Promise.all([file('Same words', 'mine'), file('Same words', 'theirs')]);
+    assert.deepEqual(
+      together.map((response) => response.statusCode),
+      [303, 303],
+    );
+    const both = await harness.store.items
+      .find({ projectId: project.id, slug: { $regex: '^same-words' } })
+      .toArray();
+    assert.equal(both.length, 2, 'two cards');
+    assert.deepEqual(
+      both.map((item) => item.body).sort(),
+      ['mine', 'theirs'],
+      'and neither wrote over the other',
+    );
 
     // And the form is on the page that files it.
     const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });

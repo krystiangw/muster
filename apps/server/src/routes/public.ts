@@ -17,7 +17,7 @@ import { redactAddress, type Mailer } from '../email.js';
 import { record, recordView } from '../events.js';
 import { ago, chip, escapeHtml, layout, when } from '../html.js';
 import { avatar, who } from '../identity.js';
-import { normalizeSlug } from '../ids.js';
+import { newId, normalizeSlug } from '../ids.js';
 import {
   renderBoard,
   renderBoardFilters,
@@ -174,6 +174,9 @@ function noSuchProject(): string {
  */
 /** As much of a note as goes into a timeline entry, at both doors. */
 const NOTE_MAX_CHARS = 2_000;
+
+/** How often a board that was asked to keep up reloads itself. */
+const BOARD_REFRESH_SECONDS = 60;
 
 interface KeptFilter {
   from_owner?: string;
@@ -1139,7 +1142,13 @@ ${
       label?: string;
       q?: string;
       answered?: string;
+      live?: string;
     };
+    // A board somebody is watching while agents write to it. A minute is the
+    // slowest a person notices and the fastest that is not a nuisance: a card
+    // filed by a loop is worth seeing on this pass, and a page that reloads
+    // every ten seconds is a page nobody can read.
+    const live = one(query.live) === '1';
     const narrowing = {
       ...(query.owner ? { owner: query.owner.slice(0, 48) } : {}),
       ...(query.agent ? { agent: query.agent.slice(0, 48) } : {}),
@@ -1281,7 +1290,7 @@ ${renderBoard(view, {
   moveAction: `${boardUrl}/move`,
   questions,
   answerAction: `/r/${escapeHtml(readToken)}`,
-  filters: renderBoardFilters(view, facets, boardUrl),
+  filters: renderBoardFilters(view, facets, boardUrl, live),
   timelines: await recentTimelines(store, project._id, view),
   agents,
   facets,
@@ -1302,7 +1311,13 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
       .type('text/html; charset=utf-8')
       .send(
         layout(
-          { title: `${project.name} board`, description: project.description, wide: true },
+          {
+            title: `${project.name} board`,
+            description: project.description,
+            wide: true,
+            signedIn: hasSessionCookie(request),
+            ...(live ? { refreshSeconds: BOARD_REFRESH_SECONDS } : {}),
+          },
           body,
         ),
       );
@@ -1563,22 +1578,47 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     if (title === '') throw new ServiceError(400, 'bad_request', 'An item needs a title.');
     const body = (one(form.body) ?? '').trim().slice(0, 4000);
 
+    // Two steps, and each one answers a different question. The lookup handles
+    // the ordinary case, a name already in use, and picks the next one along.
+    // `insertOnly` handles the race the lookup cannot see, two people filing
+    // the same words in the same instant: the write itself decides who created
+    // the item, and whoever did not gets another name rather than their words
+    // landing on the other's card.
     const base = normalizeSlug(title) || 'item';
     let slug = base;
-    for (let attempt = 2; attempt <= 20; attempt += 1) {
-      if (!(await store.items.findOne({ projectId: project._id, slug }, { projection: { _id: 1 } }))) {
-        break;
+    let filed = false;
+    for (let attempt = 1; attempt <= 6 && !filed; attempt += 1) {
+      const taken = await store.items.findOne(
+        { projectId: project._id, slug },
+        { projection: { _id: 1 } },
+      );
+      if (!taken) {
+        const written = await upsertItem(store, project, {
+          slug,
+          title,
+          body,
+          actor: 'operator',
+          insertOnly: true,
+        });
+        filed = written.created;
       }
-      slug = `${base.slice(0, 90)}-${attempt}`;
+      if (!filed) {
+        // Numbered while the numbers are readable, then random, because a sixth
+        // collision is not a person filing a sixth "check the bridge" and the
+        // loop has to end on a name nobody can already hold.
+        slug =
+          attempt < 4
+            ? `${base.slice(0, 90)}-${attempt + 1}`
+            : `${base.slice(0, 86)}-${newId('x', 5).slice(2)}`;
+      }
     }
-
-    await upsertItem(store, project, {
-      slug,
-      title,
-      body,
-      actor: 'operator',
-      note: 'filed from the board',
-    });
+    if (!filed) {
+      throw new ServiceError(
+        409,
+        'slug_taken',
+        'That title could not be given a name of its own. Try a different one.',
+      );
+    }
     const params = new URLSearchParams({ done: slug, what: 'new', ...keptParams(form) });
     return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
   });

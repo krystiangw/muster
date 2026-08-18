@@ -140,13 +140,14 @@ td .face { vertical-align:-3px; margin-right:4px; }
 .asked .label { color:var(--accent); margin:0 0 6px; }
 .asked textarea { width:100%; min-height:52px; }
 .asked form { max-width:none; display:flex; flex-direction:column; gap:8px; margin:8px 0 0; }
-/* Filing a card, above the board it lands on. One line on a desktop, stacked on
-   a phone, and never taller than the thing it sits over. */
-.newitem { display:flex; flex-wrap:wrap; gap:8px; align-items:flex-start; max-width:none;
-  margin:0 0 14px; }
-.newitem label { font-size:12px; align-self:center; font-family:var(--mono); color:var(--muted); }
-.newitem input { flex:1 1 220px; }
-.newitem textarea { flex:2 1 320px; min-height:44px; }
+/* Filing a card. In a sheet, like everything else that is a form rather than
+   something to read: on the page it was a pair of large empty boxes above a
+   board, which is the page apologising for itself. */
+.addcard { margin:0 0 14px; font-family:var(--mono); font-size:12.5px; }
+.newitem { display:flex; flex-direction:column; gap:8px; max-width:none; margin:0; }
+.newitem label { font-size:12px; font-family:var(--mono); color:var(--muted); }
+.newitem input, .newitem textarea { width:100%; }
+.newitem button { align-self:flex-start; }
 .edit button.tag { font-family:var(--mono); font-size:11px; padding:3px 8px; border-radius:999px; }
 /* A control revealed by hover is a control that does not exist on a phone. */
 @media (hover: none) { .col .card .move { opacity:1; } }
@@ -261,6 +262,11 @@ button.ghost { background:transparent; color:var(--accent); }
 .peeked .sheet .none { color:var(--muted); font-style:italic; margin:0; font-size:14px; }
 .peeked .sheet .timeline { border-top:1px solid var(--rule); padding-top:4px; }
 .filters { align-items:flex-end; margin-bottom:16px; }
+/* The one control in this row that is not a filter, so it does not get the
+   uppercase label the others do: it reads as what it is, a switch. */
+.filters label.live { flex-direction:row; align-items:center; gap:6px; text-transform:none;
+  letter-spacing:0; font-size:12.5px; font-family:var(--mono); color:var(--ink-2); }
+.filters label.live input { width:auto; padding:0; }
 .filters label { font-family:var(--mono); font-size:11px; letter-spacing:.09em;
   text-transform:uppercase; color:var(--muted); }
 .filters select { font-size:14px; padding:6px 9px; min-width:170px; max-width:230px; }
@@ -351,6 +357,16 @@ export interface LayoutOptions {
    * pages and may not control the zone.
    */
   verification?: string;
+  /**
+   * Reload the page every N seconds, for a board somebody is watching while
+   * agents write to it.
+   *
+   * A meta tag because there is no JavaScript here and there is not going to
+   * be. Never on by default: a page that reloads under somebody's hands throws
+   * away the sentence they were typing, and losing your own words is worse than
+   * a board that is a minute behind.
+   */
+  refreshSeconds?: number;
 }
 
 export function layout(options: LayoutOptions, body: string): string {
@@ -360,6 +376,8 @@ export function layout(options: LayoutOptions, body: string): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(options.title)}</title>
+${options.refreshSeconds ? `<meta http-equiv="refresh" content="${Math.round(options.refreshSeconds)}">
+` : ''}
 ${options.description ? `<meta name="description" content="${escapeHtml(options.description)}">` : ''}
 ${(options.verification ?? siteVerification) ? `<meta name="google-site-verification" content="${escapeHtml(options.verification ?? siteVerification)}">\n` : ''}<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon.ico" sizes="48x48">

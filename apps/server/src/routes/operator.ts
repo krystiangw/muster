@@ -380,6 +380,9 @@ and you can end that from the view itself.</p>
     const projects = await store.projects.find({ claimedBy: session.email }).toArray();
     const ids = projects.map((project) => project._id);
     const names = new Map(projects.map((project) => [project._id, project.name]));
+    // The board each item lives on, so a row on this page is a way in rather
+    // than a sentence about work somebody then has to go and find.
+    const links = new Map(projects.map((project) => [project._id, project.readToken]));
 
     // Boards an agent has offered this person. Nothing from them is in the
     // queue below until it is accepted.
@@ -552,8 +555,28 @@ and you can end that from the view itself.</p>
   </form>
 </div>`;
 
+    // Blocked work is waiting on a person exactly as a question is, and this
+    // page used to count only the questions: two things needing a decision, a
+    // headline claiming one, and an answer box under only that one.
+    const blocked = mine.filter((item) => item.status === 'blocked').length;
+    const heading =
+      waitingTotal === 0 && blocked === 0
+        ? 'Nothing is waiting on you'
+        : [
+            waitingTotal > 0 ? `${waitingTotal} question${waitingTotal === 1 ? '' : 's'}` : '',
+            blocked > 0 ? `${blocked} blocked item${blocked === 1 ? '' : 's'}` : '',
+          ]
+            .filter(Boolean)
+            .join(' and ') + ' for you';
+
     return `
-<h1>${waitingTotal === 0 ? 'Nothing is waiting on you' : `${waitingTotal} question${waitingTotal === 1 ? '' : 's'} for you`}</h1>
+<h1>${heading}</h1>
+${
+      blocked > 0
+        ? `<p class="why">Blocked work has no answer box: it is waiting for somebody to unblock it,
+which happens on its own card. Every row under "Your work" opens the card it names.</p>`
+        : ''
+    }
 ${
       waitingTotal > waiting.length
         ? `<p class="why">Showing the ${waiting.length} most urgent. Answering these frees the
@@ -639,8 +662,16 @@ lives on.${
 ${mine
   .map((item) => {
     const held = item.claim && new Date(item.claim.expiresAt) > new Date();
+    const token = links.get(item.projectId);
+    // Straight to the card, open, on the board it lives on. The search brings
+    // the board down to this one item and the fragment opens its sheet, which
+    // is where the note field and any question waiting on it are.
+    const card = token
+      ? `/r/${escapeHtml(token)}/board?q=${encodeURIComponent(item.slug)}#${escapeHtml(item._id)}`
+      : null;
+    const label = escapeHtml(item.title || item.slug);
     return `<tr><td data-label="Project">${escapeHtml(names.get(item.projectId) ?? item.projectId)}</td>
-       <td data-label="Item">${escapeHtml(item.title || item.slug)}<br>
+       <td data-label="Item">${card ? `<a href="${card}">${label}</a>` : label}<br>
            <span class="mono" style="color:var(--muted)">${escapeHtml(item.slug)}</span></td>
        <td data-label="State">${item.status === 'blocked' ? chip('blocked', 'blocked') : ''}
            ${held ? chip(item.claim!.agent, 'claim') : ''}
