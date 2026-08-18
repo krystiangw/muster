@@ -126,6 +126,16 @@ after the link has been recognised and before anything is answered, so a 400
 means the whole path in front of the write is open and a 403 means the forms are
 dead again.
 
+It also watches the one thing the whole product is for: that a question reaches
+a person. Two dates in the project summary tell apart the two silences that look
+identical from a board. The mail is throttled to one message per project per
+hour, so a queue waiting its turn has an old `oldest_unannounced_at` and a
+recent `notice_sent_at`, because the hourly message keeps moving even while the
+back of the queue waits. A mail path refusing every send has both of them old.
+Two hours on both, twice in a row, files on the board first and only falls back
+to mail, which is the reverse of every other alert here for the obvious reason:
+mail is the thing under suspicion.
+
 The same round checks something a liveness probe cannot see: whether hygiene is
 still running. The project read carries `swept_at`, written when a sweep
 finishes rather than when one starts, and a dyno that answers while its sweeper

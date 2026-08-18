@@ -327,7 +327,26 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
     scoped.get('/v1/:project', { schema: { tags: ['projects'], summary: 'Project summary' } }, async (request) => {
       const { project } = auth(request);
       void maybeSweep(store, project).catch(() => undefined);
-      return projectJson(project, config);
+      // The oldest question nobody has been told about. Read here rather than
+      // carried on the project, and only when there is something to find: the
+      // counter says whether any question is open at all, and on the boards
+      // that answer zero, which is most reads of this route, it costs nothing.
+      //
+      // Beside `notice_sent_at` this separates the two silences that look the
+      // same from outside. A queue waiting its turn has an old question here
+      // and a recent stamp there, because the hourly message keeps moving. A
+      // mail path that is refusing every send has both of them old.
+      const unannounced =
+        project.counts.escalations > 0
+          ? await store.escalations.findOne(
+              { projectId: project._id, status: 'open', notifiedAt: null },
+              { projection: { createdAt: 1 }, sort: { createdAt: 1 } },
+            )
+          : null;
+      return {
+        ...projectJson(project, config),
+        oldest_unannounced_at: unannounced?.createdAt ?? null,
+      };
     });
 
     // ------------------------------------------------------------- agents

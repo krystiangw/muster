@@ -83,6 +83,14 @@ export function escalationJson(doc: EscalationDoc): Record<string, unknown> {
     acted_at: doc.acknowledgedAt ?? null,
     acted_by: doc.acknowledgedBy ?? null,
     acted_note: doc.acknowledgedNote ?? null,
+    // When somebody was actually told, which is a different question from when
+    // it was filed. Null on a claimed project means the mail has not gone out:
+    // either it is younger than the periodic pass, or nothing is leaving the
+    // building. An agent waiting on an answer has a real interest in telling
+    // those apart, and so does anything watching this service from outside,
+    // because a provider that quietly refuses every send looks exactly like a
+    // human who has not got round to it.
+    notified_at: doc.notifiedAt ?? null,
     created_at: doc.createdAt,
   };
 }
@@ -185,6 +193,13 @@ export function projectJson(project: ProjectDoc, config: Config): Record<string,
     // can read the date. Deliberately not the throttle marker, which is taken
     // before the work and so keeps moving through a sweep that throws.
     swept_at: project.sweptAt ?? null,
+    // When a notice about this project last left the building. The mail is
+    // throttled to one message per project per hour, so this moving is the
+    // difference between "the queue is waiting its turn" and "nothing is being
+    // sent at all", which look identical from a board and identical in a log
+    // nobody reads. Null on a project nobody has claimed: there is no address
+    // to write to, and none is expected.
+    notice_sent_at: project.escalationNotifiedAt ?? null,
     rules: {
       stale_after_hours: project.rules.staleAfterHours,
       absence_resolve: project.rules.absenceResolve

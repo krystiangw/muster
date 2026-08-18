@@ -47,6 +47,8 @@ const state = {
   // and alerts never.
   hygieneMisses: Number(saved.hygieneMisses) || 0,
   hygieneAlerted: saved.hygieneAlerted === true,
+  noticeMisses: Number(saved.noticeMisses) || 0,
+  noticeAlerted: saved.noticeAlerted === true,
 };
 
 if (process.argv.includes('--status')) {
@@ -268,6 +270,73 @@ if (broken.length === 0 && apiRead?.body && 'swept_at' in apiRead.body) {
       );
     } else {
       console.log(`hygiene miss ${state.hygieneMisses}: last swept ${since}`);
+    }
+  }
+}
+
+/**
+ * The third way this service fails quietly: it answers, it tidies, and nothing
+ * it writes ever leaves the building.
+ *
+ * The whole product is "an agent stops and asks a human". If the mail provider
+ * refuses every send, the questions pile up on a board nobody has open and the
+ * agents wait, which is exactly what happened on 2026-08-17 for a different
+ * reason and cost fourteen hours.
+ *
+ * Two dates tell the two silences apart, and one of them alone tells neither.
+ * The mail is throttled to one message per project per hour, so a queue waiting
+ * its turn has an old unannounced question and a recent `notice_sent_at`: the
+ * hourly message keeps moving even while the back of the queue waits. A dead
+ * mail path has both of them old. Two hours is generous against both the hourly
+ * throttle and the ten minute pass that picks up whatever the throttle missed.
+ *
+ * The alert goes on the board first and only falls back to mail, which is the
+ * reverse of every other check here, for the obvious reason: mail is the thing
+ * under suspicion. A board nobody reads is still a better record than a message
+ * that was never sent.
+ */
+const NOTICE_STUCK_MS = 2 * 60 * 60_000;
+if (broken.length === 0 && apiRead?.body && 'oldest_unannounced_at' in apiRead.body) {
+  const summary = apiRead.body;
+  const oldestMs = summary.oldest_unannounced_at ? Date.parse(summary.oldest_unannounced_at) : null;
+  const lastNoticeMs = summary.notice_sent_at ? Date.parse(summary.notice_sent_at) : null;
+  // Only a claimed board has an address to write to. On an unclaimed one every
+  // question is unannounced for ever, and that is the design rather than a
+  // fault.
+  const waiting =
+    summary.claimed === true && oldestMs !== null && Date.parse(now) - oldestMs > NOTICE_STUCK_MS;
+  const silent = lastNoticeMs === null || Date.parse(now) - lastNoticeMs > NOTICE_STUCK_MS;
+  if (!(waiting && silent)) {
+    if (state.noticeAlerted) console.log('notices are going out again');
+    state.noticeMisses = 0;
+    state.noticeAlerted = false;
+  } else {
+    state.noticeMisses += 1;
+    const waitedMin = Math.round((Date.parse(now) - oldestMs) / 60_000);
+    const lastNotice = lastNoticeMs
+      ? `${Math.round((Date.parse(now) - lastNoticeMs) / 60_000)} min ago`
+      : 'never';
+    if (state.noticeMisses >= 2 && !state.noticeAlerted) {
+      const filed = await fileOnTheBoard(
+        'Nothing has been mailed to the operator for two hours while a question waits. Is the mail provider refusing us?',
+        `The oldest unannounced question on ${projectId} has waited ${waitedMin} min, and the last `
+          + `notice for this project went out ${lastNotice}. The service is answering normally, so `
+          + 'this is the mail path, not the dyno. Check the provider key and the sending domain: '
+          + 'heroku logs -a muster-web | grep "escalation notice".',
+      );
+      const delivery = filed === 'filed' ? 'not needed' : await mail('Muster is not mailing anybody', [
+        `The oldest unannounced question on ${projectId} has waited ${waitedMin} min.`,
+        `The last notice for this project went out ${lastNotice}, and ${base} is answering normally.`,
+        '',
+        `Filing this on the board was refused: ${filed}.`,
+      ]);
+      state.noticeAlerted = filed === 'filed' || delivery === 'sent';
+      console.log(
+        `notices stuck: oldest waited ${waitedMin} min, last notice ${lastNotice} | board ${filed} | email ${delivery}`
+          + (state.noticeAlerted ? '' : ' | nothing landed, will try again'),
+      );
+    } else {
+      console.log(`notice miss ${state.noticeMisses}: oldest waited ${waitedMin} min, last notice ${lastNotice}`);
     }
   }
 }

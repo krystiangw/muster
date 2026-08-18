@@ -280,4 +280,55 @@ describe('the mail an escalation sends', () => {
       assert.equal(await harness.store.escalations.countDocuments({ projectId: project.id }), 1);
     }, 'throws');
   });
+
+  /**
+   * What somebody watching from outside can see. A queue waiting its turn and a
+   * mail path refusing every send look identical on a board, and identical in a
+   * log nobody reads, so the summary carries the two dates that tell them apart.
+   */
+  it('shows a question nobody was told about, and when a notice last went out', async () => {
+    await withMailer(async (harness, sent) => {
+      const project = await claimedProject(harness, 'owner@example.com');
+      const summary = async () => {
+        const read = await harness.server.inject({
+          method: 'GET',
+          url: project.api,
+          headers: authed(project),
+        });
+        return read.json();
+      };
+
+      const quiet = await summary();
+      assert.equal(quiet.oldest_unannounced_at, null, 'nothing has been asked yet');
+      assert.equal(quiet.notice_sent_at, null);
+
+      assert.equal((await ask(harness, project, 'the first one?')).statusCode, 201);
+      assert.equal(sent.length, 1);
+      const told = await summary();
+      assert.equal(told.oldest_unannounced_at, null, 'the one that was mailed is not waiting');
+      assert.ok(told.notice_sent_at, 'and the hour it claimed is on the project');
+
+      // The second question inside the same hour is throttled, which is the
+      // healthy silence: it waits to be named, and the stamp above stays put.
+      assert.equal((await ask(harness, project, 'and the second?')).statusCode, 201);
+      assert.equal(sent.length, 1, 'one message per project per hour');
+      const waiting = await summary();
+      assert.ok(waiting.oldest_unannounced_at, 'the throttled one is visible as unannounced');
+      assert.equal(waiting.notice_sent_at, told.notice_sent_at);
+
+      // And it stops being visible the moment somebody deals with it, so the
+      // number cannot latch on a question that is no longer waiting.
+      const second = await harness.store.escalations.findOne({
+        projectId: project.id,
+        notifiedAt: null,
+      });
+      await harness.server.inject({
+        method: 'PATCH',
+        url: `${project.api}/escalations/${second!._id}`,
+        headers: authed(project),
+        payload: { status: 'answered', answer: 'done' },
+      });
+      assert.equal((await summary()).oldest_unannounced_at, null);
+    });
+  });
 });
