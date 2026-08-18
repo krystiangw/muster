@@ -174,15 +174,35 @@ row('  boards never swept', unswept);
 // counter, so a counter that has drifted is a project quietly refusing work or
 // quietly allowing too much of it. The repair fixes overcounts on its own; this
 // says whether it is keeping up, and it is the only place an undercount shows
-// at all. Bounded to the busiest boards, because it is one count each.
+// at all.
+//
+// The candidates are chosen without looking at the number under audit. Picking
+// them by the counter hid the very case worth finding: a counter that drifted
+// to zero while work is still open would have been filtered out as an idle
+// project. So both ends are asked, the boards with the most open work and the
+// boards claiming the most, and every candidate is then counted exactly.
 const CHECKED = 50;
-const busiestForAudit = await projects
-  .find({ 'counts.items': { $gt: 0 } }, { projection: { name: 1, counts: 1 } })
-  .sort({ 'counts.items': -1 })
-  .limit(CHECKED)
+const [byWork, byCounter] = await Promise.all([
+  items
+    .aggregate([
+      { $match: { status: { $nin: ['done', 'dropped'] } } },
+      { $group: { _id: '$projectId', open: { $sum: 1 } } },
+      { $sort: { open: -1 } },
+      { $limit: CHECKED },
+    ])
+    .toArray(),
+  projects
+    .find({ 'counts.items': { $gt: 0 } }, { projection: { name: 1, counts: 1 } })
+    .sort({ 'counts.items': -1 })
+    .limit(CHECKED)
+    .toArray(),
+]);
+const candidateIds = [...new Set([...byWork.map((row) => row._id), ...byCounter.map((p) => p._id)])];
+const candidates = await projects
+  .find({ _id: { $in: candidateIds } }, { projection: { name: 1, counts: 1 } })
   .toArray();
 const drifted = [];
-for (const project of busiestForAudit) {
+for (const project of candidates) {
   const open = await items.countDocuments({
     projectId: project._id,
     status: { $nin: ['done', 'dropped'] },
@@ -191,7 +211,7 @@ for (const project of busiestForAudit) {
     drifted.push({ project, open, counter: project.counts.items });
   }
 }
-row(`counters checked (top ${CHECKED})`, busiestForAudit.length);
+row('counters checked', candidates.length);
 row('  of those, drifted', drifted.length);
 for (const entry of drifted.slice(0, 5)) {
   console.log(
