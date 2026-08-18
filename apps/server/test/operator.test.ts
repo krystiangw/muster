@@ -135,6 +135,17 @@ describe('the operator view', () => {
     // needs.
     const stranger = await harness.server.inject({ method: 'GET', url: '/operator' });
     assert.equal(stranger.headers['set-cookie'], undefined);
+
+    // And an old tab posting an action, which is the commonest way to meet a
+    // session that ended, is answered the same way.
+    const posted = await harness.server.inject({
+      method: 'POST',
+      url: '/operator/aliases',
+      payload: session.form({ names: 'somebody' }),
+      headers: session.headers,
+    });
+    assert.equal(posted.statusCode, 401);
+    assert.match(String(posted.headers['set-cookie'] ?? ''), /muster_session=;/);
   });
 
   it('links a person straight at the card, open on the board it lives on', async () => {

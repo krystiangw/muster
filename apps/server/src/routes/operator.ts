@@ -111,6 +111,11 @@ export function registerOperator(app: FastifyInstance, deps: OperatorDeps): void
   ): Promise<OperatorSession | null> {
     const session = await readSession(store, request);
     if (session) return session;
+    // Same as the entry page, and for the same reason: an old tab posting an
+    // action is the commonest way to meet a session that has ended, and
+    // leaving the cookie there would keep every page calling this person by a
+    // name none of them can honour.
+    forgetDeadSession(config, request, reply);
     void html(
       request,
       reply,
