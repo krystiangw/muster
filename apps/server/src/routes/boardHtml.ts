@@ -223,6 +223,11 @@ ${timeline
  * the first thing a hand lands on. A note is added to the record; an edit
  * replaces part of it, and the difference is worth one click.
  *
+ * It carries what it was showing, so the route can write only what this person
+ * changed and refuse the rest: two people share this card by construction, and
+ * a form that posts everything it was rendered with undoes whatever the other
+ * one wrote in between.
+ *
  * And a note, because until this existed a person could move a card, assign it
  * and tag it, and could not say why. The whole product is a board agents and
  * people share; a share where one side may only rearrange what the other side
@@ -310,6 +315,8 @@ function editForms(item: ItemDoc, facets: BoardFacets, action: string, keep: Boa
     <summary>Edit the words</summary>
     <form method="post" action="${escapeHtml(action)}/edit">
       <input type="hidden" name="slug" value="${escapeHtml(item.slug)}">${keptFilter(keep)}
+      <input type="hidden" name="was_title" value="${escapeHtml(item.title ?? '')}">
+      <input type="hidden" name="was_body" value="${escapeHtml(item.body ?? '')}">
       <label for="title-${id}">Title</label>
       <input id="title-${id}" name="title" maxlength="200" value="${escapeHtml(item.title ?? '')}">
       <label for="body-${id}">Description</label>

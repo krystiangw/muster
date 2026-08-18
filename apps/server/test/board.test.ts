@@ -1029,7 +1029,8 @@ describe('moving an item into a column', () => {
     const edited = await harness.server.inject({
       method: 'POST',
       url: `/r/${readToken}/board/edit`,
-      payload: 'slug=card&title=The+bridge&body=second+draft%2C+with+the+numbers',
+      payload:
+        'slug=card&title=The+bridge&body=second+draft%2C+with+the+numbers&was_title=teh+bridge&was_body=first+draft',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
     });
     assert.equal(edited.statusCode, 303);
@@ -1044,13 +1045,48 @@ describe('moving an item into a column', () => {
     const blanked = await harness.server.inject({
       method: 'POST',
       url: `/r/${readToken}/board/edit`,
-      payload: 'slug=card&title=&body=',
+      payload:
+        'slug=card&title=&body=&was_title=The+bridge&was_body=second+draft%2C+with+the+numbers',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
     });
     assert.equal(blanked.statusCode, 303);
     const after = await harness.store.items.findOne({ projectId: project.id, slug: 'card' });
     assert.equal(after?.title, 'The bridge', 'the title survives');
     assert.equal(after?.body, '', 'and the description was cleared on purpose');
+
+    // An agent writing while the form was open keeps its words: only what this
+    // person changed is written, and a field they did change that moved
+    // underneath them is refused rather than overwritten.
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'card', body: 'the agent learned something new', actor: 'errors-loop' },
+    });
+    const onlyTitle = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/edit`,
+      payload: 'slug=card&title=The+bridge+fee&body=&was_title=The+bridge&was_body=',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    assert.equal(onlyTitle.statusCode, 303);
+    const kept = await harness.store.items.findOne({ projectId: project.id, slug: 'card' });
+    assert.equal(kept?.title, 'The bridge fee');
+    assert.equal(kept?.body, 'the agent learned something new', 'the agent keeps its words');
+
+    const stale = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/edit`,
+      payload: 'slug=card&title=The+bridge+fee&body=my+older+copy&was_title=The+bridge+fee&was_body=',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    assert.equal(stale.statusCode, 409);
+    assert.equal(stale.json().error, 'changed_underneath');
+    assert.equal(
+      (await harness.store.items.findOne({ projectId: project.id, slug: 'card' }))?.body,
+      'the agent learned something new',
+      'and nothing was saved',
+    );
 
     // The form is on the card, and it is folded shut: an edit replaces part of
     // the record, and a note adds to it.

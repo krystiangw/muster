@@ -1291,7 +1291,7 @@ ${
             : query.what === 'note'
             ? `Your note is on "${touched.slug}", where every agent that reads it will see it.`
             : query.what === 'nothing'
-              ? `Nothing was written to "${touched.slug}": the note was empty.`
+              ? `Nothing was written to "${touched.slug}": it already said that.`
               : `"${touched.slug}" is ${touched.owner ? `owned by ${touched.owner}` : 'unassigned'}.`
         : undefined;
     const notice = answeredHere
@@ -1681,7 +1681,13 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
   app.post('/r/:readToken/board/edit', { schema: { hide: true } }, async (request, reply) => {
     if (!limitWrites(request, reply)) return reply;
     const { readToken } = request.params as { readToken: string };
-    const form = (request.body ?? {}) as { slug?: string; title?: string; body?: string } & KeptFilter;
+    const form = (request.body ?? {}) as {
+      slug?: string;
+      title?: string;
+      body?: string;
+      was_title?: string;
+      was_body?: string;
+    } & KeptFilter;
     const project = await store.projects.findOne({ readToken });
     if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
     if (!(await readableBy(store, request, project))) {
@@ -1689,17 +1695,51 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     }
     if (!form.slug) throw new ServiceError(400, 'bad_request', 'Which item?');
 
-    const title = (one(form.title) ?? '').trim().slice(0, 200);
-    const body = (one(form.body) ?? '').slice(0, 4000);
-    await upsertItem(store, project, {
-      slug: form.slug,
-      ...(title === '' ? {} : { title }),
-      body,
-      actor: 'operator',
-      note: 'title and description edited from the board',
-      mustExist: true,
+    // The domain's own ceilings, not the form's. An agent can write a longer
+    // title and a much longer body than a page offers boxes for, and cutting
+    // them here would mean correcting a title silently truncated a description
+    // nobody was editing.
+    const title = (one(form.title) ?? '').trim().slice(0, 300);
+    const body = (one(form.body) ?? '').slice(0, 20_000);
+    const wasTitle = one(form.was_title) ?? '';
+    const wasBody = one(form.was_body) ?? '';
+
+    // Only what this person actually changed, checked against what they were
+    // looking at. Two people share this card by construction, and writing back
+    // a field somebody never touched is how a form quietly undoes an agent's
+    // work between the render and the submit.
+    const item = await store.items.findOne({ projectId: project._id, slug: form.slug });
+    if (!item) throw new ServiceError(404, 'not_found', 'No such item.');
+    const changed: { title?: string; body?: string } = {};
+    if (title !== '' && title !== wasTitle) changed.title = title;
+    if (body !== wasBody) changed.body = body;
+    for (const [field, stored] of [
+      ['title', item.title ?? ''],
+      ['body', item.body ?? ''],
+    ] as const) {
+      const was = field === 'title' ? wasTitle : wasBody;
+      if (changed[field] !== undefined && stored !== was) {
+        throw new ServiceError(
+          409,
+          'changed_underneath',
+          `Somebody wrote to "${form.slug}" while this was open, so nothing was saved: writing your copy back would have thrown their words away. Open the card again and redo the change on what it says now.`,
+        );
+      }
+    }
+    if (Object.keys(changed).length > 0) {
+      await upsertItem(store, project, {
+        slug: form.slug,
+        ...changed,
+        actor: 'operator',
+        note: `${Object.keys(changed).join(' and ')} edited from the board`,
+        mustExist: true,
+      });
+    }
+    const params = new URLSearchParams({
+      done: form.slug,
+      what: Object.keys(changed).length > 0 ? 'edit' : 'nothing',
+      ...keptParams(form),
     });
-    const params = new URLSearchParams({ done: form.slug, what: 'edit', ...keptParams(form) });
     return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
   });
 
