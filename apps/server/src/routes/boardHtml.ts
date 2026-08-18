@@ -276,6 +276,14 @@ export interface BoardRenderOptions {
   agents?: Map<string, string>;
   /** Names already in use, offered in the assign and tag fields. */
   facets?: BoardFacets;
+  /**
+   * Said above the board when a search was dropped for reading too long.
+   *
+   * The board below it is the whole board, not the search. Rendering the search
+   * as if it had answered nothing would be the page saying there is nothing to
+   * find, which is the one thing a stopped search did not establish.
+   */
+  searchStopped?: string;
 }
 
 /** Every narrowing in force, in words, for the line above the board. */
@@ -309,6 +317,7 @@ export function renderBoard(view: BoardView, options: BoardRenderOptions = {}): 
   // Above the board, not below it: a column is taller than a screen, and a
   // confirmation nobody scrolls to is not a confirmation.
   return `${options.notice ? `<p class="notice">${escapeHtml(options.notice)}</p>` : ''}
+${options.searchStopped ? `<p class="notice warn">${escapeHtml(options.searchStopped)}</p>` : ''}
 ${options.filters ?? ''}
 ${
     // Every way of narrowing, not only two of the four. A search or a label

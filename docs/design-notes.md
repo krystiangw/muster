@@ -783,3 +783,35 @@ fetched all two hundred thousand documents anyway. Making that fast is a change
 to what the search means, not a change to how it is stored. And the insights
 report costs half a second over two hundred thousand events, which is a page one
 person opens, against the one collection every request writes to.
+
+## A clock on the one read that has no ceiling, 2026-08-18
+
+The search above was left alone as a cost. A decision audit written the same day
+found the part that is not a cost: `GET /r/:token/board?q=` has no rate limiter
+in front of it, the limiter on those routes sits on the POST. So the one read
+whose price is the whole collection is also the one read a stranger holding a
+read link can send as often as they like, and the collection it reads is bounded
+by nothing, because the cap on a project counts what is still open.
+
+Searches now carry `maxTimeMS`, half a second, four times what the largest board
+a plan sells can cost. Nothing else does: every other filter is answered from an
+index and stops at the page, and a clock on those would be a clock on the boards
+that are behaving.
+
+**A stopped search is not an empty answer.** Both are a page with nothing on it,
+and they mean opposite things: one says there is nothing to find, the other says
+nobody looked long enough to know. The API refuses with 503 `search_too_slow`
+and says how to narrow it, because an agent handed an empty list will act on it,
+and the slug is the only thing standing between that and a duplicate. The board
+page cannot refuse a person their board, so it drops the search, renders the
+board they would have had without it, and says in one line which of the two
+things happened.
+
+Rejected in the same audit, with the reasons worth keeping: a tokenized `words`
+array with prefix matching would make the search itself cheap, and would quietly
+stop finding `svc-oauth-token` when somebody types `auth`, on a product whose own
+slugs are namespaced and hyphenated. It also buys an eleventh index on the
+collection every write pays for, larger than the `labels` index this repository
+deleted two hours earlier for buying nothing. Worth revisiting on a trigger and
+not before: any single project passing fifty thousand items, or a search bearing
+read passing 300 ms at the ninety ninth percentile in production.

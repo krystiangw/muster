@@ -1033,14 +1033,28 @@ ${
       label?: string;
       q?: string;
     };
+    const narrowing = {
+      ...(query.owner ? { owner: query.owner.slice(0, 48) } : {}),
+      ...(query.agent ? { agent: query.agent.slice(0, 48) } : {}),
+      ...(query.label ? { label: query.label.slice(0, 48) } : {}),
+    };
+    // A search that ran out of its budget is refused everywhere else, because
+    // an empty page would claim there is nothing to find. A person is owed
+    // more than a refusal: they get the board they would have had without the
+    // search, and a line saying that is what happened. Everything else they
+    // narrowed by is still in force, which is also the cheapest way out of it.
+    let searchStopped: string | undefined;
     const [view, facets, waiting] = await Promise.all([
       loadBoard(store, project, {
-        ...(query.owner ? { owner: query.owner.slice(0, 48) } : {}),
-        ...(query.agent ? { agent: query.agent.slice(0, 48) } : {}),
-        ...(query.label ? { label: query.label.slice(0, 48) } : {}),
+        ...narrowing,
         // Raw, because the cut belongs to the search itself: slicing here as
         // well meant this door trimmed after cutting and the others before it.
         ...(query.q ? { q: query.q } : {}),
+      }).catch((error: unknown) => {
+        if (!(error instanceof ServiceError) || error.code !== 'search_too_slow') throw error;
+        searchStopped =
+          'That search was reading for longer than this board allows, so it was stopped. This is the board without it. Try another word beside it, or narrow by owner, agent or label first.';
+        return loadBoard(store, project, narrowing);
       }),
       boardFacets(store, project),
       // The only work on this board that no agent will ever do. It was
@@ -1118,6 +1132,7 @@ ${renderBoard(view, {
   agents,
   facets,
   ...(notice ? { notice } : {}),
+  ...(searchStopped ? { searchStopped } : {}),
 })}
 
 ${

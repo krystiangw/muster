@@ -1473,11 +1473,63 @@ async function listItems(
       : order === 'recent'
         ? { updatedAt: -1, _id: -1 }
         : { priority: -1, updatedAt: -1, _id: -1 };
-  return store.items
+  const cursor = store.items
     .find(filter, projection ? { projection } : {})
     .sort(sort)
-    .limit(limit)
-    .toArray() as Promise<ItemDoc[]>;
+    .limit(limit);
+  // Only the searches are put on a clock. Every other filter here is answered
+  // from an index and stops at the limit; a search is the one read whose cost
+  // is the collection rather than the page, and it is the one read a stranger
+  // holding a read link can issue without a rate limiter in front of it.
+  if (words) cursor.maxTimeMS(SEARCH_BUDGET_MS);
+  try {
+    return (await cursor.toArray()) as ItemDoc[];
+  } catch (error) {
+    const stopped = words ? searchTooSlow(error) : null;
+    if (stopped) throw stopped;
+    throw error;
+  }
+}
+
+/**
+ * How long a search may read before it is stopped.
+ *
+ * A search that matches nothing reads every item in the project: a case
+ * insensitive substring in either field is not indexable, and indexing the two
+ * fields made it worse rather than better, since the planner then spent a
+ * second choosing between them and fetched everything anyway. Measured at
+ * 119ms on twenty thousand items and 1016ms on two hundred thousand.
+ *
+ * The cap on a project counts what is still open, so the closed work behind a
+ * long lived board is bounded by nothing, and the page that carries the search
+ * box is reachable by anybody holding the read link, with no rate limiter in
+ * front of it. Left alone, that is one request that reads a whole collection,
+ * as often as somebody cares to send it.
+ *
+ * Half a second is four times what the largest board a plan sells can cost, so
+ * a paying board never meets this at all. Making the search itself cheap means
+ * changing what it matches, from a substring anywhere to the start of a word,
+ * and that is a change to what people and agents were promised rather than to
+ * how it is stored. This bounds the damage without touching the promise.
+ */
+export const SEARCH_BUDGET_MS = 500;
+
+/**
+ * Mongo's own "that took longer than you allowed", turned into an answer.
+ *
+ * Null for anything else, so a caller rethrows what it did not recognise. Both
+ * doors that carry a search go through here rather than each deciding what a
+ * stopped search means: an empty page would say there is nothing to find, which
+ * is precisely what nobody established.
+ */
+export function searchTooSlow(error: unknown): ServiceError | null {
+  const failure = error as { code?: unknown; codeName?: unknown } | null;
+  if (failure?.code !== 50 && failure?.codeName !== 'MaxTimeMSExpired') return null;
+  return new ServiceError(
+    503,
+    'search_too_slow',
+    `That search read for longer than ${SEARCH_BUDGET_MS}ms without finishing, so it was stopped rather than answered with a page that might be missing rows. Narrow it: another word, or status=, owner= or label= beside it. An empty answer would have said there is nothing to find, which is not what happened.`,
+  );
 }
 
 /**

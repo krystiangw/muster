@@ -1,7 +1,15 @@
 import type { Store } from './db.js';
 import { TIMELINE_KEEP } from './hygiene.js';
 import { normalizeSlug } from './ids.js';
-import { ServiceError, claimItem, normalizeSearch, upsertItem, wordsFilter } from './service.js';
+import {
+  SEARCH_BUDGET_MS,
+  ServiceError,
+  claimItem,
+  normalizeSearch,
+  searchTooSlow,
+  upsertItem,
+  wordsFilter,
+} from './service.js';
 import {
   DEFAULT_BOARD,
   ITEM_STATUSES,
@@ -264,11 +272,18 @@ export async function loadBoard(
     ];
   }
 
-  const items = (await store.items
+  const scan = store.items
     .find(query, { projection: { timeline: 0 } })
     .sort({ priority: -1, updatedAt: -1 })
-    .limit(BOARD_SCAN_LIMIT)
-    .toArray()) as ItemDoc[];
+    .limit(BOARD_SCAN_LIMIT);
+  // The same clock the item list puts on a search, for the same reason and by
+  // the same door: this one has no rate limiter in front of it at all.
+  if (options.q) scan.maxTimeMS(SEARCH_BUDGET_MS);
+  const items = (await scan.toArray().catch((error: unknown) => {
+    const stopped = options.q ? searchTooSlow(error) : null;
+    if (stopped) throw stopped;
+    throw error;
+  })) as ItemDoc[];
 
   return buildBoard(items, config, new Date(), narrowed);
 }

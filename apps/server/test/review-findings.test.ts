@@ -227,6 +227,71 @@ describe('one read, two doors', () => {
     );
   });
 
+  it('stops a search that reads too long, and says so rather than answering nothing', async () => {
+    // A search that matches nothing reads every item in the project, 1016 ms at
+    // two hundred thousand of them, and the page that carries the search box
+    // has no rate limiter in front of it. The clock bounds that. What it must
+    // never do is answer with an empty page: "nothing found" and "we stopped
+    // looking" are different sentences, and only one of them is true here.
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'ops:backups', title: 'nightly backups', actor: 'a' });
+
+    // Only the reads that put themselves on a clock fail, which is exactly the
+    // reads that carry a search. Anything else proves the clock reached further
+    // than it was meant to.
+    const realFind = harness.store.items.find.bind(harness.store.items);
+    (harness.store.items as { find: typeof realFind }).find = ((
+      filter: Parameters<typeof realFind>[0],
+      options: Parameters<typeof realFind>[1],
+    ) => {
+      const cursor = realFind(filter, options);
+      const realMaxTimeMS = cursor.maxTimeMS.bind(cursor);
+      cursor.maxTimeMS = (ms: number) => {
+        realMaxTimeMS(ms);
+        cursor.toArray = async () => {
+          throw Object.assign(new Error('operation exceeded time limit'), {
+            code: 50,
+            codeName: 'MaxTimeMSExpired',
+          });
+        };
+        return cursor;
+      };
+      return cursor;
+    }) as typeof realFind;
+
+    try {
+      const refused = await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/items?q=nothingmatchesthis`,
+        headers: authed(project),
+      });
+      assert.equal(refused.statusCode, 503);
+      assert.equal(refused.json().error, 'search_too_slow');
+      assert.match(refused.json().message, /narrow it/i);
+
+      const unsearched = await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/items?limit=5`,
+        headers: authed(project),
+      });
+      assert.equal(unsearched.statusCode, 200, 'a read with no search is not on a clock at all');
+      assert.equal(unsearched.json().items.length, 1);
+
+      // The person gets the board back, not an error page, and a line saying
+      // which of the two things happened.
+      const readToken = project.readUrl.split('/r/')[1]!;
+      const page = await harness.server.inject({
+        method: 'GET',
+        url: `/r/${readToken}/board?q=nothingmatchesthis`,
+      });
+      assert.equal(page.statusCode, 200);
+      assert.match(page.body, /was reading for longer than this board allows/);
+      assert.match(page.body, /ops:backups/, 'and the board underneath it is the whole board');
+    } finally {
+      (harness.store.items as { find: typeof realFind }).find = realFind;
+    }
+  });
+
   it('finds an item by its words, through either door and the way the board does', async () => {
     // The board has had a search box since it had columns, and the API it is
     // built on could not do it: an agent with two hundred items had filters and
