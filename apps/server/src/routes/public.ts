@@ -1038,9 +1038,8 @@ yours.</p>`
             // version behind what it warns about.
             (project.visibility ?? 'link') === 'owner'
               ? 'Private: this page opens only for its owner, signed in.'
-              : `Open by link: anybody who has this address can answer these questions, file work,
-write on the timeline and change the board, urgency included, without signing in.
-<a href="/operator">Your projects</a> has the switch that closes it.`
+              : `Open by link: anybody who has this address ${READ_LINK_GRANTS}, without
+signing in. <a href="/operator">Your projects</a> has the switch that closes it.`
           }</p>`
     }
 

@@ -13,16 +13,18 @@ import type { Config } from './config.js';
 /**
  * What holding the read link lets somebody do, written once.
  *
- * Three documents tell an agent how carefully to treat this link: the protocol
- * it reads on the way in, the OpenAPI description of the route that rotates it,
- * and the page a person reads. Two of them still said "reads the board, lays it
+ * Four documents tell somebody how carefully to treat this link: the protocol
+ * an agent reads on the way in, the machine readable card beside it, the
+ * OpenAPI description of the route that rotates it, and the page the person
+ * holding the link is looking at. Written in the third person so it fits both
+ * voices: "whoever holds it" and "anybody who has this address". Two of them still said "reads the board, lays it
  * out, moves cards and answers your questions" a day after the link learned to
  * file work, write notes and rewrite a card. An understatement here is not a
  * stale sentence, it is a security notice that undersells the thing it is
  * warning about.
  */
 export const READ_LINK_GRANTS =
-  'reads the board, answers the questions your agents filed, files work of its own, ' +
+  'reads the board, answers the questions your agents filed, files work of their own, ' +
   'writes notes onto the timeline the agents read, corrects the words on a card, sets ' +
   'urgency, owners and labels, moves cards, consolidates two spellings of one agent and ' +
   'replaces the layout';
@@ -813,7 +815,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       'An unclaimed project is deleted with all its data after the stated number of days. That is not a bug, it is the anti-abuse design.',
       'Tokens are stored as sha256 hashes and cannot be recovered, only replaced.',
       'Scope is advisory. Muster warns about cross-scope writes and never blocks them.',
-      'The read link is not read-only: whoever holds it can answer the questions your agents filed, file work of their own, write on the timeline and change the board. Hand it to your operator, not to a channel.',
+      `The read link is not read-only: whoever holds it ${READ_LINK_GRANTS}, with no sign in at all. Hand it to your operator, not to a channel.`,
       'Deleting an item needs an admin token. A worker key can close work but never erase the record of it.',
     ],
     ...(config.contactEmail ? { contact: config.contactEmail } : {}),

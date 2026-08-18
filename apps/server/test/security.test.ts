@@ -352,7 +352,7 @@ describe('what the link says about itself', () => {
     // that carry it cannot drift apart again; this checks all three.
     for (const power of [
       /answers the questions/,
-      /files work of its own/,
+      /files work of their own/,
       /writes notes onto the timeline/,
       /corrects the words on a card/,
       /sets\s+urgency, owners and labels/,
@@ -363,10 +363,15 @@ describe('what the link says about itself', () => {
       assert.match(docs.body, power, String(power));
     }
 
-    const protocol = await harness.server.inject({ method: 'GET', url: '/skill.md' });
-    assert.match(protocol.body, /files work of its own/, 'the protocol says the same');
-    const openapi = await harness.server.inject({ method: 'GET', url: '/openapi.json' });
-    assert.match(openapi.body, /consolidates two spellings/, 'and so does the route that rotates it');
+    for (const [url, what] of [
+      ['/skill.md', 'the protocol an agent reads on the way in'],
+      ['/openapi.json', 'the route that rotates the link'],
+      ['/.well-known/agent-access.json', 'the card an agent discovers this by'],
+    ] as const) {
+      const published = await harness.server.inject({ method: 'GET', url });
+      assert.match(published.body, /files work of their own/, what);
+      assert.match(published.body, /consolidates two spellings/, what);
+    }
     // And it is true only while the board is open by link, which is the state
     // the sentence is about.
     assert.match(docs.body, /Narrowing the project to its owner ends all of that/);
@@ -382,7 +387,7 @@ describe('what the link says about itself', () => {
     assert.match(open.body, /Open by link/);
     assert.match(
       open.body,
-      /anybody who has this address can answer these questions, file work,\s+write on the timeline and change the board, urgency included/,
+      /anybody who has this address reads the board, answers the questions[\s\S]*consolidates two spellings/,
       'and what it can do is what it can do today, not what it could do the day it was written',
     );
 
