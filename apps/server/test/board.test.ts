@@ -1444,4 +1444,30 @@ describe('a layout that would trap finished work', () => {
     });
     assert.deepEqual(saved.json().warnings, []);
   });
+
+  it('says how much of the list it is not showing', async () => {
+    // The board says "and N more" when a column is cut. The project page said
+    // nothing: past two hundred items it stopped, and a page that quietly drops
+    // work is worse than one that admits it cannot show everything.
+    // Written through the service rather than over HTTP: two hundred and five
+    // requests in a loop is eighty five more than the write limit a minute
+    // allows, and this test is about the page, not the limiter.
+    const { upsertItem } = await import('../src/service.js');
+    const project = await createProject(harness, 'a long board');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const doc = (await harness.store.projects.findOne({ _id: project.id }))!;
+    for (let index = 0; index < 205; index += 1) {
+      await upsertItem(harness.store, doc, {
+        slug: `bulk:${index}`,
+        title: `item ${index}`,
+        status: 'done',
+        actor: 'a',
+      });
+    }
+
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}` });
+    assert.equal(page.statusCode, 200);
+    assert.match(page.body, /Showing 200 of 205/);
+    assert.match(page.body, new RegExp(`/r/${readToken}/board`));
+  });
 });

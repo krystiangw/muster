@@ -672,14 +672,16 @@ address. Claiming is free and raises the limits:</p>
     recordView(store, 'project', request);
     void maybeSweep(store, project).catch(() => undefined);
 
-    const [items, escalations, agents] = await Promise.all([
+    const ITEMS_SHOWN = 200;
+    const [items, escalations, agents, itemsHeld] = await Promise.all([
       store.items
         .find({ projectId: project._id }, { projection: { timeline: { $slice: -3 } } })
         .sort({ status: 1, priority: -1, updatedAt: -1 })
-        .limit(200)
+        .limit(ITEMS_SHOWN)
         .toArray(),
       store.escalations.find({ projectId: project._id }).sort({ createdAt: -1 }).limit(50).toArray(),
       store.agents.find({ projectId: project._id }).sort({ lastSeenAt: -1 }).limit(50).toArray(),
+      store.items.countDocuments({ projectId: project._id }),
     ]);
 
     // Urgent first, then oldest, which is what /operator has always done. This
@@ -838,6 +840,17 @@ ${open.length === 0 ? '<p class="empty">Nothing. The agents are unblocked.</p>' 
 ${open.map((doc) => escalationForm(doc as EscalationDoc)).join('')}
 
 <h2>Items</h2>
+${
+      // The board says "and N more" when a column is cut, and this table said
+      // nothing at all: past two hundred items it simply stopped, and a page
+      // that quietly drops work is worse than a page that admits it cannot show
+      // everything.
+      itemsHeld > items.length
+        ? `<p class="why">Showing ${items.length} of ${itemsHeld}. <a href="/r/${escapeHtml(
+            readToken,
+          )}/board">The board</a> has search and filters for the rest.</p>`
+        : ''
+    }
 <div class="scroll cards"><table class="cards">
 <thead><tr><th>Slug</th><th>Title and last note</th><th>State</th><th>Updated</th></tr></thead>
 <tbody>
