@@ -1654,6 +1654,51 @@ export interface ClaimResult {
  * of them would stop marking an item as touched or stop signing it, which is
  * exactly the class of difference nobody notices until a board reads wrong.
  */
+/**
+ * Hands back a lease this call took a moment ago and must not keep.
+ *
+ * Guarded on the exact lease rather than on the holder's name: the same agent
+ * can heartbeat or re-claim between the two writes, and a rollback matching
+ * only the name would delete a newer, valid lease and leave that request
+ * reporting a success it no longer has.
+ *
+ * The history is not unwound, it is continued. `takingIt` has already written
+ * "claimed" and moved `touchedAt`, and popping that entry would erase a real
+ * moment and could pop somebody else's. What lands instead is the other half
+ * of the story, in the words the reader needs: the lease was taken and given
+ * straight back, and why.
+ */
+export async function handBack(
+  store: Store,
+  projectId: string,
+  slug: string,
+  agent: string,
+  expiresAt: Date,
+  why: string,
+): Promise<void> {
+  const now = new Date();
+  await store.items.updateOne(
+    { projectId, slug, 'claim.agent': agent, 'claim.expiresAt': expiresAt },
+    {
+      $set: { claim: null, updatedAt: now },
+      $push: {
+        timeline: {
+          $each: [
+            {
+              at: now,
+              by: agent,
+              kind: 'released' as const,
+              message: `lease handed straight back: ${why}`,
+            },
+          ],
+          $slice: -TIMELINE_KEEP,
+        },
+      },
+      $inc: { timelineCount: 1 },
+    },
+  );
+}
+
 function takingIt(agent: string, now: Date, ttl: number, expiresAt: Date) {
   return {
     $set: {
@@ -1764,6 +1809,13 @@ export async function claimItem(
   slug: string,
   agent: string,
   ttlMinutes?: number,
+  /**
+   * Internal: this is the second attempt after the blocker guard lost a race
+   * to a change that does not block anything. Once, never in a loop, because
+   * two callers editing the same list forever is a livelock and the honest
+   * answer at that point is the ordinary "somebody else is writing here".
+   */
+  retried = false,
 ): Promise<ClaimResult> {
   // The handle is matched against a live claim and then written into one. An
   // object here reads as an operator on the way in and is stored as the holder
@@ -1828,9 +1880,13 @@ export async function claimItem(
         ? []
         : await unmetBlockers(store, project._id, claimed as Pick<ItemDoc, 'blockedBy'>);
     if (stillUnmet.length > 0) {
-      await store.items.updateOne(
-        { projectId: project._id, slug: normalized, 'claim.agent': agent },
-        { $set: { claim: null } },
+      await handBack(
+        store,
+        project._id,
+        normalized,
+        agent,
+        expiresAt,
+        blockedMessage(normalized, stillUnmet),
       );
       throw new ServiceError(409, 'blocked_by', blockedMessage(normalized, stillUnmet), {
         blocked_by: stillUnmet.map((row) => ({
@@ -1846,14 +1902,22 @@ export async function claimItem(
 
   const current = await store.items.findOne({ projectId: project._id, slug: normalized });
   if (!current) throw notFound(slug);
-  // The lease may have been refused by the guard above rather than by another
-  // holder: whoever changed the list won, and the refusal has to say which
-  // thing happened. Asked again against the row as it is now.
+  // The lease may have been refused by the guard rather than by another
+  // holder, and the two need different answers. Asked again against the row as
+  // it is now: still waiting on something means the refusal is about that, and
+  // nothing waiting means the list changed under us in a way that does not
+  // stop this claim, so it is tried once more rather than reported as a
+  // conflict with a holder nobody can name.
   const changed = await unmetBlockers(store, project._id, current as Pick<ItemDoc, 'blockedBy'>);
   if (changed.length > 0) {
     throw new ServiceError(409, 'blocked_by', blockedMessage(normalized, changed), {
       blocked_by: changed.map((row) => ({ slug: row.slug, title: row.title, status: row.status })),
     });
+  }
+  const guardLost =
+    JSON.stringify(current.blockedBy ?? null) !== JSON.stringify(snapshot ?? null);
+  if (guardLost && !retried) {
+    return claimItem(store, project, slug, agent, ttlMinutes, true);
   }
   return { ok: false, item: current as ItemDoc, heldBy: current.claim?.agent ?? 'unknown' };
 }
@@ -2450,9 +2514,13 @@ export async function nextItemHeld(
         ? []
         : await unmetBlockers(store, project._id, taken as Pick<ItemDoc, 'blockedBy'>);
     if (unmet.length === 0) return taken;
-    await store.items.updateOne(
-      { projectId: project._id, slug: taken.slug, 'claim.agent': handle },
-      { $set: { claim: null } },
+    await handBack(
+      store,
+      project._id,
+      taken.slug,
+      handle,
+      expiresAt,
+      blockedMessage(taken.slug, unmet),
     );
     return null;
   };

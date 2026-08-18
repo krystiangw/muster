@@ -341,9 +341,15 @@ export async function ensureIndexes(store: Store): Promise<void> {
       { key: { projectId: 1, titleKey: 1 }, name: 'titleKey' },
       { key: { projectId: 1, 'claim.expiresAt': 1 }, name: 'claims', sparse: true },
       // Read on both offer paths, and only ever for the cards that use the
-      // field: sparse, so a board where nothing waits on anything carries an
-      // index with no entries in it.
-      { key: { projectId: 1, 'blockedBy.0': 1 }, name: 'waiting', sparse: true },
+      // field. Partial rather than sparse: a compound sparse index still holds
+      // every document as soon as one of its fields exists, and `projectId` is
+      // on all of them, so `sparse` here would have indexed the whole board
+      // while reading as if it did not.
+      {
+        key: { projectId: 1, 'blockedBy.0': 1 },
+        name: 'waiting',
+        partialFilterExpression: { 'blockedBy.0': { $exists: true } },
+      },
       // The three orders a page of items can be asked for, each with the
       // tiebreaker the keyset cursor pages on, because a sort the index cannot
       // finish is a sort of the whole project in memory: measured at fifty

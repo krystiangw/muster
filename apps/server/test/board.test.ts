@@ -6,6 +6,7 @@ import { authed, createProject, signIn, startHarness, type Harness, type Project
 import { flushEvents } from '../src/events.js';
 import { hashToken } from '../src/ids.js';
 import { boardApplyJson } from '../src/serialize.js';
+import { handBack } from '../src/service.js';
 
 /**
  * Columns are a view, not a state. These tests exist to keep it that way: a
@@ -2714,7 +2715,7 @@ describe('a card that waits on another', () => {
     assert.equal(second.statusCode, 409);
     assert.equal(second.json().error, 'blocked_by');
 
-    // And the lease was not left behind by the refusal.
+    // And no lease was left behind by the refusal.
     const item = await read(project, '/items/behind');
     assert.equal(item.json().item.claim, null);
   });
@@ -2742,5 +2743,32 @@ describe('a card that waits on another', () => {
     assert.equal(taken.statusCode, 200);
     assert.equal(taken.json().item.slug, 'free-one');
     assert.equal(taken.json().claimed, true);
+  });
+});
+
+describe('handing a lease straight back', () => {
+  it('clears the lease it took, records it, and leaves a renewed one alone', async () => {
+    // The rollback the blocker guard uses when it loses a race. Guarded on the
+    // exact lease rather than on the holder's name, because the same agent can
+    // heartbeat between the two writes and a rollback matching only the name
+    // deletes a newer, valid lease while that request reports success.
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'leased', title: 't', body: 'b', actor: 'a' });
+    const taken = await post(project, '/items/leased/claim', { agent: 'a', ttl_minutes: 30 });
+    const mine = new Date(taken.json().expires_at as string);
+
+    const doc = (await harness.store.projects.findOne({ _id: project.id }))!;
+    await handBack(harness.store, doc._id, 'leased', 'a', new Date(mine.getTime() + 60_000), 'a lease this call never took');
+    const untouched = await read(project, '/items/leased');
+    assert.ok(untouched.json().item.claim, 'a lease this rollback did not take is not its to clear');
+
+    await handBack(harness.store, doc._id, 'leased', 'a', mine, 'waiting on something');
+    const cleared = await read(project, '/items/leased');
+    assert.equal(cleared.json().item.claim, null);
+    const entries = (cleared.json().item.timeline ?? []) as Array<{ message: string }>;
+    assert.ok(
+      entries.some((entry) => /handed straight back: waiting on something/.test(entry.message)),
+      'the history is continued, not unwound: the claim really happened',
+    );
   });
 });
