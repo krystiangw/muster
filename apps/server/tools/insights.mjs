@@ -165,7 +165,10 @@ row(
   'longest since a sweep, min',
   sweepAgeMinutes === null ? 'n/a' : sweepAgeMinutes,
 );
-if (unswept > 0) row('  boards never swept', unswept);
+// Printed whether or not it is zero, like every count above it: a row that
+// disappears when it is healthy leaves a reader unable to tell the healthy
+// answer from a number nobody collected.
+row('  boards never swept', unswept);
 row('median answer, hours', median === null ? 'n/a' : median.toFixed(1));
 if (hours.length > 0) console.log(`  ${'  over the last'.padEnd(28)} ${String(hours.length).padStart(7)} answers`);
 
