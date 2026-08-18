@@ -177,9 +177,13 @@ function noSuchProject(): string {
  *
  * `parseInt` reads "2.9" as 2 and "5junk" as 5, which turns a typo into a
  * decision nobody made. The whole string has to be the number.
+ *
+ * A leading plus is a number, and this service prints urgency as `+5`
+ * everywhere a person can read it. Refusing what we display is refusing our own
+ * notation back.
  */
 function wholeNumber(value: string | undefined): number | null {
-  if (value === undefined || !/^-?\d{1,3}$/.test(value.trim())) return null;
+  if (value === undefined || !/^[+-]?\d{1,3}$/.test(value.trim())) return null;
   return Number.parseInt(value.trim(), 10);
 }
 

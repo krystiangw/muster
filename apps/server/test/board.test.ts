@@ -1063,6 +1063,27 @@ describe('moving an item into a column', () => {
 
     // Nonsense is refused rather than stored, and a typo is not a decision:
     // parseInt would read "2.9" as 2 and "5junk" as 5.
+    // And what this service prints is what it accepts: urgency reads as "+5"
+    // on every page, so posting it back cannot be a 400.
+    const signed = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/priority`,
+      payload: 'slug=call-the-venue&priority=%2B2',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    assert.equal(signed.statusCode, 303);
+    assert.equal(
+      (await harness.store.items.findOne({ projectId: project.id, slug: 'call-the-venue' }))
+        ?.priority,
+      2,
+    );
+    await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/priority`,
+      payload: 'slug=call-the-venue&priority=-3',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+
     for (const bad of ['99', '2.9', '5junk', '', 'urgent']) {
       const nonsense = await harness.server.inject({
         method: 'POST',
