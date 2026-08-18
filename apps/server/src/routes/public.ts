@@ -46,6 +46,7 @@ import {
   upsertItem,
   verifyClaimCode,
   renameAgent,
+  waitingSlugs,
 } from '../service.js';
 import { checkCsrf, csrfField, readSession } from '../session.js';
 import {
@@ -1418,7 +1419,11 @@ ${
             : query.what === 'note'
             ? `Your note is on "${touched.slug}", where every agent that reads it will see it.`
             : query.what === 'waiting_refused'
-            ? `Nothing was written to "${touched.slug}". A card waits on slugs, at most ${MAX_BLOCKERS} of them, and one of the names you typed is not one: it is still waiting on ${(touched.blockedBy ?? []).length > 0 ? (touched.blockedBy ?? []).join(', ') : 'nothing'}.`
+            ? `Nothing was written to "${touched.slug}": one of the names you typed is not a slug. It is still waiting on ${(touched.blockedBy ?? []).length > 0 ? (touched.blockedBy ?? []).join(', ') : 'nothing'}.`
+            : query.what === 'waiting_itself'
+            ? `Nothing was written to "${touched.slug}": a card cannot wait on itself.`
+            : query.what === 'waiting_too_many'
+            ? `Nothing was written to "${touched.slug}": a card waits on at most ${MAX_BLOCKERS} others, and more than that is a plan rather than a dependency. It belongs in the description.`
             : query.what === 'waiting'
             ? (touched.blockedBy ?? []).length > 0
               ? `"${touched.slug}" is waiting on ${(touched.blockedBy ?? []).join(', ')}. No agent will be offered it, and a claim on it is refused, until those are done or dropped.`
@@ -1473,6 +1478,9 @@ ${renderBoard(view, {
   timelines: await recentTimelines(store, project._id, view, openItem),
   agents,
   facets,
+  // One query, and the same one the offer and the claim use, so the chip on
+  // the card cannot disagree with what an agent asking for work is told.
+  waiting: new Set(await waitingSlugs(store, project._id)),
   ...(notice ? { notice } : {}),
   ...(searchStopped ? { searchStopped } : {}),
 })}
@@ -1694,7 +1702,17 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
       });
     } catch (error) {
       if (!(error instanceof ServiceError) || error.code !== 'bad_blocked_by') throw error;
-      what = 'waiting_refused';
+      // Which of the three refusals it was. The service carries the reason
+      // beside the code precisely so the page can say the true one: telling
+      // somebody who typed the card's own slug that their name is not a slug
+      // sends them looking for a spelling mistake that is not there.
+      const reason = (error.details as { reason?: string } | undefined)?.reason;
+      what =
+        reason === 'itself'
+          ? 'waiting_itself'
+          : reason === 'too_many'
+            ? 'waiting_too_many'
+            : 'waiting_refused';
     }
     const params = new URLSearchParams({
       done: form.slug,

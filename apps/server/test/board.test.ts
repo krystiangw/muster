@@ -2744,6 +2744,44 @@ describe('a card that waits on another', () => {
     assert.equal((item.json().item.blocked_by ?? []).length, 0);
   });
 
+  it('stops calling a card blocked once its prerequisites are finished', async () => {
+    // The list stays on the card after the work it depended on closes, which
+    // is right: it is a record of what this waited for. What the board must
+    // not do is keep saying "waiting" about work anybody may now take.
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'gate-a', title: 't', body: 'b', actor: 'a' });
+    await post(project, '/items', { slug: 'after-a', title: 't', body: 'b', blocked_by: ['gate-a'], actor: 'a' });
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    const blocked = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(blocked.body, /waiting on gate-a/);
+
+    await post(project, '/items', { slug: 'gate-a', status: 'done', actor: 'a' });
+    const free = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.doesNotMatch(free.body, /waiting on gate-a/, 'the chip goes when the blocking does');
+    // And the record of what it waited for is still on the card.
+    const item = await read(project, '/items/after-a');
+    assert.deepEqual(item.json().item.blocked_by, ['gate-a']);
+  });
+
+  it('says which of the three refusals it was, not one sentence for all of them', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'itself', title: 't', body: 'b', actor: 'a' });
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const refused = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/waiting`,
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: new URLSearchParams({ slug: 'itself', waiting: 'itself' }).toString(),
+    });
+    assert.match(refused.headers.location as string, /what=waiting_itself/);
+    const page = await harness.server.inject({
+      method: 'GET',
+      url: refused.headers.location as string,
+    });
+    assert.match(page.body, /cannot wait on itself/);
+  });
+
   it('takes a list a person typed with commas, spaces or both', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'one', title: 't', body: 'b', actor: 'a' });

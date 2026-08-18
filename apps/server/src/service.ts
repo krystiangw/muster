@@ -134,12 +134,19 @@ export function normalizeUpsertInput(input: UpsertItemInput): UpsertItemInput {
   let blockedBy: string[] | undefined;
   if (input.blockedBy !== undefined) {
     if (!Array.isArray(input.blockedBy) || input.blockedBy.some((s) => typeof s !== 'string')) {
-      throw badRequest('bad_blocked_by', 'blocked_by is an array of slugs this card waits on.');
+      throw new ServiceError(
+        400,
+        'bad_blocked_by',
+        'blocked_by is an array of slugs this card waits on.',
+        { reason: 'not_a_list' },
+      );
     }
     if (input.blockedBy.length > MAX_BLOCKERS) {
-      throw badRequest(
+      throw new ServiceError(
+        400,
         'bad_blocked_by',
         `A card waits on at most ${MAX_BLOCKERS} others. More than that is a plan, and a plan belongs in the body.`,
+        { reason: 'too_many' },
       );
     }
     const own = normalizeSlug(input.slug);
@@ -150,13 +157,21 @@ export function normalizeUpsertInput(input: UpsertItemInput): UpsertItemInput {
         // Refused rather than skipped. Dropping it stored a card that waits on
         // nothing, which then claims cleanly: the one outcome this field
         // exists to prevent, arrived at by a typo nobody was told about.
-        throw badRequest(
+        //
+        // The three ways this field is refused share a code, because an agent
+        // acts on the code, and carry a `reason` beside it, because the page a
+        // person typed into has to say which of the three happened.
+        throw new ServiceError(
+          400,
           'bad_blocked_by',
           `"${String(raw).slice(0, 40)}" is not a slug, so nothing can be waiting on it.`,
+          { reason: 'not_a_slug' },
         );
       }
       if (slug === own) {
-        throw badRequest('bad_blocked_by', 'A card cannot wait on itself.');
+        throw new ServiceError(400, 'bad_blocked_by', 'A card cannot wait on itself.', {
+          reason: 'itself',
+        });
       }
       seen.add(slug);
     }
@@ -1777,7 +1792,7 @@ function blockedMessage(
  * something. Empty on every board that does not use the field, for one query
  * that matches nothing.
  */
-async function waitingSlugs(store: Store, projectId: string): Promise<string[]> {
+export async function waitingSlugs(store: Store, projectId: string): Promise<string[]> {
   // Every one of them, with no cap. A cap here is not a cheaper answer, it is
   // a wrong one: the card it leaves out is offered and leased, and a claim on
   // that same card is refused, which is the loop this is here to prevent. The

@@ -99,6 +99,7 @@ function card(
   open: string,
   asked: number,
   agents?: Map<string, string>,
+  waiting?: boolean,
 ): string {
   const claimed = item.claim !== null && new Date(item.claim.expiresAt) > now;
   const classes = ['card', item.stale ? 'is-stale' : '', claimed ? 'is-claimed' : '']
@@ -135,11 +136,16 @@ function card(
       // work anybody could pick up, and the only difference is a field you
       // have to open the card to see: the board would be showing an agent
       // ignoring a ticket rather than an agent being refused it.
-      (item.blockedBy ?? []).length > 0
+      //
+      // Drawn from what is still unfinished rather than from the list itself.
+      // The list stays on the card after its prerequisites close, because it
+      // is a record of what this depended on, and a chip that outlives the
+      // blocking says the opposite of the truth.
+      waiting
         ? chip(
             (item.blockedBy ?? []).length === 1
               ? `waiting on ${item.blockedBy![0]}`
-              : `waiting on ${item.blockedBy!.length}`,
+              : `waiting on ${(item.blockedBy ?? []).length}`,
             'blocked',
           )
         : ''
@@ -472,6 +478,16 @@ export interface BoardRenderOptions {
   /** Where an answer posts, when questions are offered. */
   answerAction?: string;
   /**
+   * The slugs whose blockers are not finished yet, so the card can say which
+   * of them is actually stuck.
+   *
+   * A card keeps the list it was given after its prerequisites close, which is
+   * right: the list is a record of what this depended on. What the board must
+   * not do is keep calling that card blocked, because by then anybody may take
+   * it and the chip would be pointing at the wrong thing.
+   */
+  waiting?: Set<string>;
+  /**
    * Said above the board when a search was dropped for reading too long.
    *
    * The board below it is the whole board, not the search. Rendering the search
@@ -605,6 +621,7 @@ ${lane.columns
                   sheetUrl(item),
                   options.questions?.get(item.slug)?.length ?? 0,
                   options.agents,
+                  options.waiting?.has(item.slug) ?? false,
                 ),
               )
               .join('\n')
