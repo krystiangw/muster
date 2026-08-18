@@ -1323,6 +1323,19 @@ describe('a layout that would trap finished work', () => {
     assert.equal(moved.json().landed_in, 'fresh');
   });
 
+  it('refuses a column that says it will not touch, because every move does', async () => {
+    // touch: false would have parsed, and an apply with one key in it counts as
+    // a move, so a view could have called itself a destination and then
+    // reported touch: false on a card the same request had just touched.
+    const project = await createProject(harness, 'no touch');
+    const rejected = await put(project, '/board', {
+      rows: 'none',
+      columns: [{ key: 'fresh', title: 'Fresh', match: { stale: false }, apply: { touch: false } }],
+    });
+    assert.equal(rejected.statusCode, 400);
+    assert.match(rejected.json().message, /touch can only be true/);
+  });
+
   it('keeps a column for fresh work as a destination, since a move makes it fresh', async () => {
     // The first version of the rule read "stale" as unreachable either way and
     // took the built-in signals preset's own column off the board. A move goes

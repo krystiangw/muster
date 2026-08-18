@@ -858,8 +858,15 @@ function parseApply(raw: unknown, columnKey: string): BoardApply {
     apply.release = source.release;
   }
   if (source.touch !== undefined) {
-    if (typeof source.touch !== 'boolean') throw bad('apply.touch must be true or false.');
-    apply.touch = source.touch;
+    // The only marker here with no false half. The others add a step a move
+    // would otherwise skip; this one names the write the move already makes,
+    // and every move makes it. Keeping a false would let a column count as a
+    // destination on the strength of a key that promises nothing, and then
+    // report touch: false on an item it had just touched.
+    if (source.touch !== true) {
+      throw bad('apply.touch can only be true: a move always touches the item.');
+    }
+    apply.touch = true;
   }
   if (apply.claim && apply.release) {
     throw bad(`Column "${columnKey}" both claims and releases; it can do one or the other.`);

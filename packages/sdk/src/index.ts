@@ -131,9 +131,10 @@ export interface BoardApply {
   /**
    * For a column that asks for work which is not stale. Nothing is set: any
    * write clears the flag, and a move is a write. It has a name so that such a
-   * column counts as a destination rather than deriving an empty apply.
+   * column counts as a destination rather than deriving an empty apply. Only
+   * true: a move always touches, so the server refuses a false.
    */
-  touch?: boolean;
+  touch?: true;
 }
 
 /**

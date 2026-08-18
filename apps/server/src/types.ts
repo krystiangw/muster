@@ -239,8 +239,11 @@ export interface BoardApply {
    * name for it, a column whose only filter is `"stale": false` derives an
    * empty apply and the board decides it is not a destination, which leaves an
    * ordinary column unreachable for a reason nobody can see.
+   *
+   * Only ever true. There is no move that does not touch, so a false here
+   * would be a column claiming a write it cannot withhold.
    */
-  touch?: boolean;
+  touch?: true;
 }
 
 export interface BoardColumn {
