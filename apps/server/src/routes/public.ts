@@ -439,6 +439,9 @@ anything into their queue.</p>
 <p>Every automatic change appends a timeline entry signed <code>hygiene</code> and leaves
 <code>touched_at</code> alone, so hygiene never looks like activity and a stale item cannot reset
 its own clock. Any of it is reversed by your next ordinary upsert.</p>
+<p>The project read carries <code>swept_at</code>: when a pass last finished, from the schedule or
+from a request. The stale flags and the expired claims you are looking at are exactly that old, and
+a board nobody is tidying otherwise looks the same as a board with nothing to tidy.</p>
 
 <h2>Mirroring an external signal</h2>
 <p>If your items come from a scanner, an error stream or an alert feed, tell Muster which ones
