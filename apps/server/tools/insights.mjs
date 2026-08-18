@@ -61,6 +61,8 @@ const [
   weekViews,
   moves,
   boardViews,
+  unswept,
+  oldestSweep,
 ] = await Promise.all([
   count(events, { kind: 'discover' }),
   count(events, { kind: 'signup' }),
@@ -85,6 +87,14 @@ const [
   count(events, { kind: 'view', at: { $gte: since(7) } }),
   count(events, { kind: 'move' }),
   count(events, { kind: 'view', detail: 'board' }),
+  // Hygiene, across every project rather than the one the watchdog reads: a
+  // board nobody is sweeping looks exactly like a board with nothing to sweep.
+  count(projects, { 'counts.items': { $gt: 0 }, $or: [{ sweptAt: null }, { sweptAt: { $exists: false } }] }),
+  projects
+    .find({ 'counts.items': { $gt: 0 }, sweptAt: { $ne: null } }, { projection: { sweptAt: 1 } })
+    .sort({ sweptAt: 1 })
+    .limit(1)
+    .toArray(),
 ]);
 
 const hours = answered
@@ -147,6 +157,15 @@ row('open items', openItems);
 row('  of those, stale', staleItems);
 row('agents', agentCount);
 row('questions waiting', openQuestions);
+const sweepAgeMinutes =
+  oldestSweep.length > 0
+    ? Math.round((Date.now() - new Date(oldestSweep[0].sweptAt).getTime()) / 60_000)
+    : null;
+row(
+  'longest since a sweep, min',
+  sweepAgeMinutes === null ? 'n/a' : sweepAgeMinutes,
+);
+if (unswept > 0) row('  boards never swept', unswept);
 row('median answer, hours', median === null ? 'n/a' : median.toFixed(1));
 if (hours.length > 0) console.log(`  ${'  over the last'.padEnd(28)} ${String(hours.length).padStart(7)} answers`);
 
