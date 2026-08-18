@@ -960,3 +960,10 @@ still runs on fragments, because it has no server behind it and nothing to lose.
 **A sheet the page did not draw does not hold the refresh either.** A `?card=`
 naming something the current narrowing filtered out is an ordinary board, and
 letting it stop the clock would be a link that quietly makes the page stale.
+
+**A sheet is resolved against every item, not against the drawn ones.** A column
+draws its first fifteen cards. The address names one, and work filed above it
+between sending the link and opening it is exactly how that card reaches position
+sixteen: the link then opened nothing, silently, and the page went back to
+reloading under whoever was typing into it. Its history is fetched the same way,
+or the sheet opens on an empty timeline.

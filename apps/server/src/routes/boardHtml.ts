@@ -485,6 +485,17 @@ export function renderBoard(view: BoardView, options: BoardRenderOptions = {}): 
   const shown = lanes.flatMap((lane) =>
     lane.columns.flatMap((cell) => cell.items.slice(0, COLUMN_RENDER_LIMIT)),
   );
+  // The sheets, which are not the same list as the cards. A column draws its
+  // first fifteen; an address names one card, and work filed above it since the
+  // link was sent is exactly how that card ends up at position sixteen. A link
+  // that quietly opens nothing is worse than one that says the card is gone,
+  // so the sheet is resolved against every item on the board.
+  const sheets = addressed
+    ? lanes
+        .flatMap((lane) => lane.columns.flatMap((cell) => cell.items))
+        .filter((item) => item.slug === options.openCard)
+        .slice(0, 1)
+    : shown;
   // Above the board, not below it: a column is taller than a screen, and a
   // confirmation nobody scrolls to is not a confirmation.
   return `${options.notice ? `<p class="notice">${escapeHtml(options.notice)}</p>` : ''}
@@ -574,11 +585,7 @@ ${
       ? '<p class="notice warn">This board has more items than one page reads, so the counts are partial.</p>'
       : ''
   }
-${shown
-  // One sheet, not one per card. Every card used to carry its whole preview,
-  // its four forms and an answer form for each question on it, so a board of a
-  // hundred done items shipped a hundred of them to open one.
-  .filter((item) => !addressed || item.slug === options.openCard)
+${sheets
   .map((item) =>
     preview(
       item,

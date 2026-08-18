@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { BOARD_PRESETS } from '../src/board.js';
+import { BOARD_PRESETS, COLUMN_RENDER_LIMIT } from '../src/board.js';
 import { after, before, describe, it } from 'node:test';
 import { moveItem } from '../src/board.js';
 import { authed, createProject, signIn, startHarness, type Harness, type Project } from './helper.js';
@@ -1100,6 +1100,46 @@ describe('moving an item into a column', () => {
     // One name in the filter now, and the control is gone with the reason for
     // it: nothing left to choose between.
     assert.ok(!after.body.includes('trades_loop (seen, not registered)'));
+  });
+
+  it('opens a card the column stopped drawing, and keeps holding the refresh', async () => {
+    // A card sheet is a link somebody can send now. A column draws its first
+    // fifteen cards, so work filed above it between sending the link and
+    // opening it used to leave the address opening nothing at all, silently,
+    // and the page went back to reloading under whoever was typing.
+    const project = await createProject(harness, 'deep card');
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'buried', title: 'the buried one', priority: -5, actor: 'a' },
+    });
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items/buried/timeline`,
+      headers: authed(project),
+      payload: { actor: 'a', message: 'the venue answered on the second try' },
+    });
+    for (let n = 0; n < COLUMN_RENDER_LIMIT + 2; n += 1) {
+      await harness.server.inject({
+        method: 'POST',
+        url: `${project.api}/items`,
+        headers: authed(project),
+        payload: { slug: `newer-${n}`, title: `newer ${n}`, priority: 5, actor: 'a' },
+      });
+    }
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    const closed = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.ok(!closed.body.includes('the buried one'), 'the column stopped drawing it');
+
+    const page = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?card=buried`,
+    });
+    assert.match(page.body, /the buried one/, 'the address still opens it');
+    assert.match(page.body, /the venue answered on the second try/, 'with its history');
+    assert.ok(!page.body.includes('http-equiv="refresh"'), 'and the page holds still');
   });
 
   it('lets a person correct the words on a card, and never blank the title by accident', async () => {

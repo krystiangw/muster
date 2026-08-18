@@ -76,9 +76,19 @@ async function recentTimelines(
   store: Store,
   projectId: string,
   view: BoardView,
+  // The card an address names, which is not always one of the drawn ones: work
+  // filed above it since the link was sent puts it past the column's cap, and
+  // its sheet would then open with an empty history.
+  openCard = '',
 ): Promise<Map<string, TimelineEntry[]>> {
   const ids = view.rows
-    .flatMap((row) => row.columns.flatMap((cell) => cell.items.slice(0, COLUMN_RENDER_LIMIT)))
+    .flatMap((row) =>
+      row.columns.flatMap((cell) =>
+        cell.items.filter(
+          (item, index) => index < COLUMN_RENDER_LIMIT || item.slug === openCard,
+        ),
+      ),
+    )
     .map((item) => item._id);
   const timelines = new Map<string, TimelineEntry[]>();
   if (ids.length === 0) return timelines;
@@ -1341,9 +1351,7 @@ ${
       openNew ||
       (openCard !== '' &&
         view.rows.some((row) =>
-          row.columns.some((cell) =>
-            cell.items.slice(0, COLUMN_RENDER_LIMIT).some((item) => item.slug === openCard),
-          ),
+          row.columns.some((cell) => cell.items.some((item) => item.slug === openCard)),
         ));
 
     const boardUrl = `/r/${escapeHtml(readToken)}/board`;
@@ -1365,7 +1373,7 @@ ${renderBoard(view, {
   questions,
   answerAction: `/r/${escapeHtml(readToken)}`,
   filters: renderBoardFilters(view, facets, boardUrl),
-  timelines: await recentTimelines(store, project._id, view),
+  timelines: await recentTimelines(store, project._id, view, openCard),
   agents,
   facets,
   ...(notice ? { notice } : {}),
