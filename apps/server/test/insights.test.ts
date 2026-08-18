@@ -168,6 +168,9 @@ describe('what the service knows about its own use', () => {
   });
 
   it('counts a crawler reading the protocol beside the agents, never among them', async () => {
+    // Records are batched now, so a reading taken before they are written
+    // measures the buffer rather than the board.
+    await flushEvents();
     const before = await insights(harness.store);
 
     await harness.server.inject({
@@ -207,6 +210,9 @@ describe('what the service knows about its own use', () => {
     await post(project, '/items', { slug: 'work', title: 'work', actor: 'errors-loop' });
     await flushEvents();
 
+    // Records are batched now, so a reading taken before they are written
+    // measures the buffer rather than the board.
+    await flushEvents();
     const before = await insights(harness.store);
 
     // Events are kept ninety days, so a board that signed up before that keeps
@@ -315,11 +321,33 @@ describe('what the service knows about its own use', () => {
   });
 
   it('never fails a request when it cannot record', async () => {
-    const broken = { ...harness.store, events: { insertOne: () => Promise.reject(new Error('down')) } };
+    // Two ways a database says no, because the writer meets both: a rejected
+    // promise, and a driver that throws on the call itself.
+    const rejects = {
+      ...harness.store,
+      events: {
+        insertOne: () => Promise.reject(new Error('down')),
+        insertMany: () => Promise.reject(new Error('down')),
+      },
+    };
+    const throws = {
+      ...harness.store,
+      events: {
+        insertOne: () => {
+          throw new Error('down');
+        },
+        insertMany: () => {
+          throw new Error('down');
+        },
+      },
+    };
     // Recording is fire and forget on purpose: telemetry that can break the
     // thing it measures is worse than no telemetry.
     const { record } = await import('../src/events.js');
-    assert.doesNotThrow(() => record(broken as never, 'discover', { door: 'http' }));
+    for (const broken of [rejects, throws]) {
+      assert.doesNotThrow(() => record(broken as never, 'discover', { door: 'http' }));
+      await assert.doesNotReject(() => flushEvents());
+    }
     await new Promise((resolve) => setTimeout(resolve, 10));
   });
 });
@@ -327,6 +355,9 @@ describe('what the service knows about its own use', () => {
 describe('who owns what', () => {
   it('counts a project accepted from an agent as claimed, like one claimed with a code', async () => {
     const project = await createProject(harness, 'handed over');
+    // Records are batched now, so a reading taken before they are written
+    // measures the buffer rather than the board.
+    await flushEvents();
     const before = (await insights(harness.store)).funnel.claimed;
 
     await harness.server.inject({
@@ -382,6 +413,9 @@ describe('counting the people, not the agents', () => {
   it('counts a page only when somebody was shown one', async () => {
     const project = await createProject(harness, 'guarded');
     const readToken = project.readUrl.split('/r/')[1]!;
+    // Records are batched now, so a reading taken before they are written
+    // measures the buffer rather than the board.
+    await flushEvents();
     const before = await insights(harness.store);
 
     // A stale bookmark and a token probe both end in a 404. Nobody read a page.
@@ -403,6 +437,9 @@ describe('counting the people, not the agents', () => {
   });
 
   it('does not count a crawler as a person', async () => {
+    // Records are batched now, so a reading taken before they are written
+    // measures the buffer rather than the board.
+    await flushEvents();
     const before = (await insights(harness.store)).pages.signup ?? 0;
     for (const ua of ['Googlebot/2.1 (+http://www.google.com/bot.html)', 'curl/8.4.0', 'Bingbot']) {
       await harness.server.inject({ method: 'GET', url: '/signup', headers: { 'user-agent': ua } });
@@ -431,6 +468,9 @@ describe('counting the people, not the agents', () => {
       headers: authed(ownerless),
       payload: { agent: 'agent', question: 'answered by whatever holds the token?' },
     });
+    // Records are batched now, so a reading taken before they are written
+    // measures the buffer rather than the board.
+    await flushEvents();
     const before = await insights(harness.store);
     await harness.server.inject({
       method: 'PATCH',
@@ -469,6 +509,9 @@ describe('counting the people, not the agents', () => {
   it('counts a form refused as somebody else\'s page, by reason and not by origin', async () => {
     const project = await createProject(harness, 'refusals');
     const readToken = project.readUrl.split('/r/')[1]!;
+    // Records are batched now, so a reading taken before they are written
+    // measures the buffer rather than the board.
+    await flushEvents();
     const before = await insights(harness.store);
 
     const refused = async (headers: Record<string, string>) =>
@@ -514,6 +557,9 @@ describe('counting the people, not the agents', () => {
   it('says which door a human answered through, and counts one decision once', async () => {
     const project = await createProject(harness, 'doors');
     const readToken = project.readUrl.split('/r/')[1]!;
+    // Records are batched now, so a reading taken before they are written
+    // measures the buffer rather than the board.
+    await flushEvents();
     const before = (await insights(harness.store)).answerDoors;
 
     // Claimed first, and that ordering is the point rather than setup: an answer

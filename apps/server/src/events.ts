@@ -164,7 +164,59 @@ const inFlight = new Set<Promise<unknown>>();
  * finished would hold a dyno open until the platform killed it. Losing a
  * telemetry record is the cheapest thing in this system.
  */
+/**
+ * Records waiting to be written, per database, and the timer that will write
+ * them.
+ *
+ * One insert per page view is one database operation per page view, and the
+ * cluster this runs on allows a hundred a second in total. A front page sends
+ * more than that, and the shape of the failure is the worst one available: the
+ * landing page keeps serving, because these writes are never awaited, while
+ * the API starts failing, because those are. Batched, the same hundred views
+ * cost two or three operations.
+ *
+ * Nothing about the guarantee changes: these were already fire-and-forget, so
+ * a process that dies loses the last second of telemetry, which it always
+ * could.
+ *
+ * Keyed by the store rather than kept in one list, because the store is not
+ * always the same one. One process serves one database in production; a test
+ * file builds several, and a buffer that forgot which database a record
+ * belonged to would write it into whichever store recorded last.
+ */
+const pending = new Map<Store, { docs: EventDoc[]; timer: ReturnType<typeof setTimeout> | null }>();
+
+/** How many records one insert carries, and how long the first one waits. */
+const BATCH = 100;
+const LINGER_MS = 1_000;
+
+function writePending(store: Store): void {
+  const held = pending.get(store);
+  if (!held) return;
+  if (held.timer) clearTimeout(held.timer);
+  pending.delete(store);
+  if (held.docs.length === 0) return;
+  // Guarded, and not only against a rejected promise: the rule at the top of
+  // this file is that telemetry cannot break the thing it measures, and a
+  // driver that throws on the call rather than in the promise would otherwise
+  // take out whatever asked for the flush.
+  try {
+    const write = store.events
+      .insertMany(held.docs, { ordered: false })
+      .catch(() => undefined)
+      .finally(() => inFlight.delete(write));
+    inFlight.add(write);
+  } catch {
+    // Nothing to do and nobody to tell: the records are gone, which is the
+    // cheapest thing in this system.
+  }
+}
+
 export async function flushEvents(timeoutMs = 2_000): Promise<void> {
+  // The buffers first, then what is already on its way: a test that asserts
+  // what was recorded, and a shutdown, both mean everything, not everything
+  // that happened to have left already.
+  for (const store of [...pending.keys()]) writePending(store);
   const deadline = Date.now() + timeoutMs;
   for (let round = 0; round < 5 && inFlight.size > 0; round += 1) {
     const left = deadline - Date.now();
@@ -194,21 +246,30 @@ export function record(
   },
 ): void {
   const now = new Date();
-  const write = store.events
-    .insertOne({
-      _id: newId('e'),
-      at: now,
-      kind,
-      door: options.door,
-      detail: options.detail ?? null,
-      projectId: options.projectId ?? null,
-      ...(options.crawler === undefined ? {} : { crawler: options.crawler }),
-      ...(options.from ? { from: options.from } : {}),
-      expiresAt: new Date(now.getTime() + KEEP_DAYS * 86_400_000),
-    })
-    .catch(() => undefined)
-    .finally(() => inFlight.delete(write));
-  inFlight.add(write);
+  const held = pending.get(store) ?? { docs: [], timer: null };
+  held.docs.push({
+    _id: newId('e'),
+    at: now,
+    kind,
+    door: options.door,
+    detail: options.detail ?? null,
+    projectId: options.projectId ?? null,
+    ...(options.crawler === undefined ? {} : { crawler: options.crawler }),
+    ...(options.from ? { from: options.from } : {}),
+    expiresAt: new Date(now.getTime() + KEEP_DAYS * 86_400_000),
+  });
+  pending.set(store, held);
+  if (held.docs.length >= BATCH) {
+    writePending(store);
+    return;
+  }
+  // The first record of a quiet minute starts the clock; the ones after it
+  // ride the same timer, so a trickle is still written within a second and a
+  // burst is written in one operation.
+  if (!held.timer) {
+    held.timer = setTimeout(() => writePending(store), LINGER_MS);
+    held.timer.unref?.();
+  }
 }
 
 /**
