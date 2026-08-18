@@ -547,7 +547,9 @@ describe('moving an item into a column', () => {
       }
 
       const refused = await write('/items/fill-0/move', { column: 'doing', actor: 'worker' });
-      assert.equal(refused.statusCode, 429, 'reopening at the cap is refused');
+      // 409, like every other way of meeting this cap: it is a conflict with
+      // what the board holds, not a request to slow down.
+      assert.equal(refused.statusCode, 409, 'reopening at the cap is refused');
 
       const item = await isolated.store.items.findOne({ projectId: project.id, slug: 'fill-0' });
       assert.equal(item!.claim, null, 'and the refused move holds nothing');
