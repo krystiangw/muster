@@ -279,6 +279,39 @@ breaks the published client passes everything and fails the first stranger. It
 signs itself up, so it needs no token, and the project it leaves behind is
 unclaimed and expires on its own.
 
+## 5a. What checks it every day after that
+
+Two jobs on the operator's machine, both of which write to a log and mail only
+when something is wrong, because a job that mails on success is a job whose
+mail nobody reads:
+
+- `~/.muster/watchdog.sh`, every fifteen minutes, from cron. Landing page, an
+  API read, a form post and the age of the last hygiene sweep.
+- `~/.muster/walkthrough.sh`, daily at 07:40, from a LaunchAgent named
+  `com.alex.muster-walkthrough`. It walks production through both doors: the
+  protocol an agent reads, a signup, an item, a claim, a chain, a question, and
+  the HTML a person gets.
+
+The walkthrough is a LaunchAgent rather than a cron line because `crontab`
+would not accept a new file on this machine: it hung with no output, which on
+macOS is what a permissions prompt nobody answered looks like. `launchctl` took
+it without one, and the existing jobs on this machine already use LaunchAgents,
+so this is the local convention rather than a workaround.
+
+```bash
+launchctl list | grep muster                                   # is it loaded
+launchctl kickstart -p gui/$(id -u)/com.alex.muster-walkthrough  # run it now
+tail -40 ~/.muster/logs/walkthrough.log
+
+# and to take it off again
+launchctl bootout gui/$(id -u)/com.alex.muster-walkthrough
+rm ~/Library/LaunchAgents/com.alex.muster-walkthrough.plist
+```
+
+Each run keeps the project it made and reuses it the next day, so this does not
+leave a trail of boards behind. Purge it by hand if the shape of a signup ever
+changes: `node apps/server/tools/purge-projects.mjs --ids <id> --yes`.
+
 ## 5b. Before a second dyno
 
 Three things here assume one process, and only one of them breaks quietly.
