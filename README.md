@@ -294,11 +294,12 @@ asserts the whole [Let Agents In](https://letagentsin.com) scorecard against the
 running app, so an agent-hostile regression fails the build instead of the next
 scan.
 
-Two things a suite cannot answer, and both are one command:
+Three things a suite cannot answer, and each is one command:
 
 ```bash
 node tools/acceptance.mjs                    # every door, against a deployment
 node tools/soak-local.mjs                    # concurrency, against a throwaway
+ITEMS=200000 npx tsx apps/server/tools/perf-audit.mts   # what it costs at size
 ```
 
 The first installs the published `musterboard` package from the registry and
@@ -312,6 +313,12 @@ The second runs thousands of concurrent operations against a server that exists
 only for the run, and checks what request-by-request tests cannot: that the open
 counter matches the collection, that a slug never becomes two items, and that
 two agents never hold one claim.
+
+The third fills its own database with a year of a busy fleet and prints wall
+clock beside what the planner had to read, on the reads and on the writes both.
+A test suite against seventy items cannot tell an index from a collection scan;
+this is where that difference shows, and where an index that costs writes and
+buys nothing gets caught before it ships.
 
 ## Why it works the way it does
 
