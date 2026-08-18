@@ -952,6 +952,29 @@ describe('the open item cap', () => {
     );
   });
 
+  it('repairs a project that predates the version field', async () => {
+    const { correctOvercount } = await import('../src/hygiene.js');
+    const { createProject: createDirect, upsertItem } = await import('../src/service.js');
+    // Every project that existed before the version was written has no such
+    // field, and Mongo does not match a missing field against 0. Those are
+    // exactly the projects whose counters have been stuck long enough to need
+    // this, so the guard has to accept both.
+    const { project } = await createDirect(harness.store, harness.config, { name: 'legacy' });
+    await upsertItem(harness.store, project, { slug: 'one', title: 'one', actor: 'a' });
+    await harness.store.projects.updateOne(
+      { _id: project._id },
+      { $set: { 'counts.items': 40 }, $unset: { countsVersion: '' } },
+    );
+
+    assert.equal(await correctOvercount(harness.store, project._id), false, 'first look records it');
+    await harness.store.projects.updateOne(
+      { _id: project._id },
+      { $set: { 'countsCheck.items.at': new Date(Date.now() - 60_000) } },
+    );
+    assert.equal(await correctOvercount(harness.store, project._id), true, 'and the second repairs');
+    assert.equal((await harness.store.projects.findOne({ _id: project._id }))!.counts.items, 1);
+  });
+
   it('does not mistake one halfway close for another one settling', async () => {
     const { correctOvercount } = await import('../src/hygiene.js');
     const { createProject: createDirect, upsertItem } = await import('../src/service.js');

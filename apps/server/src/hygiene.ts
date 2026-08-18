@@ -429,8 +429,23 @@ async function repairCounter(
 
   // The guard is the version as well as the number: a counter that left and
   // came back is not a counter that stayed.
+  //
+  // Version zero has to match a document that has no version field at all.
+  // Every project that existed before this was written is in that state, and
+  // Mongo does not match a missing field against 0, so without the `$exists`
+  // half the guard would never match on exactly the projects whose counters
+  // have been stuck long enough to need repairing.
+  const unchanged =
+    version === 0
+      ? {
+          $or: [
+            { [`countsVersion.${name}`]: 0 },
+            { [`countsVersion.${name}`]: { $exists: false } },
+          ],
+        }
+      : { [`countsVersion.${name}`]: version };
   const applied = await store.projects.updateOne(
-    { _id: projectId, [`counts.${name}`]: counter, [`countsVersion.${name}`]: version },
+    { _id: projectId, [`counts.${name}`]: counter, ...unchanged },
     { $set: { [`counts.${name}`]: open }, $unset: { [`countsCheck.${name}`]: '' } },
   );
   return applied.modifiedCount > 0;
