@@ -1284,11 +1284,17 @@ export async function releaseItem(
     if (!current) {
       throw new ServiceError(404, 'not_found', `No item "${slug}" in this project.`);
     }
-    if (current.claim === null) return current as ItemDoc;
+    // A lease that has run out is free work everywhere else in this service:
+    // `/next` offers it, a claim takes it, the board counts it as unclaimed. A
+    // release that refused it would be the one place where a dead claim still
+    // held something, and only until the next sweep, which makes it a refusal
+    // whose answer depends on when you asked.
+    const held = current.claim !== null && new Date(current.claim.expiresAt) > new Date();
+    if (!held) return current as ItemDoc;
     throw new ServiceError(
       409,
       'not_claim_holder',
-      `"${slug}" is held by ${current.claim.agent}, not by you.`,
+      `"${slug}" is held by ${current.claim!.agent}, not by you.`,
     );
   }
   return item as ItemDoc;

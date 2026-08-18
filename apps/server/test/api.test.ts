@@ -404,6 +404,16 @@ describe('claims', () => {
     assert.equal(notYours.statusCode, 409);
     assert.match(notYours.json().message, /agent-a/, 'and it names who does hold it');
 
+    // A lease that has run out is free work everywhere else, so a release is
+    // not the one place a dead claim still holds something. Otherwise the
+    // answer would depend on whether hygiene had swept since it expired.
+    await harness.store.items.updateOne(
+      { projectId: project.id, slug: 'held' },
+      { $set: { 'claim.expiresAt': new Date(Date.now() - 60_000) } },
+    );
+    const expired = await post(project, '/items/held/release', { agent: 'agent-b' });
+    assert.equal(expired.statusCode, 200);
+
     // A slug that was never written is a different mistake and says so.
     const missing = await post(project, '/items/never-existed/release', { agent: 'agent-a' });
     assert.equal(missing.statusCode, 404);
