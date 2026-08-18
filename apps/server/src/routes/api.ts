@@ -43,10 +43,9 @@ import {
   itemInScope,
   listApiKeys,
   escalationCursor,
-  itemCursor,
   listEscalations,
   readInbox,
-  listItems,
+  readItems,
   nextItem,
   observe,
   registerAgent,
@@ -526,34 +525,24 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       async (request) => {
         const { project } = auth(request);
         const query = request.query as Record<string, unknown>;
-        const limit = Math.min(Math.max((query.limit as number | undefined) ?? 50, 1), 200);
-        const order: ItemOrder =
-          query.order === 'id' ? 'id' : query.order === 'recent' ? 'recent' : 'urgency';
-        const since = query.since ? new Date(String(query.since)) : undefined;
-        if (since && Number.isNaN(since.getTime())) {
-          throw new ServiceError(400, 'bad_since', 'since must be an ISO timestamp.');
-        }
-        // Stamped before the read, never after: anything written while this
-        // query ran must fall inside the next window rather than between them.
-        const asOf = new Date();
-        const items = await listItems(store, project._id, {
+        // Paging, ordering and the `since` window live in the service, because
+        // the MCP tool is the same read through another door and the two had
+        // already drifted apart once.
+        const { items, nextCursor, asOf } = await readItems(store, project._id, {
           status: query.status as ItemStatus | undefined,
           owner: query.owner as string | undefined,
           label: query.label as string | undefined,
           source: query.source as string | undefined,
           stale: query.stale as boolean | undefined,
           claimed: query.claimed as boolean | undefined,
-          limit,
-          order,
+          limit: query.limit as number | undefined,
+          order: query.order as string | undefined,
           cursor: query.cursor as string | undefined,
-          ...(since ? { since } : {}),
+          since: query.since as string | undefined,
         });
         return {
           items: items.map((item) => itemJson(item)),
-          // Null on a short page, so the caller learns it is done without
-          // spending one more request to find out.
-          next_cursor:
-            items.length === limit ? itemCursor(items[items.length - 1]!, order) : null,
+          next_cursor: nextCursor,
           // Hand this back as `since` next time. A poller using its own clock
           // loses every row written in the gap between the two machines.
           as_of: asOf.toISOString(),

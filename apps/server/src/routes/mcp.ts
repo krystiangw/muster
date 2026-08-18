@@ -18,7 +18,7 @@ import {
   appendNote,
   listEscalations,
   readInbox,
-  listItems,
+  readItems,
   nextItem,
   observe,
   registerAgent,
@@ -176,7 +176,8 @@ const TOOLS: ToolDefinition[] = [
   {
     name: 'list_items',
     title: 'List items',
-    description: 'Filter by status, owner, label, source, staleness or claim state.',
+    description:
+      'Filter by status, owner, label, source, staleness or claim state. Pages with next_cursor, and as_of is what to pass back as since to read only what changed.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -185,7 +186,24 @@ const TOOLS: ToolDefinition[] = [
         label: { type: 'string' },
         source: { type: 'string' },
         stale: { type: 'boolean' },
+        claimed: { type: 'boolean' },
         limit: { type: 'integer', minimum: 1, maximum: 200 },
+        order: {
+          type: 'string',
+          enum: ['urgency', 'id', 'recent'],
+          description:
+            'urgency (default) is most urgent first. id is stable while you page, which is what an export needs. recent is the change feed, and what since is for.',
+        },
+        since: {
+          type: 'string',
+          description:
+            'Only what changed at or after this moment. Pass back the as_of from your previous read rather than your own clock.',
+        },
+        cursor: {
+          type: 'string',
+          description:
+            'From the previous page\'s next_cursor, read in the same order. A null next_cursor means that was the last page.',
+        },
       },
     },
     requiresProject: true,
@@ -232,6 +250,10 @@ const TOOLS: ToolDefinition[] = [
       type: 'object',
       properties: {
         items: { type: 'boolean', description: 'false for counts only' },
+        include_closed: {
+          type: 'boolean',
+          description: 'Include done and dropped items, which the board leaves out by default',
+        },
         owner: { type: 'string', description: 'Only items assigned to this owner' },
         agent: {
           type: 'string',
@@ -585,15 +607,27 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         };
       }
       case 'list_items': {
-        const items = await listItems(store, project._id, {
+        // The same read the HTTP route makes. It used to be its own smaller
+        // one: no cursor, so nothing past the limit existed on this door, no
+        // since, so no incremental sync, and no claimed, which the tool
+        // description had been promising all along.
+        const { items, nextCursor, asOf } = await readItems(store, project._id, {
           status: args.status as ItemStatus | undefined,
           owner: args.owner === undefined ? undefined : str(args.owner),
           label: args.label === undefined ? undefined : str(args.label),
           source: args.source === undefined ? undefined : str(args.source),
           stale: typeof args.stale === 'boolean' ? args.stale : undefined,
+          claimed: typeof args.claimed === 'boolean' ? args.claimed : undefined,
           limit: typeof args.limit === 'number' ? args.limit : undefined,
+          order: args.order === undefined ? undefined : str(args.order),
+          cursor: args.cursor === undefined ? undefined : str(args.cursor),
+          since: args.since === undefined ? undefined : str(args.since),
         });
-        return { items: items.map((item) => itemJson(item)) };
+        return {
+          items: items.map((item) => itemJson(item)),
+          next_cursor: nextCursor,
+          as_of: asOf.toISOString(),
+        };
       }
       case 'observe': {
         const present = Array.isArray(args.present) ? (args.present as string[]) : [];
@@ -616,6 +650,9 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
       case 'board': {
         void maybeSweep(store, project).catch(() => undefined);
         const view = await loadBoard(store, project, {
+          ...(typeof args.include_closed === 'boolean'
+            ? { includeClosed: args.include_closed }
+            : {}),
           ...(str(args.owner) ? { owner: str(args.owner) } : {}),
           ...(str(args.agent) ? { agent: str(args.agent) } : {}),
         });

@@ -1414,6 +1414,75 @@ export async function listItems(
     .toArray() as Promise<ItemDoc[]>;
 }
 
+/**
+ * A page of items, with the two things a caller needs to ask for the next one.
+ *
+ * Behind both doors on purpose. The HTTP route grew paging, an `id` order for
+ * exports and a `since` window for change feeds; the MCP tool kept the six
+ * filters it was born with, so an agent on that door could not read past its
+ * limit, could not sync incrementally, and was told in the tool description
+ * that it could filter by claim state, which it could not. Two implementations
+ * of one behaviour drift, and this is what that drift looks like.
+ */
+export interface ReadItemsInput {
+  status?: ItemStatus | undefined;
+  owner?: string | undefined;
+  label?: string | undefined;
+  source?: string | undefined;
+  stale?: boolean | undefined;
+  claimed?: boolean | undefined;
+  limit?: number | undefined;
+  order?: string | undefined;
+  cursor?: string | undefined;
+  since?: string | Date | undefined;
+}
+
+export interface ReadItemsResult {
+  items: ItemDoc[];
+  /** Null on a short page, so a caller learns it is done without one more read. */
+  nextCursor: string | null;
+  asOf: Date;
+}
+
+export async function readItems(
+  store: Store,
+  projectId: string,
+  input: ReadItemsInput,
+): Promise<ReadItemsResult> {
+  const limit = Math.min(Math.max(input.limit ?? 50, 1), 200);
+  const order: ItemOrder =
+    input.order === 'id' ? 'id' : input.order === 'recent' ? 'recent' : 'urgency';
+  const since =
+    input.since === undefined
+      ? undefined
+      : input.since instanceof Date
+        ? input.since
+        : new Date(String(input.since));
+  if (since && Number.isNaN(since.getTime())) {
+    throw new ServiceError(400, 'bad_since', 'since must be an ISO timestamp.');
+  }
+  // Stamped before the read, never after: anything written while this query
+  // ran must fall inside the next window rather than between them.
+  const asOf = new Date();
+  const items = await listItems(store, projectId, {
+    ...(input.status === undefined ? {} : { status: input.status }),
+    ...(input.owner === undefined ? {} : { owner: input.owner }),
+    ...(input.label === undefined ? {} : { label: input.label }),
+    ...(input.source === undefined ? {} : { source: input.source }),
+    ...(input.stale === undefined ? {} : { stale: input.stale }),
+    ...(input.claimed === undefined ? {} : { claimed: input.claimed }),
+    ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+    ...(since ? { since } : {}),
+    limit,
+    order,
+  });
+  return {
+    items,
+    nextCursor: items.length === limit ? itemCursor(items[items.length - 1]!, order) : null,
+    asOf,
+  };
+}
+
 export async function getItem(
   store: Store,
   projectId: string,

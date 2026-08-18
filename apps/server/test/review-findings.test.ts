@@ -129,6 +129,118 @@ describe('the MCP surface obeys the same rules as HTTP', () => {
   });
 });
 
+describe('one read, two doors', () => {
+  it('pages and filters over MCP exactly as it does over HTTP', async () => {
+    // The tool description promised a claim filter the schema never had, and
+    // there was no cursor at all, so everything past the limit was invisible
+    // to an agent on this door. Both doors call one function now.
+    const project = await createProject(harness);
+    for (const slug of ['one', 'two', 'three']) {
+      await post(project, '/items', { slug, title: slug, actor: 'a' });
+    }
+    await post(project, '/items/two/claim', { agent: 'holder' });
+
+    const call = async (args: Record<string, unknown>) => {
+      const response = await harness.server.inject({
+        method: 'POST',
+        url: '/mcp',
+        headers: authed(project),
+        payload: {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'list_items', arguments: args },
+        },
+      });
+      return response.json().result.structuredContent as {
+        items: { slug: string }[];
+        next_cursor: string | null;
+        as_of: string;
+      };
+    };
+
+    const first = await call({ limit: 2, order: 'id' });
+    assert.equal(first.items.length, 2);
+    assert.ok(first.next_cursor, 'a full page says how to ask for the next one');
+    const second = await call({ limit: 2, order: 'id', cursor: first.next_cursor });
+    assert.equal(second.items.length, 1, 'the third item is reachable at all');
+    assert.equal(second.next_cursor, null, 'and a short page says it was the last');
+    const seen = [...first.items, ...second.items].map((item) => item.slug).sort();
+    assert.deepEqual(seen, ['one', 'three', 'two'], 'every item, each once');
+
+    const held = await call({ claimed: true });
+    assert.deepEqual(
+      held.items.map((item) => item.slug),
+      ['two'],
+      'the filter the description was promising',
+    );
+    const free = await call({ claimed: false });
+    assert.deepEqual(free.items.map((item) => item.slug).sort(), ['one', 'three']);
+
+    // The same page over HTTP, to make the parity a fact rather than a claim.
+    const overHttp = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/items?order=id&limit=2`,
+      headers: authed(project),
+    });
+    assert.deepEqual(
+      overHttp.json().items.map((item: { slug: string }) => item.slug),
+      first.items.map((item) => item.slug),
+    );
+    assert.equal(overHttp.json().next_cursor, first.next_cursor);
+
+    // as_of is what a poller hands back as `since`, so it has to be a date the
+    // next read accepts rather than a decorative string.
+    const nothingNew = await call({ since: second.as_of });
+    assert.equal(nothingNew.items.length, 0, 'nothing changed after the read that reported it');
+  });
+
+  it('shows closed work on the board over MCP, the way the API does', async () => {
+    const project = await createProject(harness);
+    // A layout with no column for finished work, which is what makes closed
+    // items off the board by default and include_closed worth having.
+    await harness.server.inject({
+      method: 'PUT',
+      url: `${project.api}/board`,
+      headers: authed(project),
+      payload: { rows: 'none', columns: [{ key: 'open', title: 'Open', match: { status: ['open'] } }] },
+    });
+    await post(project, '/items', { slug: 'shipped', title: 'shipped', actor: 'a', status: 'done' });
+
+    const board = async (args: Record<string, unknown>) => {
+      const response = await harness.server.inject({
+        method: 'POST',
+        url: '/mcp',
+        headers: authed(project),
+        payload: {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'board', arguments: args },
+        },
+      });
+      return response.json().result.structuredContent as { unplaced: number };
+    };
+
+    // A layout that names only open work leaves the finished card off the
+    // board entirely, and asking for the closed ones puts it where the board
+    // admits to it: in the count of what matched no column.
+    assert.equal((await board({})).unplaced, 0, 'closed work is off the board by default');
+    assert.equal(
+      (await board({ include_closed: true })).unplaced,
+      1,
+      'and this door can ask for the rest, which it could not before',
+    );
+
+    const overHttp = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/board?include_closed=true`,
+      headers: authed(project),
+    });
+    assert.equal(overHttp.json().unplaced, 1, 'the same answer through the other door');
+  });
+});
+
 describe('claims cannot be revived after they lapse', () => {
   it('rejects a heartbeat from the old holder once the lease has expired', async () => {
     const project = await createProject(harness);
