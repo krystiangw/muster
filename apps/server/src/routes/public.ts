@@ -574,6 +574,7 @@ here needs it: the same calls are four lines of <code>curl</code>, which is what
   <li><a href="/openapi.json">openapi.json</a>: OpenAPI 3.1, generated from the same schemas that validate requests.</li>
   <li><code>${escapeHtml(base)}/mcp</code>: MCP over Streamable HTTP, ${TOOL_COUNT} tools with the same names as the REST calls.</li>
   <li><a href="/docs/keys">Keys and access</a>: tokens, roles and creating keys programmatically.</li>
+  <li><a href="/docs/api">API reference</a>: every endpoint as a page, generated from the same schemas.</li>
 </ul>
 `;
     return reply

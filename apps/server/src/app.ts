@@ -7,8 +7,9 @@ import { gzipSync } from 'node:zlib';
 import type { Config } from './config.js';
 import type { Store } from './db.js';
 import { createMailer, type Mailer } from './email.js';
-import { setSiteVerification } from './html.js';
+import { escapeHtml, setSiteVerification } from './html.js';
 import { createNotifier, type Notifier } from './notify.js';
+import { recordView } from './events.js';
 import { RateLimiter } from './rateLimit.js';
 import { registerAgentFiles } from './routes/agentfiles.js';
 import { registerApi } from './routes/api.js';
@@ -326,6 +327,73 @@ export async function buildApp(
   server.get('/openapi.json', { schema: { hide: true } }, async (_request, reply) => {
     reply.compressible = true;
     return server.swagger();
+  });
+
+  /**
+   * The same document as a page.
+   *
+   * Not a second copy: it is rendered from `server.swagger()`, which is
+   * generated from the schemas that validate the requests, so a route that
+   * changes changes this with it. It exists because openapi.json answers
+   * "what can I call" only to something willing to parse it, and the two
+   * readers who are not are a person deciding whether to use this at all and
+   * an agent that fetches HTML and reads it.
+   */
+  server.get('/docs/api', { schema: { hide: true } }, async (request, reply) => {
+    recordView(store, 'docs/api', request, new URL(config.baseUrl).host);
+    reply.compressible = true;
+    const doc = server.swagger() as {
+      paths: Record<string, Record<string, { summary?: string; description?: string; tags?: string[] }>>;
+    };
+    const rows: Array<{ tag: string; method: string; path: string; summary: string; description: string }> = [];
+    for (const [path, methods] of Object.entries(doc.paths ?? {})) {
+      for (const [method, operation] of Object.entries(methods)) {
+        if (!['get', 'post', 'put', 'patch', 'delete'].includes(method)) continue;
+        rows.push({
+          tag: operation.tags?.[0] ?? 'other',
+          method: method.toUpperCase(),
+          path,
+          summary: operation.summary ?? '',
+          description: operation.description ?? '',
+        });
+      }
+    }
+    const groups = [...new Set(rows.map((row) => row.tag))];
+    const body = `
+<h1>API reference</h1>
+<p class="lead">Every endpoint this deployment serves, generated from the same schemas that
+validate the requests, so it cannot describe a route that is not there. The machine-readable
+version is <a href="/openapi.json">openapi.json</a>; the five calls that matter, with copy-paste
+curl, are in <a href="/skill.md">skill.md</a>.</p>
+<p>Authentication is one header on everything under <code>/v1</code>:
+<code>authorization: Bearer &lt;project token&gt;</code>. Getting the first token is
+<a href="/docs/keys">one call and no account</a>.</p>
+${groups
+  .map(
+    (tag) => `<h2>${escapeHtml(tag)}</h2>
+<div class="scroll"><table>
+<thead><tr><th>Call</th><th>What it does</th></tr></thead>
+<tbody>
+${rows
+  .filter((row) => row.tag === tag)
+  .map(
+    (row) =>
+      `<tr><td class="mono">${escapeHtml(row.method)} ${escapeHtml(row.path)}</td><td>${escapeHtml(
+        row.summary,
+      )}${row.description ? `<br><span class="why">${escapeHtml(row.description)}</span>` : ''}</td></tr>`,
+  )
+  .join('\n')}
+</tbody></table></div>`,
+  )
+  .join('\n')}
+`;
+    return reply.type('text/html; charset=utf-8').send(
+      page(request, {
+        title: 'Muster API reference',
+        description:
+          'Every endpoint, generated from the schemas that validate the requests: projects, items, claims, boards, escalations and keys.',
+      }, body),
+    );
   });
 
   server.addHook('onSend', async (request, reply, payload) => {

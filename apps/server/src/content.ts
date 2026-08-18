@@ -669,6 +669,7 @@ export function llmsTxt(config: Config): string {
 
 - [/docs](${base}/docs): what the primitives are and how the hygiene engine behaves
 - [/docs/keys](${base}/docs/keys): tokens, roles, and creating keys programmatically
+- [/docs/api](${base}/docs/api): every endpoint as a page, generated from the schemas that validate the requests
 - [/pricing](${base}/pricing): what is free and what the caps are
 
 ## Concepts
@@ -696,6 +697,7 @@ Allow: /llms.txt
 Allow: /openapi.json
 Allow: /docs
 Allow: /docs/keys
+Allow: /docs/api
 Allow: /pricing
 Allow: /signup
 Allow: /.well-known/agent-access.json

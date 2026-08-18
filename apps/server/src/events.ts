@@ -90,6 +90,7 @@ export const VIEWABLE = [
   'landing',
   'docs',
   'docs/keys',
+  'docs/api',
   'pricing',
   'signup',
   'operator',

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
+import { escapeHtml } from '../src/html.js';
 import { authed, createProject, startHarness, type Harness } from './helper.js';
 
 /**
@@ -157,8 +158,28 @@ describe('A. discovery', () => {
     }
   });
 
+  it('serves the API reference as a page, from the document that validates the requests', async () => {
+    // openapi.json answers "what can I call" only to something willing to
+    // parse it. The two readers who will not are a person deciding whether to
+    // use this at all, and an agent that fetches HTML and reads it.
+    const page = await harness.server.inject({ method: 'GET', url: '/docs/api' });
+    assert.equal(page.statusCode, 200);
+    const spec = (
+      await harness.server.inject({ method: 'GET', url: '/openapi.json' })
+    ).json() as { paths: Record<string, Record<string, unknown>> };
+
+    // Generated from the spec rather than written beside it, so this checks
+    // the two cannot disagree rather than checking a list somebody typed.
+    const paths = Object.keys(spec.paths);
+    assert.ok(paths.length >= 10);
+    for (const path of paths) {
+      assert.ok(page.body.includes(escapeHtml(path)), `${path} is missing from the page`);
+    }
+    assert.doesNotMatch(page.body, /<script/i);
+  });
+
   it('renders every documentation page without JavaScript', async () => {
-    for (const url of ['/', '/docs', '/docs/keys', '/pricing', '/signup']) {
+    for (const url of ['/', '/docs', '/docs/keys', '/docs/api', '/pricing', '/signup']) {
       const response = await harness.server.inject({ method: 'GET', url });
       assert.equal(response.statusCode, 200, url);
       assert.doesNotMatch(response.body, /<script/i, `${url} must not need JavaScript`);
