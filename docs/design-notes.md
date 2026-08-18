@@ -655,3 +655,58 @@ one that admits it cannot show everything.
 **Ask for the kind you are going to show.** A query that fetches a mixture and
 filters in memory has a cap on the mixture, not on the thing. The fix is one
 query per kind, in the index built for it.
+
+## What it costs when the data stops being small, 2026-08-18
+
+Every measurement in this repository had been taken against a board with
+seventy items on it. At that size a collection scan and an index are the same
+number, so the shape of every query here was untested: the first evidence would
+have been somebody's fleet slowing down after a year of writing.
+
+`apps/server/tools/perf-audit.mts` fills a real mongod with fifty thousand
+items, five thousand questions, two hundred boards and two hundred thousand
+events, drives the paths a person and an agent take, and prints wall clock
+beside what the planner had to read. The second number is the one that predicts
+the future.
+
+It found four scans and a sort of everything. What each one returned, and what
+it read to do it, before and after:
+
+| | examined | after | wall clock |
+|---|---|---|---|
+| the page the mail links to | 50,000 | 25 | 80 ms to 14 ms |
+| a page of items, urgency order | 50,000 keys | 50 | 55 ms to 2 ms |
+| the board | 50,000 | 1,000 | 73 ms to 9 ms |
+| work assigned to a person, across a fleet | 23,491 | 59 | 121 ms to 5 ms |
+| the stale list | 23,491 | 43 | 99 ms to 2 ms |
+| answered questions, newest first | 4,878 | 50 | 15 ms to 1 ms |
+| a hygiene sweep | | | 183 ms to 37 ms |
+
+Only one of the three causes was a missing index.
+
+**An index that stops one field short of the sort is not an index for it.** A
+page of items sorts by priority, then date, then `_id`, because the keyset
+cursor pages on the tiebreaker, and an index without `_id` cannot finish that
+sort. Mongo used it and then sorted the project in memory anyway. All three
+orders now have their own index, tiebreaker included, and the audit measures the
+sorts the code issues rather than simpler ones that look like them.
+
+**A rank computed in the pipeline cannot be indexed.** The project page ordered
+statuses with a `$switch` so that live work came first, which reads well and
+means "scan everything, then sort it". It asks for live work as live work now,
+and fills the rest of the page from the recency index.
+
+**A negation cannot be an equality bound.** The pass that decides what has gone
+stale asked for `stale: {$ne: true}`, so the most expensive thing hygiene does
+read every open item on the board, every five minutes, on every project.
+`$in: [false, null]` against an index naming all four conditions took it from
+153 ms to 1 ms. The `null` is there because an item written before the field
+existed has no `stale` at all, and that one is still not stale.
+
+Two things were measured and deliberately left alone. A search that matches
+nothing reads the whole collection, 188 ms at fifty thousand items, because a
+case insensitive substring in either field is not indexable; making it fast
+means a text index, and that changes what the search means, which is a product
+decision rather than a performance one. And `dropContentless` walks the open
+items at 21 ms a sweep, which is not worth an eleventh index on the collection
+every write already pays for.
