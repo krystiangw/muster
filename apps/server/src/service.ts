@@ -711,6 +711,49 @@ export async function touchAgent(store: Store, projectId: string, handle: string
 }
 
 /**
+ * What is wrong with the name on this write, if anything.
+ *
+ * A handle is free text on purpose: an agent writes before it registers, and
+ * refusing a write over bookkeeping loses the write. The cost of that is a
+ * board where `trades-loop`, `trades_loop` and `tradesloop` are three agents,
+ * `/next` offers none of them work by scope, and a person filtering by any one
+ * of them sees a third of the work.
+ *
+ * So every door that takes an actor says so, once, in words that name the fix.
+ * A near miss of a handle that is registered gets named: a typo is far more
+ * likely than a fourth loop nobody mentioned, and "did you mean" is the only
+ * part of this a machine can answer.
+ */
+export async function nameWarning(
+  store: Store,
+  projectId: string,
+  actor: string,
+): Promise<string | null> {
+  if (!actor) return null;
+  if (actor === 'unknown-agent') {
+    return 'Nothing named itself on that write, so the board shows it as "unknown-agent". Send `actor` with every write, and register the handle with POST /agents so a person can tell it from the others.';
+  }
+  const agent = await store.agents.findOne({ projectId, handle: actor });
+  if (agent) return null;
+
+  const known = await store.agents
+    .find({ projectId }, { projection: { handle: 1 } })
+    .limit(200)
+    .toArray();
+  const flat = (handle: string) => handle.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const mine = flat(actor);
+  const near = known
+    .map((entry) => entry.handle)
+    .find((handle) => {
+      const other = flat(handle);
+      return other === mine || other.startsWith(mine) || mine.startsWith(other);
+    });
+  return near
+    ? `No agent is registered here as "${actor}", but "${near}" is. If that is you, use it: two spellings are two agents on this board, and /next offers work by the registered one.`
+    : `No agent is registered here as "${actor}", so the board shows a handle nobody has described and /next has no scope to offer it work by. Register with POST /agents, or check the spelling.`;
+}
+
+/**
  * Advisory scope matching. A scope token matches an item when it is a prefix of
  * the slug, one of its labels, or its owner. Nothing here blocks a write: the
  * incident that motivated it was solved socially, by making the boundary

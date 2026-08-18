@@ -1062,3 +1062,92 @@ describe('a parameter this door does not have', () => {
     assert.equal(page.statusCode, 200);
   });
 });
+
+describe('who is writing, and by what name', () => {
+  it('names a near miss of a handle that is registered', async () => {
+    // A handle is free text on purpose: an agent writes before it registers.
+    // The cost is a board where trades-loop and trades_loop are two agents,
+    // /next offers neither of them work by scope, and a person filtering by one
+    // sees half the work.
+    const project = await createProject(harness);
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/agents`,
+      headers: authed(project),
+      payload: { handle: 'trades-loop', scope: ['trades:'] },
+    });
+
+    const typo = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'trades:one', title: 'one', actor: 'trades_loop' },
+    });
+    assert.equal(typo.statusCode, 201);
+    assert.match(typo.json().warnings.join(' '), /"trades_loop".*"trades-loop" is/);
+
+    // A name nothing resembles gets the plain version, which is a different
+    // sentence: there is nothing to suggest.
+    const stranger = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'trades:two', title: 'two', actor: 'somebody-else' },
+    });
+    assert.match(stranger.json().warnings.join(' '), /No agent is registered here as "somebody-else"/);
+    assert.ok(!stranger.json().warnings.join(' ').includes('If that is you'));
+
+    // Registered writes say nothing at all.
+    const fine = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'trades:three', title: 'three', actor: 'trades-loop' },
+    });
+    assert.deepEqual(fine.json().warnings ?? [], []);
+  });
+
+  it('says it at the doors an agent reaches for first, not only at the item door', async () => {
+    const project = await createProject(harness);
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/agents`,
+      headers: authed(project),
+      payload: { handle: 'errors-loop', scope: [] },
+    });
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'card', title: 'card', actor: 'errors-loop' },
+    });
+
+    // Asking for work under a name nobody registered is the earliest moment a
+    // typo can be caught: there is no scope to narrow by, so the agent is
+    // offered everything and never finds out why.
+    const asked = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/next?agent=errors_loop`,
+      headers: authed(project),
+    });
+    assert.match(asked.json().warnings.join(' '), /"errors-loop" is/);
+
+    const noted = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items/card/timeline`,
+      headers: authed(project),
+      payload: { message: 'looked at it', actor: 'errors_loop' },
+    });
+    assert.match(noted.json().warnings.join(' '), /"errors-loop" is/);
+
+    // And a write that named nobody says the loudest thing of all, because
+    // "unknown-agent" is what the board will show for ever otherwise.
+    const anonymous = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items/card/timeline`,
+      headers: authed(project),
+      payload: { message: 'no name on this one' },
+    });
+    assert.match(anonymous.json().warnings.join(' '), /Nothing named itself/);
+  });
+});
