@@ -1504,5 +1504,40 @@ describe('a layout that would trap finished work', () => {
     assert.equal(page.statusCode, 200);
     assert.match(page.body, /the one nobody can see\?/);
     assert.match(page.body, new RegExp(`/r/${readToken}/escalations/${old._id}`));
+
+    // And answering it says so. The same trap one step along: the confirmation
+    // is drawn from the answered list, and ordered by age this question falls
+    // off the end of that too, on exactly the question that was hardest to see.
+    const answered = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/escalations/${old._id}`,
+      payload: 'status=answered&answer=at+last',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        origin: 'null',
+        'sec-fetch-site': 'same-origin',
+      },
+    });
+    assert.equal(answered.statusCode, 303);
+    const back = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}?answered=${old._id}`,
+    });
+    assert.match(back.body, /Answered\./, 'the confirmation names it');
+    assert.match(back.body, /at last/, 'and the answer is in the history');
+  });
+
+  it('says when it is showing some of the questions rather than all', async () => {
+    const { createEscalation } = await import('../src/service.js');
+    const project = await createProject(harness, 'a long queue');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const doc = (await harness.store.projects.findOne({ _id: project.id }))!;
+    for (let index = 0; index < 55; index += 1) {
+      await createEscalation(harness.store, doc, { agent: 'a', question: `q${index}` }, 'http');
+    }
+
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}` });
+    assert.match(page.body, /55 question\(s\)/, 'the summary counts them all');
+    assert.match(page.body, /Showing the 50 most urgent of 55/, 'and the list says it is a slice');
   });
 });

@@ -688,9 +688,14 @@ address. Claiming is free and raises the limits:</p>
         .sort({ priorityRank: -1, createdAt: 1 })
         .limit(50)
         .toArray(),
+      // By when they were answered, not by when they were asked, which is the
+      // same trap one step along: answering the old question this page now
+      // finds redirects here naming it, and ordered by age it would fall off
+      // the end again. The confirmation would go missing on exactly the
+      // question that was hardest to see.
       store.escalations
         .find({ projectId: project._id, status: { $ne: 'open' } })
-        .sort({ createdAt: -1 })
+        .sort({ answeredAt: -1 })
         .limit(50)
         .toArray(),
       store.agents.find({ projectId: project._id }).sort({ lastSeenAt: -1 }).limit(50).toArray(),
@@ -846,6 +851,16 @@ will do the rest.</div>`
 
 <h2>Waiting for you</h2>
 ${open.length === 0 ? '<p class="empty">Nothing. The agents are unblocked.</p>' : ''}
+${
+      // Two hundred questions fit in a free project and fifty are drawn here,
+      // so the line above can honestly say more than this list shows. Saying
+      // which fifty matters more than the number: they are the ones the agents
+      // are most stuck behind.
+      project.counts.escalations > open.length
+        ? `<p class="why">Showing the ${open.length} most urgent of ${project.counts.escalations}.
+Answering these frees the agents behind them first.</p>`
+        : ''
+    }
 ${open.map((doc) => escalationForm(doc as EscalationDoc)).join('')}
 
 <h2>Items</h2>
