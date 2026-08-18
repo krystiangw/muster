@@ -305,3 +305,33 @@ claimed atomically on the project document, not held in the process.
 - Watch the first week of `hygiene sweep` log lines. If a rule closes something
   it should not have, the timeline says exactly which rule did it and the fix is
   a `PATCH /v1/{project}/rules`, not a deploy.
+
+## 7. Publishing the MCP server to the registry
+
+The one distribution step nobody can do for us, and the only one worth doing
+first: Smithery, Glama, mcp.so and MCPfinder all pull from the official
+registry, so this is one publication rather than four submissions.
+
+`server.json` in the repository root is the document that gets published. It
+names the server `dev.musterboard/muster`, which is a domain namespace and
+deliberately not `io.github.<owner>/muster`: the GitHub form ties the identity
+to an account name, and renaming the account or moving the repository breaks
+the name every client has stored. We own the domain, so the domain is what we
+publish under.
+
+Proving that ownership is the part that has to be interactive, and it is the
+whole point of the exercise:
+
+1. Generate an Ed25519 keypair. Keep the private half in `~/.muster/`, chmod
+   600, outside every checkout, like the rest of them.
+2. Set `MCP_REGISTRY_AUTH` on the deployment to the public half and deploy.
+   `https://musterboard.dev/.well-known/mcp-registry-auth` serves it as one
+   line of text, and answers 404 while the variable is unset.
+3. `mcp-publisher login dns --domain musterboard.dev --private-key <key>`, or
+   the HTTP method, which reads the well-known file above.
+4. `mcp-publisher publish --dry-run`, then `mcp-publisher publish`.
+
+Republish on a version change. `version` in `server.json` is the server's, not
+the SDK's; keep it in step with what `/.well-known/mcp.json` reports, because a
+registry entry claiming a version the server does not is the kind of drift an
+agent finds and nobody else does.

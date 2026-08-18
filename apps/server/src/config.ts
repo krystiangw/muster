@@ -34,6 +34,14 @@ export interface Config {
   /** Support address published in the agent files. */
   contactEmail: string;
   siteVerification: string;
+  /**
+   * The Ed25519 public key line the MCP registry reads to believe that
+   * whoever publishes under this domain owns it. Empty on every deployment
+   * that is not publishing, and the route 404s rather than serving a blank
+   * file, because a well-known path that answers with nothing is worse than
+   * one that answers not-found.
+   */
+  mcpRegistryAuth: string;
   feedbackProject: string;
   logLevel: string;
 }
@@ -94,6 +102,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     // Proving to a search console that this deployment is ours. Empty on a
     // self-host, which then renders no tag at all rather than an empty one.
     siteVerification: env.SITE_VERIFICATION ?? '',
+    mcpRegistryAuth: env.MCP_REGISTRY_AUTH ?? '',
     /**
      * Where an unauthenticated report lands, if this deployment accepts any.
      *

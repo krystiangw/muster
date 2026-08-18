@@ -1,0 +1,16 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "dev.musterboard/muster",
+  "description": "Shared operational memory for a fleet of agents: items with stable slugs, leases with a TTL, timelines and questions for a human. An agent signs up without a person in the loop.",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/krystiangw/muster",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://musterboard.dev/mcp"
+    }
+  ]
+}
