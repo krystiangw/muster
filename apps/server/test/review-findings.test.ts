@@ -903,6 +903,43 @@ describe('the open item cap', () => {
     );
   });
 
+  it('stands the repair down when an item moves under it, not just the counter', async () => {
+    const { correctOvercount } = await import('../src/hygiene.js');
+    const { createProject: createDirect, upsertItem } = await import('../src/service.js');
+    // Closing an item is two writes: the status, then the slot. In between, the
+    // counter still reads the old number while the item is already closed, so a
+    // repair counting in that gap sees one fewer than the counter, matches its
+    // guard, writes the lower number, and the close's own decrement then takes
+    // it one lower still. CI found the counter at -1 from exactly that.
+    const { project } = await createDirect(harness.store, harness.config, { name: 'racing close' });
+    await upsertItem(harness.store, project, { slug: 'one', title: 'one', actor: 'a' });
+    await harness.store.projects.updateOne({ _id: project._id }, { $set: { 'counts.items': 1 } });
+
+    const original = harness.store.items.countDocuments.bind(harness.store.items);
+    let raced = false;
+    harness.store.items.countDocuments = (async (...callArgs: unknown[]) => {
+      const result = await (original as (...a: unknown[]) => Promise<number>)(...callArgs);
+      if (!raced) {
+        raced = true;
+        // The status half of a close, with the slot not given back yet.
+        await harness.store.items.updateOne(
+          { projectId: project._id, slug: 'one' },
+          { $set: { status: 'done', updatedAt: new Date(), closedAt: new Date() } },
+        );
+      }
+      return result;
+    }) as typeof harness.store.items.countDocuments;
+
+    try {
+      const repaired = await correctOvercount(harness.store, project._id);
+      assert.equal(repaired, false, 'a repair that raced a close must not apply');
+      const counts = await harness.store.projects.findOne({ _id: project._id });
+      assert.equal(counts!.counts.items, 1, 'the slot is still the close request to give back');
+    } finally {
+      harness.store.items.countDocuments = original;
+    }
+  });
+
   it('keeps the counter honest through exact deltas on every path', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'real', title: 'real', actor: 'a' });

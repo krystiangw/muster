@@ -316,10 +316,23 @@ export async function correctOvercount(store: Store, projectId: string): Promise
   const before = await store.projects.findOne({ _id: projectId }, { projection: { counts: 1 } });
   if (!before) return false;
 
+  // Stamped before the count, checked after it. Closing an item is two writes,
+  // the status and then the slot, and the counter still reads the old number in
+  // between: a repair that counted in that gap saw one item fewer than the
+  // counter, matched its guard, wrote the lower number, and then the close's
+  // own decrement took it one lower still. CI found the counter at -1 from
+  // exactly that. The counter guard cannot see it, because at that instant the
+  // counter genuinely is what the repair read; what moved was an item.
+  const mark = new Date();
   const [openItems, openEscalations] = await Promise.all([
     store.items.countDocuments({ projectId, status: { $nin: [...TERMINAL_STATUSES] } }),
     store.escalations.countDocuments({ projectId, status: 'open' }),
   ]);
+  const [itemsMoved, escalationsMoved] = await Promise.all([
+    store.items.countDocuments({ projectId, updatedAt: { $gte: mark } }),
+    store.escalations.countDocuments({ projectId, updatedAt: { $gte: mark } }),
+  ]);
+  if (itemsMoved > 0 || escalationsMoved > 0) return false;
 
   const repairs = await Promise.all([
     before.counts.items > openItems
