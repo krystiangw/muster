@@ -46,7 +46,7 @@ import {
   upsertItem,
   verifyClaimCode,
   renameAgent,
-  waitingSlugs,
+  waitingBlockers,
 } from '../service.js';
 import { checkCsrf, csrfField, readSession } from '../session.js';
 import {
@@ -1480,7 +1480,7 @@ ${renderBoard(view, {
   facets,
   // One query, and the same one the offer and the claim use, so the chip on
   // the card cannot disagree with what an agent asking for work is told.
-  waiting: new Set(await waitingSlugs(store, project._id)),
+  waiting: await waitingBlockers(store, project._id),
   ...(notice ? { notice } : {}),
   ...(searchStopped ? { searchStopped } : {}),
 })}

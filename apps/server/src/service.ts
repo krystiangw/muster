@@ -1788,11 +1788,25 @@ function blockedMessage(
 }
 
 /**
- * The slugs this project is not offering, because they are waiting on
- * something. Empty on every board that does not use the field, for one query
- * that matches nothing.
+ * Every card on this board that is waiting on something, and what each is
+ * still waiting on.
+ *
+ * One answer for two readers: the offer, which must not hand out work a claim
+ * would refuse, and the board, which must not call a card blocked once its
+ * prerequisites are finished. Two queries when a board uses the field at all,
+ * nothing at all to maintain when a blocker closes, and nothing that can drift
+ * out of agreement with either.
+ *
+ * Not restricted to open cards. A card somebody parked as `blocked` still
+ * refuses a claim for its unmet dependency, so a board drawn from an
+ * offer-only set would take the chip off exactly the cards a person is looking
+ * for. Terminal statuses are left out because a finished card is not waiting
+ * for anything.
  */
-export async function waitingSlugs(store: Store, projectId: string): Promise<string[]> {
+export async function waitingBlockers(
+  store: Store,
+  projectId: string,
+): Promise<Map<string, string[]>> {
   // Every one of them, with no cap. A cap here is not a cheaper answer, it is
   // a wrong one: the card it leaves out is offered and leased, and a claim on
   // that same card is refused, which is the loop this is here to prevent. The
@@ -1801,11 +1815,17 @@ export async function waitingSlugs(store: Store, projectId: string): Promise<str
   // where `$ne: []` cannot.
   const waiting = (await store.items
     .find(
-      { projectId, status: 'open', 'blockedBy.0': { $exists: true } },
+      {
+        projectId,
+        status: { $nin: [...TERMINAL_STATUSES] },
+        'blockedBy.0': { $exists: true },
+      },
       { projection: { slug: 1, blockedBy: 1 } },
     )
     .toArray()) as Array<Pick<ItemDoc, 'slug' | 'blockedBy'>>;
-  if (waiting.length === 0) return [];
+  const unmet = new Map<string, string[]>();
+  if (waiting.length === 0) return unmet;
+
   const named = [...new Set(waiting.flatMap((row) => row.blockedBy ?? []))];
   const rows = (await store.items
     .find({ projectId, slug: { $in: named } }, { projection: { slug: 1, status: 1 } })
@@ -1813,9 +1833,16 @@ export async function waitingSlugs(store: Store, projectId: string): Promise<str
   const finished = new Set(
     rows.filter((row) => TERMINAL_STATUSES.includes(row.status)).map((row) => row.slug),
   );
-  return waiting
-    .filter((row) => (row.blockedBy ?? []).some((slug) => !finished.has(slug)))
-    .map((row) => row.slug);
+  for (const row of waiting) {
+    const left = (row.blockedBy ?? []).filter((slug) => !finished.has(slug));
+    if (left.length > 0) unmet.set(row.slug, left);
+  }
+  return unmet;
+}
+
+/** The same answer as a list, for the queries that only need the names. */
+export async function waitingSlugs(store: Store, projectId: string): Promise<string[]> {
+  return [...(await waitingBlockers(store, projectId)).keys()];
 }
 
 export async function claimItem(

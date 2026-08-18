@@ -2764,6 +2764,35 @@ describe('a card that waits on another', () => {
     assert.deepEqual(item.json().item.blocked_by, ['gate-a']);
   });
 
+  it('counts what is still unfinished, and keeps saying so on a card somebody parked', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'gate-1', title: 't', body: 'b', actor: 'a' });
+    await post(project, '/items', { slug: 'gate-2', title: 't', body: 'b', actor: 'a' });
+    await post(project, '/items', {
+      slug: 'after-both',
+      title: 't',
+      body: 'b',
+      blocked_by: ['gate-1', 'gate-2'],
+      actor: 'a',
+    });
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    const two = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(two.body, /waiting on 2/);
+
+    // One finishes: the chip counts what is left, not what it once waited for.
+    await post(project, '/items', { slug: 'gate-1', status: 'done', actor: 'a' });
+    const one = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(one.body, /waiting on gate-2/);
+    assert.doesNotMatch(one.body, /waiting on 2/);
+
+    // And a card a person parked as blocked still refuses a claim over its
+    // dependency, so the board has to keep saying so.
+    await post(project, '/items', { slug: 'after-both', status: 'blocked', actor: 'a' });
+    const parked = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(parked.body, /waiting on gate-2/);
+  });
+
   it('says which of the three refusals it was, not one sentence for all of them', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'itself', title: 't', body: 'b', actor: 'a' });

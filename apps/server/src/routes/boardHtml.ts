@@ -99,7 +99,8 @@ function card(
   open: string,
   asked: number,
   agents?: Map<string, string>,
-  waiting?: boolean,
+  /** What this card is still waiting on, empty when it is waiting on nothing. */
+  waiting: string[] = [],
 ): string {
   const claimed = item.claim !== null && new Date(item.claim.expiresAt) > now;
   const classes = ['card', item.stale ? 'is-stale' : '', claimed ? 'is-claimed' : '']
@@ -141,11 +142,9 @@ function card(
       // The list stays on the card after its prerequisites close, because it
       // is a record of what this depended on, and a chip that outlives the
       // blocking says the opposite of the truth.
-      waiting
+      waiting.length > 0
         ? chip(
-            (item.blockedBy ?? []).length === 1
-              ? `waiting on ${item.blockedBy![0]}`
-              : `waiting on ${(item.blockedBy ?? []).length}`,
+            waiting.length === 1 ? `waiting on ${waiting[0]}` : `waiting on ${waiting.length}`,
             'blocked',
           )
         : ''
@@ -486,7 +485,7 @@ export interface BoardRenderOptions {
    * not do is keep calling that card blocked, because by then anybody may take
    * it and the chip would be pointing at the wrong thing.
    */
-  waiting?: Set<string>;
+  waiting?: Map<string, string[]>;
   /**
    * Said above the board when a search was dropped for reading too long.
    *
@@ -621,7 +620,7 @@ ${lane.columns
                   sheetUrl(item),
                   options.questions?.get(item.slug)?.length ?? 0,
                   options.agents,
-                  options.waiting?.has(item.slug) ?? false,
+                  options.waiting?.get(item.slug) ?? [],
                 ),
               )
               .join('\n')
