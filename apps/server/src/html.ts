@@ -108,8 +108,10 @@ td.mono, .mono { font-family:var(--mono); font-size:13px; }
 .chip.claim { color:var(--ink-2); background:var(--surface-2); }
 /* A question waiting on whoever is reading. The accent is the page's "this is
    addressed to you" colour and the outline is what separates it from a label,
-   which is the only other accent chip a card carries. */
-.chip.asked { color:var(--accent); background:var(--accent-soft); border:1px solid var(--accent); }
+   which is the only other accent chip a card carries.
+   Not the .asked below: that is the question panel inside a sheet, and a chip
+   wearing its name came out with panel padding on the face of the card. */
+.chip.asks { color:var(--accent); background:var(--accent-soft); border:1px solid var(--accent); }
 /* A claim is somebody working now; the last writer is somebody who was. The
    outline says "past tense" without spending another colour on it. */
 .chip.note { color:var(--muted); background:transparent; border:1px solid var(--rule); }

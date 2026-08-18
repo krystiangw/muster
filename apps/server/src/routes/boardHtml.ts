@@ -126,7 +126,7 @@ function card(
       // say nothing: the question lived in the sheet behind it and on another
       // page. A board whose whole claim is "what needs a human" cannot make
       // that the one thing you have to open every card to find.
-      asked > 0 ? chip(asked === 1 ? 'asks you' : `${asked} questions`, 'asked') : ''
+      asked > 0 ? chip(asked === 1 ? 'asks you' : `${asked} questions`, 'asks') : ''
     }
     ${item.stale ? chip('stale', 'stale') : ''}
     ${(item.labels ?? []).slice(0, 3).map((label) => chip(label, 'open')).join(' ')}

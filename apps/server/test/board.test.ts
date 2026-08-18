@@ -931,7 +931,7 @@ describe('moving an item into a column', () => {
     // a board whose claim is "what needs a human" cannot hide that one card
     // deep.
     const face = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
-    assert.match(face.body, /<span class="chip asked">asks you<\/span>/);
+    assert.match(face.body, /<span class="chip asks">asks you<\/span>/);
 
     const page = await harness.server.inject({
       method: 'GET',
@@ -1007,7 +1007,7 @@ describe('moving an item into a column', () => {
       method: 'GET',
       url: `/r/${readToken}/board?card=shared`,
     });
-    assert.match(page.body, /<span class="chip asked">2 questions<\/span>/, 'and the card counts them');
+    assert.match(page.body, /<span class="chip asks">2 questions<\/span>/, 'and the card counts them');
     assert.match(page.body, /Do we pay the fee\?/);
     assert.match(page.body, /Do we tell the venue first\?/);
   });
