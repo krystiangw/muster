@@ -100,6 +100,19 @@ const html = async (path, options = {}) => {
 /** The project this walkthrough owns, reused unless it is gone or refused. */
 async function project() {
   const kept = state[BASE];
+  // Said out loud, because nothing else will say it: a project cannot be
+  // deleted over the API by design, so the board this run walks away from
+  // sits on the deployment until its own expiry clears it. Two of them turned
+  // up on production before this line existed, and the only way anybody would
+  // have noticed is by counting projects in the database.
+  if (kept && FRESH) {
+    console.log(
+      `  note  leaving ${kept.project} behind; an unclaimed project expires on its own, or`,
+    );
+    console.log(
+      `        MONGODB_URI=... node tools/purge-projects.mjs --ids ${kept.project} --yes`,
+    );
+  }
   if (kept && !FRESH) {
     const check = await json(`/v1/${kept.project}`, {
       headers: { authorization: `Bearer ${kept.token}` },
