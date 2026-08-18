@@ -11,6 +11,18 @@
  * claim, which is a single source of truth for ownership and cannot desync from
  * a status field somebody forgot to flip.
  */
+/**
+ * The name a person's own writes carry.
+ *
+ * Not an agent and not a handle somebody forgot to register: it is the door.
+ * Everything written through the read link or the operator's own page is signed
+ * with it, so a timeline can say a human did this and a filter can show what
+ * they touched. Every list of agents that offers it has to say which of those
+ * two it is, or the next person to read one tries to consolidate the operator
+ * into a loop.
+ */
+export const OPERATOR_ACTOR = 'operator';
+
 export type ItemStatus = 'open' | 'blocked' | 'done' | 'dropped';
 
 export const ITEM_STATUSES: readonly ItemStatus[] = ['open', 'blocked', 'done', 'dropped'];

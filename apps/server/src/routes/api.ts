@@ -65,6 +65,7 @@ import {
   type EscalationPriority,
   type EscalationStatus,
   type ItemStatus,
+  OPERATOR_ACTOR,
 } from '../types.js';
 
 declare module 'fastify' {
@@ -531,7 +532,13 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         const seen = written
           .filter(
             (handle): handle is string =>
-              typeof handle === 'string' && handle !== '' && !registered.has(handle),
+              typeof handle === 'string' &&
+              handle !== '' &&
+              // Not an agent that forgot to register: it is the door a person
+              // writes through, and listing it here as a name to consolidate is
+              // an invitation to merge the operator into a loop.
+              handle !== OPERATOR_ACTOR &&
+              !registered.has(handle),
           )
           .sort()
           .slice(0, 200);

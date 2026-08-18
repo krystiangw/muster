@@ -1,4 +1,5 @@
 import type { AgentFacet, BoardFacets, BoardFilter, BoardView } from '../board.js';
+import { OPERATOR_ACTOR } from '../types.js';
 import { BOARD_PRESETS, COLUMN_RENDER_LIMIT, applyForColumn, unsatisfiableBy } from '../board.js';
 import { boardConfigJson } from '../serialize.js';
 import { chip, escapeHtml, when } from '../html.js';
@@ -730,6 +731,12 @@ ${filterRow(
       // tooltip, because a handle is a line number and the description is the
       // name.
       const registered = agent?.registered === true;
+      // The door a person writes through is neither of the two things this
+      // marking is about, so it says what it is instead of implying somebody
+      // forgot to register it.
+      if (handle === OPERATOR_ACTOR) {
+        return { value: handle, note: 'written from this page, by a person' };
+      }
       return {
         value: handle,
         note: registered

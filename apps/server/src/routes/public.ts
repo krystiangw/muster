@@ -51,6 +51,7 @@ import {
   type ItemDoc,
   type ProjectDoc,
   type TimelineEntry,
+  OPERATOR_ACTOR,
 } from '../types.js';
 
 export interface PublicDeps {
@@ -1509,7 +1510,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     await upsertItem(store, project, {
       slug: form.slug,
       owner: owner === '' ? null : owner,
-      actor: 'operator',
+      actor: OPERATOR_ACTOR,
       note: owner === '' ? 'unassigned' : `assigned to ${owner}`,
       mustExist: true,
     });
@@ -1556,7 +1557,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
         store,
         project,
         form.slug,
-        'operator',
+        OPERATOR_ACTOR,
         add !== '' ? `tagged ${add}` : `untagged ${remove}`,
       );
     }
@@ -1655,7 +1656,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
           title,
           body,
           priority,
-          actor: 'operator',
+          actor: OPERATOR_ACTOR,
           insertOnly: true,
         });
         filed = written.created;
@@ -1709,7 +1710,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     await upsertItem(store, project, {
       slug: form.slug,
       priority,
-      actor: 'operator',
+      actor: OPERATOR_ACTOR,
       note: `urgency set to ${priority > 0 ? '+' : ''}${priority}`,
       mustExist: true,
     });
@@ -1777,7 +1778,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
         slug: form.slug,
         ...changed,
         expect,
-        actor: 'operator',
+        actor: OPERATOR_ACTOR,
         note: `${Object.keys(changed).join(' and ')} edited from the board`,
         mustExist: true,
       });
@@ -1809,7 +1810,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     // it goes back to the board having changed nothing rather than filing a
     // blank line into a timeline everybody reads.
     if (message !== '') {
-      await appendNote(store, project, form.slug, 'operator', message);
+      await appendNote(store, project, form.slug, OPERATOR_ACTOR, message);
     }
     const params = new URLSearchParams({
       done: form.slug,
@@ -1837,7 +1838,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     const result = await moveItem(store, project, {
       slug: form.slug,
       column: form.column,
-      actor: 'operator',
+      actor: OPERATOR_ACTOR,
     });
     record(store, 'move', { door: 'browser', detail: form.column.slice(0, 40), projectId: project._id });
     // Back to the board they were actually looking at. Somebody working through

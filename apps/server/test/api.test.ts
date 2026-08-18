@@ -1159,6 +1159,23 @@ describe('who is writing, and by what name', () => {
       })
     ).json();
     assert.deepEqual(after.seen, ['passer-by']);
+
+    // The door a person writes through is not a name somebody forgot to
+    // register, so it is not offered as one to consolidate.
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'four', title: 'four', actor: 'operator' },
+    });
+    const withPerson = (
+      await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/agents`,
+        headers: authed(project),
+      })
+    ).json();
+    assert.ok(!withPerson.seen.includes('operator'), 'the operator is a door, not a loop');
   });
 
   it('consolidates a handle that was already written two ways', async () => {
