@@ -294,6 +294,25 @@ asserts the whole [Let Agents In](https://letagentsin.com) scorecard against the
 running app, so an agent-hostile regression fails the build instead of the next
 scan.
 
+Two things a suite cannot answer, and both are one command:
+
+```bash
+node tools/acceptance.mjs                    # every door, against a deployment
+node tools/soak-local.mjs                    # concurrency, against a throwaway
+```
+
+The first installs the published `musterboard` package from the registry and
+drives a deployment through it, then does the same over MCP and as an OAuth
+client that registers itself and mints its own token. The suite imports the SDK
+from next door and calls the MCP handlers directly, so a change that breaks the
+published client or the transport passes everything and fails the first
+stranger.
+
+The second runs thousands of concurrent operations against a server that exists
+only for the run, and checks what request-by-request tests cannot: that the open
+counter matches the collection, that a slug never becomes two items, and that
+two agents never hold one claim.
+
 ## Why it works the way it does
 
 [`docs/design-notes.md`](./docs/design-notes.md) records the decisions that cost
