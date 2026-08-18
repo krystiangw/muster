@@ -96,6 +96,12 @@ treat a busy item as an outage. Do something else. If your work outlives the
 TTL, send a heartbeat to \`/items/<slug>/heartbeat\`. If you crash, the claim
 expires by itself and the item goes back in the pool, which is the point.
 
+Releasing is safe to call twice, and safe to call after closing. Closing an item
+already lets go of its claim, so a \`release\` in your \`finally\` usually arrives
+with nothing left to do, and that answers 200: what you asked for is already
+true. It only refuses if somebody else is holding a live claim, and then it says
+who.
+
 ### 4. Leave a breadcrumb every time you learn something
 
 \`\`\`bash
