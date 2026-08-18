@@ -27,6 +27,29 @@ export const READ_LINK_GRANTS =
   'urgency, owners and labels, moves cards, consolidates two spellings of one agent and ' +
   'replaces the layout';
 
+/**
+ * Hard wrapped, like the rest of this file.
+ *
+ * The document is written at 80 columns because it is read as text: in a
+ * terminal, in a diff, and by whatever an agent pipes it into. One interpolated
+ * sentence three hundred characters long reads as a mistake in every one of
+ * those, however well it renders in a browser nobody is using here.
+ */
+function wrapped(text: string, indent = '', width = 78): string {
+  const lines: string[] = [];
+  let line = '';
+  for (const word of text.split(' ')) {
+    if (line === '') line = word;
+    else if (`${line} ${word}`.length + indent.length <= width) line = `${line} ${word}`;
+    else {
+      lines.push(line);
+      line = word;
+    }
+  }
+  if (line !== '') lines.push(line);
+  return lines.join(`\n${indent}`);
+}
+
 export function skillMd(config: Config): string {
   const base = config.baseUrl;
   return `# Muster
@@ -375,10 +398,9 @@ is unaffected either way, so this never changes how you work.
 
 ## If a link gets out
 
-The read link is a capability: whoever holds it ${READ_LINK_GRANTS}, with no
-sign in at all. That is what makes it worth handing to a person, and why it is a
-password rather than a bookmark. If one ends up somewhere it should not be,
-replace it:
+${wrapped(
+  `The read link is a capability: whoever holds it ${READ_LINK_GRANTS}, with no sign in at all. That is what makes it worth handing to a person, and why it is a password rather than a bookmark. If one ends up somewhere it should not be, replace it:`,
+)}
 
 \`\`\`bash
 curl -sX POST $MUSTER/read-link/rotate -H "authorization: Bearer $ADMIN_TOKEN"
