@@ -179,6 +179,13 @@ export async function buildApp(
       request.url.startsWith('/operator?')
     ) {
       reply.header('cache-control', 'private, no-store');
+      // A read link is a credential in a URL, and a credential in a URL gets
+      // pasted into an issue, a chat or a gist eventually. A crawler that finds
+      // one there would put somebody's board in a search index, where the
+      // repair is not rotating the link but asking a search engine to forget.
+      // The header, not a robots.txt rule: a Disallow keeps a crawler from
+      // fetching the page and therefore from ever reading this.
+      reply.header('x-robots-tag', 'noindex, nofollow, noarchive');
     }
     return payload;
   });

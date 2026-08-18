@@ -167,8 +167,11 @@ curl -s https://musterboard.dev/v1/<project> -H 'authorization: Bearer <token>' 
 # public text arrives compressed
 curl -sI -H 'accept-encoding: gzip' https://musterboard.dev/skill.md | grep -i content-encoding
 # and a page carrying a capability does not, whatever sits in front of the dyno
-curl -sI -H 'accept-encoding: gzip' https://musterboard.dev/r/<read-token>/board \
-  | grep -i content-encoding && echo 'FAIL: a capability page came back compressed'
+if curl -sI -H 'accept-encoding: gzip' https://musterboard.dev/r/<read-token>/board \
+     | grep -qi content-encoding
+then echo 'FAIL: a capability page came back compressed'; false
+else echo 'ok: capability pages are not compressed'
+fi
 ```
 
 ## 5b. Before a second dyno

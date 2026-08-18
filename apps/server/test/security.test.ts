@@ -248,11 +248,19 @@ describe('the response headers', () => {
     assert.equal(page.headers['x-content-type-options'], 'nosniff');
   });
 
-  it('keep a capability page out of shared caches', async () => {
+  it('keep a capability page out of shared caches, and out of the index', async () => {
     const project = await createProject(harness);
     const readToken = project.readUrl.split('/r/')[1]!;
     const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
     assert.match(page.headers['cache-control'] as string, /no-store/);
+    // A read link ends up pasted somewhere public eventually, and a crawler
+    // that finds one there would put the board in a search index, where the
+    // repair is not rotating the link but asking a search engine to forget.
+    assert.match(page.headers['x-robots-tag'] as string, /noindex/);
+
+    // And the pages that are meant to be found still are.
+    const landing = await harness.server.inject({ method: 'GET', url: '/' });
+    assert.equal(landing.headers['x-robots-tag'], undefined);
   });
 });
 
