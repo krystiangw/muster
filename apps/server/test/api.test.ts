@@ -493,6 +493,10 @@ describe('escalations', () => {
 
     const emptyInbox = await get(project, '/inbox?agent=errors-loop');
     assert.equal(emptyInbox.json().answers.length, 0);
+    // Promised by name in skill.md, so an agent can tell a person who has not
+    // decided from a person who has not been told. Null here because nobody
+    // owns this board, which is the honest answer rather than a missing field.
+    assert.equal(emptyInbox.json().waiting[0].notified_at, null);
 
     const readToken = (await harness.store.projects.findOne({ _id: project.id }))!.readToken;
     const answer = await harness.server.inject({
