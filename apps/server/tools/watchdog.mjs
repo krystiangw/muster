@@ -49,6 +49,7 @@ const state = {
   hygieneAlerted: saved.hygieneAlerted === true,
   noticeMisses: Number(saved.noticeMisses) || 0,
   noticeAlerted: saved.noticeAlerted === true,
+  lastNote: typeof saved.lastNote === 'string' ? saved.lastNote : null,
 };
 
 if (process.argv.includes('--status')) {
@@ -173,9 +174,29 @@ async function fileOnTheBoard(question, context) {
   }
 }
 
+/**
+ * One line an hour when nothing is wrong.
+ *
+ * "Quiet unless it matters" was the rule, and it left a log that is empty when
+ * this runs every quarter of an hour and equally empty when the cron entry is
+ * gone: the two states a person tailing the file most wants to tell apart. The
+ * date in the state file is the machine readable version and nobody opens it.
+ *
+ * Hourly rather than every round, so a day is twenty four lines and each one
+ * carries what was actually checked, which makes the file a record of how the
+ * deployment behaved rather than a heartbeat with no content.
+ */
+const NOTE_EVERY_MS = 60 * 60_000;
+const noteIsDue = () =>
+  state.lastNote === null || Date.parse(now) - Date.parse(state.lastNote) >= NOTE_EVERY_MS;
+
 if (broken.length === 0) {
   const recovered = state.alerted;
   Object.assign(state, { failures: 0, alerted: false, lastOk: now });
+  if (noteIsDue()) {
+    state.lastNote = now;
+    console.log(`ok ${now} ${checks.map((check) => `${check.name} ${check.status}`).join(', ')}`);
+  }
   if (recovered) {
     const delivery = await mail('Muster is answering again', [
       `${base} is back up as of ${now}.`,

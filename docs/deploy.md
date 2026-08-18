@@ -110,6 +110,10 @@ includes the two written today: `escalationNoticeSentAt` on a project and
 holds.
 
 `watchdog.sh` runs `apps/server/tools/watchdog.mjs` every quarter of an hour.
+It writes one line an hour when everything is fine, naming what it checked and
+what each answered, because a log that is empty while it runs and empty while
+its cron entry is missing tells a person tailing it nothing. The rest of the
+time it says nothing at all.
 It reads a real project through the API rather than `/health`, which answers
 without touching the database and therefore stays green through the failure
 that matters most. It alerts on the second consecutive miss, once per outage,
