@@ -445,6 +445,13 @@ export interface ProjectDoc {
   } | null;
   lastSweptAt: Date | null;
   /**
+   * The throttle for the lease-only pass a read is allowed to run. Kept apart
+   * from `lastSweptAt` on purpose: sharing one stamp would let a read take the
+   * slot and do a tenth of the work, and the write a second later would find
+   * the sweep already claimed and skip the rules it was the only trigger for.
+   */
+  leasesSweptAt?: Date | null;
+  /**
    * When a sweep last finished. Written after the rules have run, so it is the
    * one date that tells a board with nothing to tidy apart from a sweeper that
    * throws on every pass.

@@ -29,7 +29,7 @@ import {
   type BoardQuestion,
 } from './boardHtml.js';
 import { DEMO_AGENTS, demoBoard } from './demoBoard.js';
-import { maybeSweep } from '../hygiene.js';
+import { maybeExpireClaims } from '../hygiene.js';
 import { codeAttemptKey, type RateLimiter } from '../rateLimit.js';
 import {
   ServiceError,
@@ -826,7 +826,7 @@ address. Claiming is free and raises the limits:</p>
     // Counted once the page is actually going to be drawn. A stale bookmark and
     // a token probe both end above this line, and neither is somebody reading.
     recordView(store, 'project', request);
-    void maybeSweep(store, project).catch(() => undefined);
+    void maybeExpireClaims(store, project).catch(() => undefined);
 
     // Twenty five, not two hundred. This is the page the mail sends somebody to,
     // and the table was fifty eight percent of what a phone downloaded to read
@@ -1203,7 +1203,7 @@ ${
     // Counted once the page is actually going to be drawn. A stale bookmark and
     // a token probe both end above this line, and neither is somebody reading.
     recordView(store, 'board', request);
-    void maybeSweep(store, project).catch(() => undefined);
+    void maybeExpireClaims(store, project).catch(() => undefined);
     const query = request.query as {
       moved?: string;
       landed?: string;

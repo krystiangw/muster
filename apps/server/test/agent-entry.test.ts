@@ -132,8 +132,20 @@ describe('A. discovery', () => {
     assert.equal(byName.get('share_project')!.destructiveHint, true);
     assert.equal(byName.get('observe')!.destructiveHint, true);
     assert.equal(byName.get('escalate')!.openWorldHint, true, 'escalate mails a person');
-    assert.equal(byName.get('list_items')!.readOnlyHint, true);
-    assert.equal(byName.get('board')!.readOnlyHint, true);
+    assert.equal(byName.get('inbox')!.readOnlyHint, true, 'the inbox touches nothing');
+
+    // The two reads that are not read-only, and the annotation says so rather
+    // than rounding it off: both clear leases that have already lapsed. What
+    // they must never be is destructive, because that is what a client weighs
+    // when it decides whether to run something unattended, and reading a board
+    // is the call an agent makes most.
+    for (const name of ['list_items', 'board']) {
+      assert.equal(byName.get(name)!.readOnlyHint, false, `${name} expires lapsed leases`);
+      assert.equal(byName.get(name)!.destructiveHint, false, `${name} must not close work`);
+    }
+    assert.equal(byName.get('upsert_item')!.destructiveHint, true);
+    assert.equal(byName.get('move')!.destructiveHint, true);
+    assert.equal(byName.get('register_agent')!.idempotentHint, false);
   });
 
   it('publishes llms.txt with the entry points in it', async () => {

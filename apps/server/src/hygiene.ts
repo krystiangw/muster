@@ -483,6 +483,45 @@ export async function sweepProject(
 }
 
 const SWEEP_THROTTLE_MS = 60_000;
+const LEASE_THROTTLE_MS = 15_000;
+
+/**
+ * The only part of hygiene a read is allowed to run.
+ *
+ * Reading the board is the call an agent makes most, and several MCP clients
+ * run a tool without asking anybody when it says it only reads. That made the
+ * published annotation and the code disagree: a read triggered the whole
+ * sweep, so listing items could close somebody's work as a side effect of
+ * looking at it. The rule now is one sentence: reads expire lapsed leases,
+ * writes and the timer do everything else.
+ *
+ * Expiry stays on the read path because a read is where its absence shows. A
+ * lease is free work the moment it lapses, but the row does not change until
+ * hygiene clears it, so a poller asking for unclaimed work with `since` would
+ * never be told. Nothing else hygiene does has that property: a stale mark or
+ * an absent close is late by at most the five minutes to the next scheduled
+ * pass, and nobody is blocked meanwhile.
+ */
+export async function maybeExpireClaims(
+  store: Store,
+  project: Pick<ProjectDoc, '_id'>,
+  now: Date = new Date(),
+): Promise<HygieneOutcome | null> {
+  const claimed = await store.projects.findOneAndUpdate(
+    {
+      _id: project._id,
+      $or: [
+        { leasesSweptAt: null },
+        { leasesSweptAt: { $exists: false } },
+        { leasesSweptAt: { $lte: new Date(now.getTime() - LEASE_THROTTLE_MS) } },
+      ],
+    },
+    { $set: { leasesSweptAt: now } },
+    { projection: { _id: 1 } },
+  );
+  if (!claimed) return null;
+  return expireClaims(store, project._id, now);
+}
 
 /**
  * Sweeps a project at most once a minute, whoever asks. The throttle is taken

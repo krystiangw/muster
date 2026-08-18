@@ -295,6 +295,66 @@ describe('absence resolve', () => {
   });
 });
 
+describe('what a read is allowed to tidy', () => {
+  it('clears a lapsed lease, because a lapsed lease is free work', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'held', title: 't', body: 'b', actor: 'a' });
+    await post(project, '/items/held/claim', { agent: 'a' });
+    await harness.store.items.updateOne(
+      { projectId: project.id, slug: 'held' },
+      { $set: { 'claim.expiresAt': hoursAgo(1) } },
+    );
+    // The read path has a throttle of its own, and creating the item above
+    // took the slot. Move it back or this measures the throttle.
+    await harness.store.projects.updateOne(
+      { _id: project.id },
+      { $set: { leasesSweptAt: hoursAgo(1) } },
+    );
+
+    await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/items`,
+      headers: authed(project),
+    });
+    // The write lands after the response, so read the row until it clears
+    // rather than once: the assertion is that it happens, not when.
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+      if ((await itemDoc(project, 'held')).claim === null) break;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    assert.equal((await itemDoc(project, 'held')).claim, null);
+  });
+
+  it('does not close work, however contentless the board is', async () => {
+    // The rule this protects is one sentence: reading the board expires
+    // lapsed leases and nothing else. It is what lets the MCP tools say they
+    // are not destructive, and a client weighs that annotation when it decides
+    // whether to run a tool without asking a person first.
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'placeholder', title: 'look into this', actor: 'a' });
+    await backdate(project, 'placeholder', { createdAt: hoursAgo(48) });
+    // Both throttles opened, so nothing here is explained by one being held.
+    await harness.store.projects.updateOne(
+      { _id: project.id },
+      { $set: { leasesSweptAt: hoursAgo(1), lastSweptAt: hoursAgo(1) } },
+    );
+
+    for (const url of [`${project.api}/items`, `${project.api}/board`, project.api]) {
+      await harness.server.inject({ method: 'GET', url, headers: authed(project) });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(
+      (await itemDoc(project, 'placeholder')).status,
+      'open',
+      'a read must not drop an item, however contentless it is',
+    );
+
+    // And the rest of hygiene still runs, from the timer or from a write.
+    await sweepProject(harness.store, await projectDoc(project));
+    assert.equal((await itemDoc(project, 'placeholder')).status, 'dropped');
+  });
+});
+
 describe('sweep throttle', () => {
   it('says when hygiene last looked, so a dead sweeper is not silence', async () => {
     // A board with nothing to tidy and a board nobody is tidying produce the

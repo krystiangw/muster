@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
 import { READ_LINK_GRANTS } from '../content.js';
 import type { Store } from '../db.js';
-import { maybeSweep, sweepProject } from '../hygiene.js';
+import { maybeExpireClaims, maybeSweep, sweepProject } from '../hygiene.js';
 import {
   hashToken,
   isValidHandle,
@@ -414,7 +414,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
 
     scoped.get('/v1/:project', { schema: { tags: ['projects'], summary: 'Project summary' } }, async (request) => {
       const { project } = auth(request);
-      void maybeSweep(store, project).catch(() => undefined);
+      void maybeExpireClaims(store, project).catch(() => undefined);
       // The oldest question nobody has been told about, asked of the questions
       // themselves rather than of the counter beside them. The counter is
       // maintained by a second write, and the repair that keeps it honest only
@@ -990,7 +990,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           owner?: string;
           agent?: string;
         };
-        void maybeSweep(store, project).catch(() => undefined);
+        void maybeExpireClaims(store, project).catch(() => undefined);
         const view = await loadBoard(store, project, {
           ...(query.include_closed === undefined ? {} : { includeClosed: query.include_closed }),
           ...(query.owner ? { owner: query.owner } : {}),
@@ -1095,7 +1095,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       async (request) => {
         const { project } = auth(request);
         const { agent } = request.query as { agent?: string };
-        void maybeSweep(store, project).catch(() => undefined);
+        void maybeExpireClaims(store, project).catch(() => undefined);
         const result = await nextItem(store, project, agent ?? '');
         // The earliest moment a mistyped handle can be caught: an agent asking
         // for work under a name nobody registered is offered everything, since

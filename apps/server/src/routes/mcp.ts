@@ -4,7 +4,7 @@ import { clientIp } from './api.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
-import { maybeSweep } from '../hygiene.js';
+import { maybeExpireClaims, maybeSweep } from '../hygiene.js';
 import type { Notifier } from '../notify.js';
 import type { RateLimiter } from '../rateLimit.js';
 import { loadBoard, moveItem } from '../board.js';
@@ -171,11 +171,12 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
-    // The handle is the key, so registering twice converges on one agent.
+    // The handle is the key, but registering again writes a new lastSeenAt and
+    // replaces the scope somebody else may have declared under that handle.
     annotations: {
       readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: true,
+      destructiveHint: true,
+      idempotentHint: false,
       openWorldHint: false,
     },
   },
@@ -233,10 +234,12 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
-    // Idempotent on the card, not on the call: a note or a status change writes a timeline entry every time.
+    // Idempotent on the card, not on the call: a note or a status change writes a
+    // timeline entry every time. Destructive because an existing slug can have its
+    // title, body, owner and labels replaced, or be closed outright.
     annotations: {
       readOnlyHint: false,
-      destructiveHint: false,
+      destructiveHint: true,
       idempotentHint: false,
       openWorldHint: false,
     },
@@ -356,8 +359,12 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    // Not read-only, and the reason is worth stating rather than hiding: a read
+    // clears leases that have already lapsed, because a lapsed lease is free work
+    // and nothing else would tell a poller so. It cannot close, drop or mark
+    // anything, which is the whole point of hygiene's read path being one rule.
     annotations: {
-      readOnlyHint: true,
+      readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: true,
       openWorldHint: false,
@@ -431,8 +438,12 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    // Not read-only, and the reason is worth stating rather than hiding: a read
+    // clears leases that have already lapsed, because a lapsed lease is free work
+    // and nothing else would tell a poller so. It cannot close, drop or mark
+    // anything, which is the whole point of hygiene's read path being one rule.
     annotations: {
-      readOnlyHint: true,
+      readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: true,
       openWorldHint: false,
@@ -454,10 +465,11 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
-    // A column can carry a terminal status, and the note lands on the timeline each time.
+    // A column can carry a terminal status, release somebody's claim or replace an
+    // owner, and the note lands on the timeline each time.
     annotations: {
       readOnlyHint: false,
-      destructiveHint: false,
+      destructiveHint: true,
       idempotentHint: false,
       openWorldHint: false,
     },
@@ -902,7 +914,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         };
       }
       case 'board': {
-        void maybeSweep(store, project).catch(() => undefined);
+        void maybeExpireClaims(store, project).catch(() => undefined);
         const view = await loadBoard(store, project, {
           ...(typeof args.include_closed === 'boolean'
             ? { includeClosed: args.include_closed }

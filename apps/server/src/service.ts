@@ -1,7 +1,7 @@
 import type { Config } from './config.js';
 import type { Store } from './db.js';
 import { record, type EventDoor } from './events.js';
-import { charge, maybeSweep, resolveAbsent, spend } from './hygiene.js';
+import { charge, maybeExpireClaims, maybeSweep, resolveAbsent, spend } from './hygiene.js';
 import { hashToken, isValidHandle, newId, newOtpCode, newToken, normalizeHandle, normalizeSlug } from './ids.js';
 import {
   DEFAULT_RULES,
@@ -2102,12 +2102,16 @@ export async function readItems(
   project: Pick<ProjectDoc, '_id' | 'rules'>,
   input: ReadItemsInput,
 ): Promise<ReadItemsResult> {
-  // The throttled sweep runs from in here rather than from the routes. A lapsed
-  // lease is free work the moment it lapses, but the row does not change until
-  // hygiene clears it, so a caller polling claimed=false with since= would not
-  // see it; and putting the trigger on one door is how the first version of
-  // this shipped, with the other door left behind again.
-  void maybeSweep(store, project).catch(() => undefined);
+  // Runs from in here rather than from the routes, because putting the trigger
+  // on one door is how the first version of this shipped, with the other door
+  // left behind again.
+  //
+  // Leases only, and not the rest of hygiene: a lapsed lease is free work the
+  // moment it lapses, but the row does not change until something clears it,
+  // so a caller polling claimed=false with since= would never be told. Closing
+  // and marking are the timer's job, so that reading the board cannot end
+  // anybody's work.
+  void maybeExpireClaims(store, project).catch(() => undefined);
   const limit = Math.min(Math.max(input.limit ?? 50, 1), 200);
   const order: ItemOrder =
     input.order === 'id' ? 'id' : input.order === 'recent' ? 'recent' : 'urgency';
