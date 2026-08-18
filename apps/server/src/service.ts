@@ -22,6 +22,7 @@ import {
   type ShareDoc,
   type TimelineEntry,
   type TimelineKind,
+  OPERATOR_ACTOR,
 } from './types.js';
 import { TIMELINE_KEEP } from './hygiene.js';
 
@@ -654,6 +655,12 @@ export async function registerAgent(
       'A handle is lowercase letters, digits, dot, dash or underscore, starting with a letter or digit.',
     );
   }
+  if (handle === OPERATOR_ACTOR) {
+    throw badRequest(
+      'reserved_handle',
+      `"${OPERATOR_ACTOR}" is the name every write from the board itself carries, so a person and an agent would sign the same way. Pick a handle of your own.`,
+    );
+  }
   if (input.scope !== undefined) {
     if (!Array.isArray(input.scope) || input.scope.some((token) => typeof token !== 'string')) {
       throw badRequest('bad_scope', 'Scope is an array of strings.');
@@ -748,6 +755,12 @@ export async function renameAgent(
   }
   if (from === to) {
     throw badRequest('same_handle', 'That is the name it already writes under.');
+  }
+  if (from === OPERATOR_ACTOR || to === OPERATOR_ACTOR) {
+    throw badRequest(
+      'reserved_handle',
+      `"${OPERATOR_ACTOR}" is what a person's own writes are signed with, not an agent that spelled itself wrong. Consolidating it either way would put one of them under the other's name.`,
+    );
   }
 
   const [leaving, arriving] = await Promise.all([
@@ -888,6 +901,9 @@ export async function nameWarning(
   // An empty actor and the sentinel it becomes are the same event: nobody
   // said who was writing. Reading them differently is how one of the two ends
   // up silent, which is the case this whole function exists for.
+  if (actor === OPERATOR_ACTOR) {
+    return `"${OPERATOR_ACTOR}" is the name this board signs a person's own writes with, so a timeline cannot tell you apart from whoever is reading it. Register a handle of your own and write under that.`;
+  }
   if (actor === '' || actor === 'unknown-agent') {
     return 'Nothing named itself on that write, so the board shows it as "unknown-agent". Send `actor` with every write, and register the handle with POST /agents so a person can tell it from the others.';
   }

@@ -1176,6 +1176,37 @@ describe('who is writing, and by what name', () => {
       })
     ).json();
     assert.ok(!withPerson.seen.includes('operator'), 'the operator is a door, not a loop');
+
+    // And it is reserved rather than merely hidden: nothing can register it,
+    // nothing can consolidate it either way, and an agent writing under it is
+    // told what it is signing as.
+    const claimed = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/agents`,
+      headers: authed(project),
+      payload: { handle: 'operator', scope: [] },
+    });
+    assert.equal(claimed.statusCode, 400);
+    assert.equal(claimed.json().error, 'reserved_handle');
+
+    for (const payload of [{ to: 'operator' }, { to: 'errors-loop' }]) {
+      const merge = await harness.server.inject({
+        method: 'POST',
+        url: `${project.api}/agents/${payload.to === 'operator' ? 'passer-by' : 'operator'}/rename`,
+        headers: authed(project),
+        payload,
+      });
+      assert.equal(merge.statusCode, 400, JSON.stringify(payload));
+      assert.equal(merge.json().error, 'reserved_handle');
+    }
+
+    const signed = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'five', title: 'five', actor: 'operator' },
+    });
+    assert.match(signed.json().warnings.join(' '), /signs a person's own writes with/);
   });
 
   it('consolidates a handle that was already written two ways', async () => {

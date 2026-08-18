@@ -792,9 +792,13 @@ ${filterRow(
  * a control anybody should meet by accident.
  */
 function renderAgentMerge(facets: BoardFacets, action: string, keep: BoardFilter): string {
-  if (facets.agents.length < 2) return '';
+  // Not the door. A person's own writes are signed with it, and offering it
+  // here as a name to consolidate is offering to file everything a human did
+  // under a loop, on the control built to undo exactly that kind of mixing.
+  const agents = facets.agents.filter((agent) => agent.handle !== OPERATOR_ACTOR);
+  if (agents.length < 2) return '';
   const options = (selected: string) =>
-    facets.agents
+    agents
       .map(
         (agent) =>
           `<option value="${escapeHtml(agent.handle)}"${
