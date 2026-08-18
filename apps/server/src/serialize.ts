@@ -63,6 +63,9 @@ export function agentJson(agent: AgentDoc): Record<string, unknown> {
     description: agent.description,
     registered_at: agent.registeredAt,
     last_seen_at: agent.lastSeenAt,
+    // Only when there are any: a field that is an empty array on every agent
+    // on every board is a field every reader has to learn and nobody uses.
+    ...((agent.aliases ?? []).length > 0 ? { aliases: agent.aliases } : {}),
     meta: agent.meta,
   };
 }

@@ -42,6 +42,7 @@ import {
   heartbeatClaim,
   itemInScope,
   nameWarning,
+  renameAgent,
   listApiKeys,
   escalationCursor,
   listEscalations,
@@ -471,6 +472,37 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         const { agent, created } = await registerAgent(store, project, body);
         if (created) record(store, 'register', { door: 'http', projectId: project._id });
         return reply.code(created ? 201 : 200).send({ agent: agentJson(agent), created });
+      },
+    );
+
+    scoped.post(
+      '/v1/:project/agents/:handle/rename',
+      {
+        schema: {
+          tags: ['agents'],
+          summary: 'Consolidate a handle that got written two ways',
+          description:
+            'Moves the work: every item whose last writer was this handle, and any live claim it holds, now name the new one. The timelines keep what they said, because an agent calling itself that is what happened, and the old name is kept on the agent as an alias so a reader who meets it in an old entry can find out who it became. If the new handle is already registered, the two registrations become one.',
+          body: {
+            type: 'object',
+            required: ['to'],
+            properties: { to: { type: 'string', maxLength: 48 } },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request) => {
+        const { project } = auth(request);
+        const { handle } = request.params as { handle: string };
+        const { to } = request.body as { to: string };
+        const moved = await renameAgent(store, project, handle, to);
+        return {
+          from: moved.from,
+          to: moved.to,
+          items: moved.items,
+          claims: moved.claims,
+          merged: moved.merged,
+        };
       },
     );
 

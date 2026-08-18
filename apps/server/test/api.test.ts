@@ -1107,6 +1107,116 @@ describe('who is writing, and by what name', () => {
     assert.deepEqual(fine.json().warnings ?? [], []);
   });
 
+  it('consolidates a handle that was already written two ways', async () => {
+    // The warnings catch a typo the first time it is used, which does nothing
+    // for a board that collected work under both spellings before anybody read
+    // one of them.
+    const project = await createProject(harness);
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/agents`,
+      headers: authed(project),
+      payload: { handle: 'trades-loop', scope: ['trades:'], description: 'watches the venues' },
+    });
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/agents`,
+      headers: authed(project),
+      payload: { handle: 'trades_loop', scope: [] },
+    });
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'trades:one', title: 'one', actor: 'trades_loop' },
+    });
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items/trades:one/claim`,
+      headers: authed(project),
+      payload: { agent: 'trades_loop' },
+    });
+
+    const moved = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/agents/trades_loop/rename`,
+      headers: authed(project),
+      payload: { to: 'trades-loop' },
+    });
+    assert.equal(moved.statusCode, 200);
+    assert.deepEqual(moved.json(), {
+      from: 'trades_loop',
+      to: 'trades-loop',
+      items: 1,
+      claims: 1,
+      merged: true,
+    });
+
+    // The work moved, claim included.
+    const item = await harness.store.items.findOne({ projectId: project.id, slug: 'trades:one' });
+    assert.equal(item?.lastActor, 'trades-loop');
+    assert.equal(item?.claim?.agent, 'trades-loop');
+
+    // The history did not: an agent calling itself that is what happened.
+    assert.ok(
+      item!.timeline.some((entry) => entry.by === 'trades_loop'),
+      'the record still says who wrote it',
+    );
+
+    // One registration, carrying the old name so an old entry can be read.
+    const agents = (
+      await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/agents`,
+        headers: authed(project),
+      })
+    ).json().agents;
+    assert.deepEqual(
+      agents.map((agent: { handle: string }) => agent.handle),
+      ['trades-loop'],
+    );
+    assert.deepEqual(agents[0].aliases, ['trades_loop']);
+    assert.equal(agents[0].description, 'watches the venues', 'the described one survived');
+
+    // And the filter offers one name instead of two.
+    const facets = (
+      await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/board/facets`,
+        headers: authed(project),
+      })
+    ).json();
+    assert.deepEqual(facets.agents, ['trades-loop']);
+  });
+
+  it('moves work written under a name nobody ever registered', async () => {
+    const project = await createProject(harness);
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'one', title: 'one', actor: 'ghost-loop' },
+    });
+    const moved = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/agents/ghost-loop/rename`,
+      headers: authed(project),
+      payload: { to: 'errors-loop' },
+    });
+    assert.equal(moved.statusCode, 200);
+    assert.equal(moved.json().items, 1);
+    assert.equal(moved.json().merged, false);
+
+    // A name nothing was ever written under is not there to rename.
+    const nothing = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/agents/nobody/rename`,
+      headers: authed(project),
+      payload: { to: 'errors-loop' },
+    });
+    assert.equal(nothing.statusCode, 404);
+  });
+
   it('says it at the doors an agent reaches for first, not only at the item door', async () => {
     const project = await createProject(harness);
     await harness.server.inject({

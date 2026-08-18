@@ -123,6 +123,15 @@ export interface AgentDoc {
   description: string;
   registeredAt: Date;
   lastSeenAt: Date;
+  /**
+   * Names this agent used to write under, before somebody consolidated them.
+   *
+   * Kept because the timelines still carry them: renaming moves the state, the
+   * live claim and whose work an item is, and leaves the history saying what it
+   * said. A reader who meets `trades_loop` in an entry from March needs
+   * somewhere to find out it is this one.
+   */
+  aliases?: string[];
   meta: Record<string, unknown>;
 }
 

@@ -710,6 +710,104 @@ export async function touchAgent(store: Store, projectId: string, handle: string
   }
 }
 
+export interface RenamedAgent {
+  from: string;
+  to: string;
+  items: number;
+  claims: number;
+  merged: boolean;
+}
+
+/**
+ * Consolidating a handle that got written two ways.
+ *
+ * The warnings catch a typo the first time it is used, which does not help a
+ * board that collected forty items under `trades_loop` before anybody read one.
+ * This is the other half: the state moves, the history does not.
+ *
+ * State is `lastActor` and a live claim, which answer "whose work is this" and
+ * "who is holding it", and both are about now. The timeline is what happened,
+ * and what happened is that an agent calling itself `trades_loop` wrote that
+ * line. Rewriting it would make the record say something that was never true,
+ * so the old name is kept on the agent instead, where a reader who meets it in
+ * an old entry can find out who it became.
+ */
+export async function renameAgent(
+  store: Store,
+  project: ProjectDoc,
+  fromRaw: string,
+  toRaw: string,
+): Promise<RenamedAgent> {
+  const from = normalizeHandle(fromRaw ?? '');
+  const to = normalizeHandle(toRaw ?? '');
+  if (!isValidHandle(from) || !isValidHandle(to)) {
+    throw badRequest(
+      'bad_handle',
+      'A handle is lowercase letters, digits, dot, dash or underscore, starting with a letter or digit.',
+    );
+  }
+  if (from === to) {
+    throw badRequest('same_handle', 'That is the name it already writes under.');
+  }
+
+  const [leaving, arriving] = await Promise.all([
+    store.agents.findOne({ projectId: project._id, handle: from }),
+    store.agents.findOne({ projectId: project._id, handle: to }),
+  ]);
+  const wroteHere = await store.items.countDocuments({ projectId: project._id, lastActor: from });
+  if (!leaving && wroteHere === 0) {
+    throw notFound(from);
+  }
+
+  const now = new Date();
+  const [items, claims] = await Promise.all([
+    store.items.updateMany(
+      { projectId: project._id, lastActor: from },
+      { $set: { lastActor: to } },
+    ),
+    store.items.updateMany(
+      { projectId: project._id, 'claim.agent': from },
+      { $set: { 'claim.agent': to } },
+    ),
+  ]);
+
+  // The registration follows the work. Two registrations become one, because a
+  // board that offers both names in its filter has not been consolidated, it
+  // has been given a second row.
+  const aliases = [
+    ...new Set([...(arriving?.aliases ?? []), ...(leaving?.aliases ?? []), from]),
+  ].slice(0, 32);
+  if (arriving) {
+    await store.agents.updateOne(
+      { _id: arriving._id },
+      { $set: { aliases, lastSeenAt: now } },
+    );
+    if (leaving) {
+      await store.agents.deleteOne({ _id: leaving._id });
+      // Two registrations became one, so the count of them has to say one. A
+      // plain decrement, floored, because the agent counter has no repair pass
+      // behind it the way items and questions do.
+      await store.projects.updateOne(
+        { _id: project._id, 'counts.agents': { $gt: 0 } },
+        { $inc: { 'counts.agents': -1 } },
+      );
+    }
+  } else if (leaving) {
+    await store.agents.updateOne(
+      { _id: leaving._id },
+      { $set: { handle: to, aliases, lastSeenAt: now } },
+    );
+  }
+
+  return {
+    from,
+    to,
+    items: items.modifiedCount,
+    claims: claims.modifiedCount,
+    merged: Boolean(arriving && leaving),
+  };
+}
+
 /**
  * What is wrong with the name on this write, if anything.
  *
