@@ -4,6 +4,7 @@ import type { Store } from '../db.js';
 import type { Mailer } from '../email.js';
 import { chip, escapeHtml, layout, when } from '../html.js';
 import { who } from '../identity.js';
+import { fromOurPage, originOf } from '../origin.js';
 import { hashToken, newId, newOtpCode } from '../ids.js';
 import { codeAttemptKey, type RateLimiter } from '../rateLimit.js';
 import {
@@ -59,6 +60,33 @@ const MAX_CODE_ATTEMPTS = 5;
 
 export function registerOperator(app: FastifyInstance, deps: OperatorDeps): void {
   const { store, config, limiter, mailer } = deps;
+  const ourOrigin = originOf(config.baseUrl);
+
+  /**
+   * Two guards on every write here, never one.
+   *
+   * The token in the form proves the page it came from was rendered for this
+   * session, which is the guard that matters and the one an attacker cannot
+   * forge without reading a page they cannot read. The header check beside it
+   * costs nothing and holds in the case the first one does not: a token that
+   * reached a log, a screenshot or a paste is still a token, and a post
+   * carrying it from somebody else's page is not this person acting.
+   *
+   * The capability pages have had this for a day; they have no token to check,
+   * so it was all they had. These had the token and nothing else.
+   */
+  const ownWrite = (request: FastifyRequest, session: OperatorSession): void => {
+    const verdict = fromOurPage(request, ourOrigin);
+    if (!verdict.ok) {
+      record(store, 'refused', { door: 'browser', detail: verdict.reason });
+      throw new ServiceError(
+        403,
+        'bad_origin',
+        `That form arrived from ${verdict.came}, which is not this service. Nothing was changed. Open the page again and retry.`,
+      );
+    }
+    checkCsrf(session, request.body);
+  };
 
   // The nav label comes off the cookie, on every page here rather than on the
   // one that remembered to pass it. Half of these pages are only ever seen by
@@ -361,7 +389,7 @@ and you can end that from the view itself.</p>
   app.post('/operator/logout', { schema: { hide: true } }, async (request, reply) => {
     const session = await requireSession(request, reply);
     if (!session) return reply;
-    checkCsrf(session, request.body);
+    ownWrite(request, session);
     const form = (request.body ?? {}) as { scope?: string };
     await endSession(store, config, request, reply, form.scope === 'everywhere');
     return html(
@@ -789,7 +817,7 @@ ${
   app.post('/operator/shares/:id', { schema: { hide: true } }, async (request, reply) => {
     const session = await requireSession(request, reply);
     if (!session) return reply;
-    checkCsrf(session, request.body);
+    ownWrite(request, session);
 
     const { id } = request.params as { id: string };
     const form = (request.body ?? {}) as { decision?: string };
@@ -815,7 +843,7 @@ ${
   app.post('/operator/projects/:id/keys', { schema: { hide: true } }, async (request, reply) => {
     const session = await requireSession(request, reply);
     if (!session) return reply;
-    checkCsrf(session, request.body);
+    ownWrite(request, session);
 
     const { id } = request.params as { id: string };
     const project = await store.projects.findOne({ _id: id, claimedBy: session.email });
@@ -855,7 +883,7 @@ curl -sX DELETE ${escapeHtml(config.baseUrl)}/v1/${escapeHtml(project._id)}/keys
   app.post('/operator/projects/:id/visibility', { schema: { hide: true } }, async (request, reply) => {
     const session = await requireSession(request, reply);
     if (!session) return reply;
-    checkCsrf(session, request.body);
+    ownWrite(request, session);
 
     const { id } = request.params as { id: string };
     const form = (request.body ?? {}) as { visibility?: string };
@@ -871,7 +899,7 @@ curl -sX DELETE ${escapeHtml(config.baseUrl)}/v1/${escapeHtml(project._id)}/keys
   app.post('/operator/aliases', { schema: { hide: true } }, async (request, reply) => {
     const session = await requireSession(request, reply);
     if (!session) return reply;
-    checkCsrf(session, request.body);
+    ownWrite(request, session);
 
     const form = (request.body ?? {}) as { aliases?: string };
     const aliases = [
@@ -894,7 +922,7 @@ curl -sX DELETE ${escapeHtml(config.baseUrl)}/v1/${escapeHtml(project._id)}/keys
   app.post('/operator/escalations/:id', { schema: { hide: true } }, async (request, reply) => {
     const session = await requireSession(request, reply);
     if (!session) return reply;
-    checkCsrf(session, request.body);
+    ownWrite(request, session);
 
     const { id } = request.params as { id: string };
     const form = (request.body ?? {}) as { status?: string; answer?: string };

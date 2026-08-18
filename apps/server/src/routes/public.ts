@@ -17,6 +17,7 @@ import { redactAddress, type Mailer } from '../email.js';
 import { record, recordView } from '../events.js';
 import { ago, chip, escapeHtml, layout, when } from '../html.js';
 import { avatar, who } from '../identity.js';
+import { fromOurPage, originOf } from '../origin.js';
 import { newId, normalizeSlug } from '../ids.js';
 import {
   renderBoard,
@@ -1369,56 +1370,29 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
   // spelled `https://Example.com:443` is the same site as the `https://example.com`
   // a browser puts in the header, and a string comparison would answer 403 to
   // every form on it.
-  const ourOrigin = (() => {
-    try {
-      return new URL(config.baseUrl).origin;
-    } catch {
-      return config.baseUrl;
-    }
-  })();
+  const ourOrigin = originOf(config.baseUrl);
 
   const sameOrigin = (request: FastifyRequest, reply: FastifyReply): boolean => {
-    const refuse = (came: string, reason: 'cross-site' | 'same-site' | 'origin'): boolean => {
-      // Counted, because this refusal is the one that cannot be seen from
-      // outside: a browser gets a page, the agents never hit it, and the number
-      // stays at zero until either somebody probes us or we break our own
-      // forms. The reason is one of three fixed words; the origin itself is
-      // caller supplied and never stored.
-      record(store, 'refused', { door: 'browser', detail: reason });
-      void reply
-        .code(403)
-        .type('text/html; charset=utf-8')
-        .send(
-          layout(
-            { title: 'Not from this page' },
-            `<h1>That form did not come from here</h1>
-             <p>The request arrived from ${escapeHtml(came)}, which is not this service. Nothing
-             was changed. Open the board again and retry.</p>`,
-          ),
-        );
-      return false;
-    };
-
-    // `none` is a typed address or a bookmark, which no form post is; it is
-    // allowed anyway because it is nobody else's page either.
-    const site = request.headers['sec-fetch-site'];
-    if (typeof site === 'string' && site !== '') {
-      if (site === 'same-origin' || site === 'none') return true;
-      return site === 'same-site'
-        ? refuse('another host on this domain', 'same-site')
-        : refuse('another site', 'cross-site');
-    }
-
-    const origin = request.headers.origin;
-    if (typeof origin !== 'string' || origin === '') return true;
-    let sent = origin;
-    try {
-      sent = new URL(origin).origin;
-    } catch {
-      // Not a URL at all. Nothing a browser sends, so it is refused below.
-    }
-    if (sent === ourOrigin) return true;
-    return refuse(origin, 'origin');
+    const verdict = fromOurPage(request, ourOrigin);
+    if (verdict.ok) return true;
+    // Counted, because this refusal is the one that cannot be seen from
+    // outside: a browser gets a page, the agents never hit it, and the number
+    // stays at zero until either somebody probes us or we break our own forms.
+    // The reason is one of three fixed words; the origin itself is caller
+    // supplied and never stored.
+    record(store, 'refused', { door: 'browser', detail: verdict.reason });
+    void reply
+      .code(403)
+      .type('text/html; charset=utf-8')
+      .send(
+        layout(
+          { title: 'Not from this page' },
+          `<h1>That form did not come from here</h1>
+           <p>The request arrived from ${escapeHtml(verdict.came)}, which is not this service.
+           Nothing was changed. Open the board again and retry.</p>`,
+        ),
+      );
+    return false;
   };
 
   const limitWrites = (request: FastifyRequest, reply: FastifyReply): boolean => {

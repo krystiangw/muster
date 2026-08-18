@@ -976,6 +976,32 @@ describe('every form these pages render', () => {
       'the signed in reader of an unclaimed board was never rendered',
     );
 
+    // The other half of the same question, and the half that is a security
+    // property rather than a usability one: every one of these forms has to
+    // refuse the same post arriving from somebody else's page. Written as a
+    // sweep over what the pages actually render, so a form added next month is
+    // covered on both sides without anybody remembering to add it here.
+    //
+    // Before the same-origin sweep below, which ends by logging out.
+    for (const form of forms) {
+      const elsewhere = await harness.server.inject({
+        method: 'POST',
+        url: form.action,
+        payload: new URLSearchParams(form.hidden).toString(),
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+          cookie: session.cookie,
+          origin: 'https://evil.example',
+          'sec-fetch-site': 'cross-site',
+        },
+      });
+      assert.equal(
+        elsewhere.statusCode,
+        403,
+        `${form.action} answered ${elsewhere.statusCode} to a post from another site`,
+      );
+    }
+
     // Logging out is the one form that takes the session every other operator
     // form needs, so it goes last rather than being skipped.
     const ordered = [...forms].sort(
