@@ -475,8 +475,14 @@ describe('the open item cap', () => {
 
   it('skips the overcount repair when a write lands while it is counting', async () => {
     const { correctOvercount } = await import('../src/hygiene.js');
-    const project = await createProject(harness);
-    await post(project, '/items', { slug: 'one', title: 'one', actor: 'a' });
+    const { createProject: createDirect, upsertItem } = await import('../src/service.js');
+    // Built through the service rather than over HTTP, and this is the whole
+    // reason: every request fires a throttled sweep in the background, that
+    // sweep runs this same repair, and the patched counter below would be
+    // consumed by it. On a slow runner the test then measured the race instead
+    // of the guard, and failed in CI while passing on the machine that wrote it.
+    const { project } = await createDirect(harness.store, harness.config, { name: 'overcount' });
+    await upsertItem(harness.store, project, { slug: 'one', title: 'one', actor: 'a' });
 
     // Simulate the race directly: the repair reads the counter, and a create
     // increments it before the write-back. The guard has to make the repair
@@ -488,7 +494,7 @@ describe('the open item cap', () => {
       if (!raced) {
         raced = true;
         await harness.store.projects.updateOne(
-          { _id: project.id },
+          { _id: project._id },
           { $inc: { 'counts.items': 5 } },
         );
       }
@@ -496,9 +502,9 @@ describe('the open item cap', () => {
     }) as typeof harness.store.items.countDocuments;
 
     try {
-      const repaired = await correctOvercount(harness.store, project.id);
+      const repaired = await correctOvercount(harness.store, project._id);
       assert.equal(repaired, false, 'a repair that raced a write must not apply');
-      const counts = await harness.store.projects.findOne({ _id: project.id });
+      const counts = await harness.store.projects.findOne({ _id: project._id });
       assert.equal(counts!.counts.items, 6, 'the concurrent increment survives');
     } finally {
       harness.store.items.countDocuments = original;

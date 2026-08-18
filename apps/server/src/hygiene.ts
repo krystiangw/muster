@@ -354,7 +354,12 @@ export async function sweepProject(
   // maybeSweep takes it on the way in, so it advances even on a pass where
   // every rule throws; a watcher asking whether hygiene still works needs the
   // date a sweep reached the end.
-  await store.projects.updateOne({ _id: project._id }, { $set: { sweptAt: now } });
+  //
+  // Stamped here rather than from `now`, which is when this pass started and on
+  // a slow one is minutes behind. `$max` because a scheduled pass and one a
+  // request triggered can overlap: whichever finishes second must not hand the
+  // watchdog an older date than the one already recorded.
+  await store.projects.updateOne({ _id: project._id }, { $max: { sweptAt: new Date() } });
 
   return outcomes;
 }
