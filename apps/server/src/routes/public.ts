@@ -79,17 +79,18 @@ async function recentTimelines(
   // The card an address names, which is not always one of the drawn ones: work
   // filed above it since the link was sent puts it past the column's cap, and
   // its sheet would then open with an empty history.
-  openCard = '',
+  openItem?: ItemDoc | null,
 ): Promise<Map<string, TimelineEntry[]>> {
-  const ids = view.rows
-    .flatMap((row) =>
-      row.columns.flatMap((cell) =>
-        cell.items.filter(
-          (item, index) => index < COLUMN_RENDER_LIMIT || item.slug === openCard,
+  const ids = [
+    ...new Set(
+      [
+        ...view.rows.flatMap((row) =>
+          row.columns.flatMap((cell) => cell.items.slice(0, COLUMN_RENDER_LIMIT)),
         ),
-      ),
-    )
-    .map((item) => item._id);
+        ...(openItem ? [openItem] : []),
+      ].map((item) => item._id),
+    ),
+  ];
   const timelines = new Map<string, TimelineEntry[]>();
   if (ids.length === 0) return timelines;
 
@@ -117,6 +118,10 @@ async function agentDescriptions(
   store: Store,
   projectId: string,
   view: BoardView,
+  // And whoever is on the open sheet, which is a card the columns need not be
+  // drawing: a handle nothing else on the page carries would otherwise lose the
+  // description every other card shows.
+  openItem?: ItemDoc | null,
 ): Promise<Map<string, string>> {
   const handles = new Set<string>();
   for (const row of view.rows) {
@@ -127,6 +132,8 @@ async function agentDescriptions(
       }
     }
   }
+  if (openItem?.claim) handles.add(openItem.claim.agent);
+  if (openItem?.lastActor) handles.add(openItem.lastActor);
   const described = new Map<string, string>();
   if (handles.size === 0) return described;
 
@@ -1248,7 +1255,25 @@ ${
       });
       questions.set(doc.itemSlug, asked);
     }
-    const agents = await agentDescriptions(store, project._id, view);
+    // The card an address names, wherever it has got to. A column keeps fifty
+    // items and draws fifteen of them, and a link sent last week outlives both:
+    // resolving the sheet against what the board happens to be holding is a
+    // permalink that quietly stops opening anything.
+    const openItem =
+      openCard === ''
+        ? null
+        : (view.rows
+            .flatMap((row) => row.columns.flatMap((cell) => cell.items))
+            .find((item) => item.slug === openCard) ??
+          ((await store.items.findOne(
+            { projectId: project._id, slug: openCard },
+            { projection: { timeline: 0 } },
+          )) as ItemDoc | null));
+    // A sheet the page did not draw holds nothing, so it does not hold the
+    // refresh either: `?card=` naming a card this project never had is an
+    // ordinary board that would otherwise quietly stop keeping itself true.
+    const sheetOpen = openNew || openItem !== null;
+    const agents = await agentDescriptions(store, project._id, view, openItem);
 
     // A question can be answered from a card now, and an answer that reloads
     // the page silently is how somebody answers the same thing twice. Read from
@@ -1344,15 +1369,6 @@ ${
       ? `Answered. ${answeredHere.agent} picks it up on its next iteration, and the card will say when it did.`
       : (movedNotice ?? doneNotice));
 
-    // A sheet the page did not draw holds nothing, so it does not hold the
-    // refresh either: `?card=` naming something this narrowing filtered out is
-    // an ordinary board that would otherwise quietly stop keeping itself true.
-    const sheetOpen =
-      openNew ||
-      (openCard !== '' &&
-        view.rows.some((row) =>
-          row.columns.some((cell) => cell.items.some((item) => item.slug === openCard)),
-        ));
 
     const boardUrl = `/r/${escapeHtml(readToken)}/board`;
     const body = `
@@ -1368,12 +1384,12 @@ ${project.description ? `<p class="lead">${escapeHtml(project.description)}</p>`
 ${renderNewItem(boardUrl, project.rules.requireBodyAfterHours ?? null, view.filter, openNew)}
 ${renderBoard(view, {
   boardUrl,
-  openCard,
+  openItem,
   moveAction: `${boardUrl}/move`,
   questions,
   answerAction: `/r/${escapeHtml(readToken)}`,
   filters: renderBoardFilters(view, facets, boardUrl),
-  timelines: await recentTimelines(store, project._id, view, openCard),
+  timelines: await recentTimelines(store, project._id, view, openItem),
   agents,
   facets,
   ...(notice ? { notice } : {}),

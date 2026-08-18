@@ -961,9 +961,11 @@ still runs on fragments, because it has no server behind it and nothing to lose.
 naming something the current narrowing filtered out is an ordinary board, and
 letting it stop the clock would be a link that quietly makes the page stale.
 
-**A sheet is resolved against every item, not against the drawn ones.** A column
-draws its first fifteen cards. The address names one, and work filed above it
-between sending the link and opening it is exactly how that card reaches position
-sixteen: the link then opened nothing, silently, and the page went back to
-reloading under whoever was typing into it. Its history is fetched the same way,
-or the sheet opens on an empty timeline.
+**A sheet is resolved against the collection, not against the drawn cards.** A
+column draws fifteen cards and keeps fifty, and a link somebody sent last week
+outlives both: work filed above it is exactly how that card reaches position
+sixteen, and then fifty one. Twice the fix was to widen the list it was looked up
+in, and twice that only moved the number at which the permalink silently stops
+opening anything. It is a lookup by slug now, and the history and the agent
+descriptions the sheet shows are fetched for it whether or not it made the
+slice.

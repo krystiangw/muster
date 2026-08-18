@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { BOARD_PRESETS, COLUMN_RENDER_LIMIT } from '../src/board.js';
+import { BOARD_PRESETS, COLUMN_ITEM_LIMIT } from '../src/board.js';
 import { after, before, describe, it } from 'node:test';
 import { moveItem } from '../src/board.js';
 import { authed, createProject, signIn, startHarness, type Harness, type Project } from './helper.js';
@@ -927,6 +927,12 @@ describe('moving an item into a column', () => {
     const id = asked.json().escalation.id;
     const readToken = project.readUrl.split('/r/')[1]!;
 
+    // The face of the card says something is waiting, before anybody opens it:
+    // a board whose claim is "what needs a human" cannot hide that one card
+    // deep.
+    const face = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(face.body, /<span class="chip asked">asks you<\/span>/);
+
     const page = await harness.server.inject({
       method: 'GET',
       url: `/r/${readToken}/board?card=bridge`,
@@ -1001,6 +1007,7 @@ describe('moving an item into a column', () => {
       method: 'GET',
       url: `/r/${readToken}/board?card=shared`,
     });
+    assert.match(page.body, /<span class="chip asked">2 questions<\/span>/, 'and the card counts them');
     assert.match(page.body, /Do we pay the fee\?/);
     assert.match(page.body, /Do we tell the venue first\?/);
   });
@@ -1110,17 +1117,26 @@ describe('moving an item into a column', () => {
     const project = await createProject(harness, 'deep card');
     await harness.server.inject({
       method: 'POST',
+      url: `${project.api}/agents`,
+      headers: authed(project),
+      payload: { handle: 'deep-loop', scope: [], description: 'watches the slow venue' },
+    });
+    await harness.server.inject({
+      method: 'POST',
       url: `${project.api}/items`,
       headers: authed(project),
-      payload: { slug: 'buried', title: 'the buried one', priority: -5, actor: 'a' },
+      payload: { slug: 'buried', title: 'the buried one', priority: -5, actor: 'deep-loop' },
     });
     await harness.server.inject({
       method: 'POST',
       url: `${project.api}/items/buried/timeline`,
       headers: authed(project),
-      payload: { actor: 'a', message: 'the venue answered on the second try' },
+      payload: { actor: 'deep-loop', message: 'the venue answered on the second try' },
     });
-    for (let n = 0; n < COLUMN_RENDER_LIMIT + 2; n += 1) {
+    // Past what a column keeps, not only past what it draws: fifty items are
+    // held per cell, and a link older than that is exactly the one somebody
+    // sends and opens a week later.
+    for (let n = 0; n < COLUMN_ITEM_LIMIT + 2; n += 1) {
       await harness.server.inject({
         method: 'POST',
         url: `${project.api}/items`,
@@ -1139,6 +1155,11 @@ describe('moving an item into a column', () => {
     });
     assert.match(page.body, /the buried one/, 'the address still opens it');
     assert.match(page.body, /the venue answered on the second try/, 'with its history');
+    assert.match(
+      page.body,
+      /title="watches the slow venue"/,
+      'and with what the agent on it is for, like every other sheet',
+    );
     assert.ok(!page.body.includes('http-equiv="refresh"'), 'and the page holds still');
   });
 

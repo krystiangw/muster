@@ -97,6 +97,7 @@ function card(
   now: Date,
   move: string,
   open: string,
+  asked: number,
   agents?: Map<string, string>,
 ): string {
   const claimed = item.claim !== null && new Date(item.claim.expiresAt) > now;
@@ -119,6 +120,13 @@ function card(
       // it, wherever the layout puts it. Anything else makes the operator's
       // "what is stuck" question unanswerable from the board.
       item.status === 'blocked' ? chip('blocked', 'blocked') : ''
+    }
+    ${
+      // Something is waiting on the person reading this, and the card used to
+      // say nothing: the question lived in the sheet behind it and on another
+      // page. A board whose whole claim is "what needs a human" cannot make
+      // that the one thing you have to open every card to find.
+      asked > 0 ? chip(asked === 1 ? 'asks you' : `${asked} questions`, 'asked') : ''
     }
     ${item.stale ? chip('stale', 'stale') : ''}
     ${(item.labels ?? []).slice(0, 3).map((label) => chip(label, 'open')).join(' ')}
@@ -440,8 +448,15 @@ export interface BoardRenderOptions {
    * server can hold a page still for a state it is not told about.
    */
   boardUrl?: string;
-  /** The slug whose sheet is open, when the board is addressed. */
-  openCard?: string;
+  /**
+   * The card whose sheet is open, when the board is addressed.
+   *
+   * The item itself rather than its slug, because the card an address names is
+   * not always one the board is holding: a column keeps fifty and draws
+   * fifteen, and a link sent last week outlives both. The route resolves it,
+   * from the board when it is there and from the collection when it is not.
+   */
+  openItem?: ItemDoc | null;
 }
 
 /** Every narrowing in force, in words, for the line above the board. */
@@ -485,17 +500,9 @@ export function renderBoard(view: BoardView, options: BoardRenderOptions = {}): 
   const shown = lanes.flatMap((lane) =>
     lane.columns.flatMap((cell) => cell.items.slice(0, COLUMN_RENDER_LIMIT)),
   );
-  // The sheets, which are not the same list as the cards. A column draws its
-  // first fifteen; an address names one card, and work filed above it since the
-  // link was sent is exactly how that card ends up at position sixteen. A link
-  // that quietly opens nothing is worse than one that says the card is gone,
-  // so the sheet is resolved against every item on the board.
-  const sheets = addressed
-    ? lanes
-        .flatMap((lane) => lane.columns.flatMap((cell) => cell.items))
-        .filter((item) => item.slug === options.openCard)
-        .slice(0, 1)
-    : shown;
+  // The sheets, which are not the same list as the cards: a column draws its
+  // first fifteen, and an address names one card wherever it has got to.
+  const sheets = addressed ? (options.openItem ? [options.openItem] : []) : shown;
   // Above the board, not below it: a column is taller than a screen, and a
   // confirmation nobody scrolls to is not a confirmation.
   return `${options.notice ? `<p class="notice">${escapeHtml(options.notice)}</p>` : ''}
@@ -556,6 +563,7 @@ ${lane.columns
                     ? moveForm(item, cell.key, targets, options.moveAction, view.filter)
                     : '',
                   sheetUrl(item),
+                  options.questions?.get(item.slug)?.length ?? 0,
                   options.agents,
                 ),
               )

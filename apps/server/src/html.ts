@@ -106,6 +106,10 @@ td.mono, .mono { font-family:var(--mono); font-size:13px; }
 .chip.dropped { color:var(--muted); background:var(--surface-2); }
 .chip.stale { color:var(--warn); background:color-mix(in srgb,var(--warn) 16%,transparent); }
 .chip.claim { color:var(--ink-2); background:var(--surface-2); }
+/* A question waiting on whoever is reading. The accent is the page's "this is
+   addressed to you" colour and the outline is what separates it from a label,
+   which is the only other accent chip a card carries. */
+.chip.asked { color:var(--accent); background:var(--accent-soft); border:1px solid var(--accent); }
 /* A claim is somebody working now; the last writer is somebody who was. The
    outline says "past tense" without spending another colour on it. */
 .chip.note { color:var(--muted); background:transparent; border:1px solid var(--rule); }
