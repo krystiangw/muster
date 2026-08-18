@@ -207,6 +207,37 @@ export async function runMigrations(store: Store): Promise<void> {
     after = ids[ids.length - 1]!;
     if (page.length < BATCH) break;
   }
+
+  /**
+   * When a notice about a project last left, for the projects that were sending
+   * them before the field existed.
+   *
+   * Without this, every board that has been mailing its owner for weeks reports
+   * "no notice has ever gone out" on the first read after the deploy, and the
+   * watchdog reads that beside an old unanswered question as a dead mail path.
+   * A false alarm about the alerting itself is worse than most false alarms.
+   *
+   * The value is exact rather than approximate: an escalation's `notifiedAt` is
+   * stamped in the same success path as the project field, so the newest one a
+   * project has is precisely when its last notice went out.
+   *
+   * Runs on every boot rather than once, because a claimed project that has
+   * never had a question is missing this field legitimately and always will be,
+   * so there is no "everything is backfilled" state to detect. It groups a
+   * collection the escalation cap and the TTL both keep small.
+   */
+  const lastNotices = await store.escalations
+    .aggregate<{ _id: string; last: Date }>([
+      { $match: { notifiedAt: { $ne: null } } },
+      { $group: { _id: '$projectId', last: { $max: '$notifiedAt' } } },
+    ])
+    .toArray();
+  for (const notice of lastNotices) {
+    await store.projects.updateOne(
+      { _id: notice._id, escalationNoticeSentAt: { $exists: false } },
+      { $set: { escalationNoticeSentAt: notice.last } },
+    );
+  }
 }
 
 /**

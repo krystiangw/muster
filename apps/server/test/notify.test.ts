@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import type { EscalationNotice } from '../src/email.js';
+import { runMigrations } from '../src/db.js';
 import { authed, createProject, startHarness, type Harness, type Project } from './helper.js';
 
 /**
@@ -329,6 +330,33 @@ describe('the mail an escalation sends', () => {
         payload: { status: 'answered', answer: 'done' },
       });
       assert.equal((await summary()).oldest_unannounced_at, null);
+    });
+  });
+
+  it('starts a board that was already mailing with the date it last did', async () => {
+    // The field arrived after the mail did. Read off the questions themselves,
+    // where the same success path stamps the same instant, so a board that has
+    // been mailing for weeks does not read as one that never has.
+    await withMailer(async (harness, sent) => {
+      const project = await claimedProject(harness, 'owner@example.com');
+      assert.equal((await ask(harness, project, 'mailed before the field?')).statusCode, 201);
+      assert.equal(sent.length, 1);
+
+      await harness.store.projects.updateOne(
+        { _id: project.id },
+        { $unset: { escalationNoticeSentAt: '' } },
+      );
+      await runMigrations(harness.store);
+
+      const read = await harness.server.inject({
+        method: 'GET',
+        url: project.api,
+        headers: authed(project),
+      });
+      const stamped = read.json().notice_sent_at;
+      assert.ok(stamped, 'the board was mailing, and now says so');
+      const escalation = await harness.store.escalations.findOne({ projectId: project.id });
+      assert.equal(new Date(stamped).getTime(), escalation!.notifiedAt!.getTime());
     });
   });
 
