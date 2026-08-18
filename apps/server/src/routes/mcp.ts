@@ -614,11 +614,10 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
               : undefined,
           note: args.note === undefined ? undefined : str(args.note),
           // Both doors, same behaviour: a guarded write was reachable from the
-          // browser's edit form and from nowhere an agent could call.
-          expect:
-            args.expect && typeof args.expect === 'object' && !Array.isArray(args.expect)
-              ? (args.expect as { title?: string; body?: string })
-              : undefined,
+          // browser's edit form and from nowhere an agent could call. Passed
+          // as it arrived, and rebuilt from its two known fields in the
+          // service, which is where every door's arguments meet the filter.
+          expect: args.expect as { title?: string; body?: string } | undefined,
           mustExist: args.must_exist === true,
           actor,
         });

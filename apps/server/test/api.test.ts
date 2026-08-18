@@ -404,6 +404,72 @@ describe('items', () => {
       },
     });
     assert.match(JSON.stringify(overMcp.json()), /changed_underneath/);
+
+    // And a guard that is a query rather than a memory is refused. MCP
+    // arguments are whatever a model produced, and this one is spread into the
+    // filter of the write right after the project and the slug: a crafted
+    // `expect` would otherwise overwrite the scoping and reach another
+    // project's card.
+    const other = await createProject(harness, 'somebody else');
+    await post(other, '/items', { slug: 'victim', title: 'theirs', body: 'theirs', actor: 'their-loop' });
+    const crafted = await harness.server.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: authed(project),
+      payload: {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: {
+          name: 'upsert_item',
+          arguments: {
+            slug: 'victim',
+            title: 'taken',
+            expect: { projectId: { $ne: null }, slug: 'victim' },
+            actor: 'errors-loop',
+          },
+        },
+      },
+    });
+    assert.match(JSON.stringify(crafted.json()), /bad_expect/);
+    assert.equal(
+      (await harness.store.items.findOne({ projectId: other.id, slug: 'victim' }))?.title,
+      'theirs',
+      'and the other project keeps its card',
+    );
+
+    // A guard that says nothing is not a guard, and quietly writing without
+    // one is the failure this whole mechanism exists to prevent. (A number
+    // where a string belongs is coerced by the HTTP schema into the string it
+    // reads as, which is a guard that simply does not match: 409, not 400.)
+    for (const bad of [null, [], {}]) {
+      const answer = await post(project, '/items', {
+        slug: 'errors:withdraw',
+        body: 'written unguarded',
+        expect: bad,
+        actor: 'errors-loop',
+      });
+      assert.equal(answer.statusCode, 400, JSON.stringify(bad));
+    }
+
+    // Over MCP nothing coerces, because nothing validates: the arguments are
+    // whatever a model produced, and the service is the only thing between
+    // them and the filter.
+    const wrongType = await harness.server.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: authed(project),
+      payload: {
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: {
+          name: 'upsert_item',
+          arguments: { slug: 'errors:withdraw', body: 'blind', expect: { title: 7 }, actor: 'errors-loop' },
+        },
+      },
+    });
+    assert.match(JSON.stringify(wrongType.json()), /bad_expect/);
   });
 
   it('enforces the project item cap', async () => {

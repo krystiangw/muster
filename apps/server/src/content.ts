@@ -145,7 +145,7 @@ refuses instead:
 curl -sX POST $MUSTER/items -H "authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' \
   -d '{"slug":"errors:venue-withdraw-stuck","body":"Corrected: the signer, not the venue.",
-       "expect":{"body":"A large position is parked behind a bridge."},
+       "expect":{"body":"A large position is parked behind a bridge, with no direct withdraw to a tradeable pair."},
        "must_exist":true,"actor":"errors-loop"}'
 \`\`\`
 

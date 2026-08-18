@@ -83,8 +83,42 @@ export function normalizeUpsertInput(input: UpsertItemInput): UpsertItemInput {
   if (input.fields !== undefined && (typeof input.fields !== 'object' || input.fields === null)) {
     throw badRequest('bad_fields', 'Fields is an object.');
   }
+  // Two fields, both strings, and nothing else. What arrives here is spread
+  // into the filter of the write itself, after `projectId` and `slug`: an
+  // `expect` carrying `{"projectId": {"$ne": null}}` would otherwise overwrite
+  // the scoping and reach another project's card. The HTTP door refuses the
+  // extra keys by schema and MCP arguments are whatever a model produced, so
+  // the guard is rebuilt here, where both doors pass through.
+  let expect: UpsertItemInput['expect'];
+  if (input.expect !== undefined) {
+    if (typeof input.expect !== 'object' || input.expect === null || Array.isArray(input.expect)) {
+      throw badRequest('bad_expect', 'expect is an object of the title and body you last saw.');
+    }
+    const known = ['title', 'body'] as const;
+    for (const key of Object.keys(input.expect)) {
+      if (!known.includes(key as (typeof known)[number])) {
+        throw badRequest(
+          'bad_expect',
+          `expect takes ${known.join(' and ')}, and "${key}" is neither. It is what you last saw, not a query.`,
+        );
+      }
+    }
+    expect = {};
+    for (const key of known) {
+      const value = input.expect[key];
+      if (value === undefined) continue;
+      if (typeof value !== 'string') {
+        throw badRequest('bad_expect', `expect.${key} is the string you last saw.`);
+      }
+      expect[key] = value;
+    }
+    if (Object.keys(expect).length === 0) {
+      throw badRequest('bad_expect', 'expect said nothing to check. Send the title or the body you last saw.');
+    }
+  }
   return {
     ...input,
+    expect,
     title: clamp(input.title, 300),
     body: clamp(input.body, 20_000),
     note: clamp(input.note, 2_000),
