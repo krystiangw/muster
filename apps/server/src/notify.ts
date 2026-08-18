@@ -153,8 +153,13 @@ export function createNotifier(deps: {
       // Open, never answered, and nobody was ever told. Grouped by project
       // because the throttle is per project: one message covers whatever that
       // board has accumulated.
-      const projects = await store.escalations
-        .aggregate<{ _id: string; oldest: EscalationDoc }>([
+      const hourAgo = new Date(now.getTime() - NOTIFY_EVERY_MS);
+      // Eligibility is decided before the batch is cut, not after. A slot spent
+      // on a project nobody owns, or one still inside its hour, is a slot an
+      // eligible project does not get, and since neither entry goes away the
+      // same twenty could crowd out the same somebody for ever.
+      const due = await store.escalations
+        .aggregate<{ _id: string; oldest: EscalationDoc; project: ProjectDoc }>([
           {
             $match: {
               status: 'open',
@@ -164,15 +169,32 @@ export function createNotifier(deps: {
           },
           { $sort: { createdAt: 1 } },
           { $group: { _id: '$projectId', oldest: { $first: '$$ROOT' } } },
+          {
+            $lookup: { from: 'projects', localField: '_id', foreignField: '_id', as: 'project' },
+          },
+          { $unwind: '$project' },
+          {
+            $match: {
+              'project.claimedBy': { $ne: null },
+              $or: [
+                { 'project.escalationNotifiedAt': null },
+                { 'project.escalationNotifiedAt': { $exists: false } },
+                { 'project.escalationNotifiedAt': { $lt: hourAgo } },
+              ],
+            },
+          },
           { $limit: REMINDER_BATCH },
         ])
         .toArray();
 
       let sent = 0;
-      for (const entry of projects) {
-        const project = await store.projects.findOne({ _id: entry._id });
-        if (!project?.claimedBy) continue;
-        if (await notifyOnce(project, entry.oldest)) sent += 1;
+      for (const entry of due) {
+        // Read again on its turn. Twenty provider calls can take a while, and
+        // a question answered in the meantime must not produce a message
+        // asking somebody to answer it.
+        const still = await store.escalations.findOne({ _id: entry.oldest._id, status: 'open' });
+        if (!still) continue;
+        if (await notifyOnce(entry.project, still as EscalationDoc)) sent += 1;
       }
       return sent;
     },

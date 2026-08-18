@@ -40,6 +40,14 @@ async function main(): Promise<void> {
           server.log.info({ projects: stale.length, changes: touched }, 'hygiene sweep');
         }
 
+      } catch (error) {
+        server.log.error({ err: error }, 'hygiene sweep failed');
+      }
+
+      // Its own guard, deliberately. Sharing the one above meant a single
+      // project whose sweep throws takes the notifications down with it, every
+      // five minutes, silently: two unrelated jobs, two failures.
+      try {
         // The other thing a quiet board cannot do for itself. A question filed
         // inside another question's hour is silently not sent, and the only
         // record of it is a page nobody has open; this is where it finally
@@ -49,7 +57,7 @@ async function main(): Promise<void> {
           server.log.info({ projects: told }, 'told somebody about questions that were missed');
         }
       } catch (error) {
-        server.log.error({ err: error }, 'hygiene sweep failed');
+        server.log.error({ err: error }, 'missed question sweep failed');
       }
     })();
   }, SWEEP_INTERVAL_MS);

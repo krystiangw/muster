@@ -189,6 +189,45 @@ describe('the mail an escalation sends', () => {
     });
   });
 
+  it('spends its batch on projects that can actually be told', async () => {
+    // A slot spent on a board nobody owns is a slot a claimed board does not
+    // get, and since neither entry goes away, the same unclaimed ones could
+    // crowd out the same somebody for ever. Eligibility is decided before the
+    // batch is cut.
+    await withMailer(async (harness, sent) => {
+      const orphans = [];
+      for (let n = 0; n < 3; n += 1) {
+        const orphan = await createProject(harness, `nobody owns this ${n}`);
+        await ask(harness, orphan, `unanswerable ${n}`);
+        orphans.push(orphan);
+      }
+      const owned = await claimedProject(harness, 'owner@example.com');
+      await ask(harness, owned, 'this one has somebody to ask');
+      // The owned project's question is the youngest of the four, so a pass
+      // that cut its batch before checking ownership would sort it last.
+      await harness.store.escalations.updateMany(
+        {},
+        { $set: { notifiedAt: null, createdAt: new Date(Date.now() - 30 * 60_000) } },
+      );
+      await harness.store.escalations.updateMany(
+        { projectId: { $in: orphans.map((p) => p.id) } },
+        { $set: { createdAt: new Date(Date.now() - 90 * 60_000) } },
+      );
+      // The owned board's own question already sent a notice, which claimed
+      // its hour; the hour has to have passed for the sweep to have anything
+      // to do at all.
+      await harness.store.projects.updateOne(
+        { _id: owned.id },
+        { $set: { escalationNotifiedAt: new Date(Date.now() - 2 * 3_600_000) } },
+      );
+      sent.length = 0;
+
+      assert.equal(await harness.notifier.sweepMissed(), 1);
+      assert.equal(sent.length, 1);
+      assert.match(sent[0]!.notice.question, /somebody to ask/);
+    });
+  });
+
   it('says nothing about a question that was answered before anybody was told', async () => {
     await withMailer(async (harness, sent) => {
       const project = await claimedProject(harness, 'owner@example.com');

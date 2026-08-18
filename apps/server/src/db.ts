@@ -264,6 +264,11 @@ export async function ensureIndexes(store: Store): Promise<void> {
       { key: { projectId: 1, status: 1, createdAt: -1 }, name: 'inbox' },
       { key: { projectId: 1, status: 1, priorityRank: -1, createdAt: 1 }, name: 'queue' },
       { key: { projectId: 1, agent: 1, createdAt: -1 }, name: 'byAgent' },
+      // The periodic pass for questions nobody was told about asks across every
+      // project at once, so it starts where the others cannot: at the status.
+      // Not sparse: a question with no `notifiedAt` at all is exactly the one
+      // it is looking for.
+      { key: { status: 1, notifiedAt: 1, createdAt: 1 }, name: 'missed' },
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
     ]),
     ensure(store.keys, [
