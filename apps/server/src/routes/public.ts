@@ -22,6 +22,7 @@ import { DEMO_AGENTS, demoBoard } from './demoBoard.js';
 import { maybeSweep } from '../hygiene.js';
 import { codeAttemptKey, type RateLimiter } from '../rateLimit.js';
 import {
+  SEARCH_MAX_CHARS,
   ServiceError,
   answerEscalation,
   appendNote,
@@ -186,7 +187,8 @@ function keptParams(form: KeptFilter): Record<string, string> {
   if (owner) kept.owner = owner.slice(0, 48);
   if (agent) kept.agent = agent.slice(0, 48);
   if (label) kept.label = label.slice(0, 48);
-  if (q) kept.q = q.slice(0, 80);
+  // The same cut the search itself makes, so the box shows what was searched.
+  if (q) kept.q = q.slice(0, SEARCH_MAX_CHARS);
   return kept;
 }
 
@@ -920,7 +922,7 @@ ${
         ...(query.label ? { label: query.label.slice(0, 48) } : {}),
         // Long enough for a real phrase, short enough that nobody sends a
         // novel into a regular expression.
-        ...(query.q ? { q: query.q.slice(0, 80) } : {}),
+        ...(query.q ? { q: query.q.slice(0, SEARCH_MAX_CHARS) } : {}),
       }),
       boardFacets(store, project),
       // The only work on this board that no agent will ever do. It was

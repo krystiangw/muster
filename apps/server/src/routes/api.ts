@@ -505,9 +505,8 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
               },
               q: {
                 type: 'string',
-                maxLength: 120,
                 description:
-                  'Words to look for in the slug or the title, case insensitive. The same search the board offers a person, so both doors answer alike.',
+                  'Words to look for in the slug or the title, case insensitive: every word has to appear, in either field, in any order. The same search the board offers a person, so both doors answer alike. Anything past 120 characters or six words is cut rather than refused, for the same reason.',
               },
               limit: { type: 'integer', minimum: 1, maximum: 200 },
               order: {

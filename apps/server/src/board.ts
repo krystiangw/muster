@@ -1,7 +1,7 @@
 import type { Store } from './db.js';
 import { TIMELINE_KEEP } from './hygiene.js';
 import { normalizeSlug } from './ids.js';
-import { ServiceError, claimItem, upsertItem } from './service.js';
+import { ServiceError, claimItem, upsertItem, wordsFilter } from './service.js';
 import {
   DEFAULT_BOARD,
   ITEM_STATUSES,
@@ -237,13 +237,10 @@ export async function loadBoard(
   }
   if (options.q) {
     narrowed.q = options.q;
-    // Slug or title, case insensitive, escaped: the query is a person's words,
-    // not a pattern, and a stray bracket should find nothing rather than throw.
-    const words = options.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    query.$and = [
-      ...((query.$and as unknown[]) ?? []),
-      { $or: [{ slug: { $regex: words, $options: 'i' } }, { title: { $regex: words, $options: 'i' } }] },
-    ];
+    // The same question the item list asks. It used to be a second copy of the
+    // regex here, and the two agreed by luck rather than by construction.
+    const words = wordsFilter(options.q);
+    if (words) query.$and = [...((query.$and as unknown[]) ?? []), words];
   }
   if (options.agent) {
     narrowed.agent = options.agent;

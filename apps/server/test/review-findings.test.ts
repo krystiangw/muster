@@ -278,6 +278,21 @@ describe('one read, two doors', () => {
       'the other door answers the same',
     );
 
+    // Every word, in either field, in any order. Two words that sit at
+    // opposite ends of a title are the ordinary case, and a search that only
+    // matches the whole string as one phrase answers nothing and reads as
+    // broken.
+    const twoWords = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/items?q=${encodeURIComponent('venue withdrawal')}`,
+      headers: authed(project),
+    });
+    assert.deepEqual(
+      twoWords.json().items.map((item: { slug: string }) => item.slug),
+      ['errors:venue-withdraw-stuck'],
+      'one word from the slug and one from the title, in neither order',
+    );
+
     // Somebody's words, not a pattern. A stray bracket finds nothing rather
     // than throwing, and a dot is a dot.
     const bracket = await harness.server.inject({
@@ -287,6 +302,44 @@ describe('one read, two doors', () => {
     });
     assert.equal(bracket.statusCode, 200);
     assert.deepEqual(bracket.json().items, []);
+
+    // A long query is cut at the same place by every door rather than refused
+    // by one and truncated differently by another, which was three behaviours
+    // for one contract.
+    const long = `venue ${'x'.repeat(200)}`;
+    const longOverHttp = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/items?q=${encodeURIComponent(long)}`,
+      headers: authed(project),
+    });
+    assert.equal(longOverHttp.statusCode, 200, 'not refused');
+    const longOverMcp = await harness.server.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: authed(project),
+      payload: {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'list_items', arguments: { q: long } },
+      },
+    });
+    assert.deepEqual(
+      longOverMcp.json().result.structuredContent.items.map((item: { slug: string }) => item.slug),
+      longOverHttp.json().items.map((item: { slug: string }) => item.slug),
+      'and both doors cut it identically',
+    );
+
+    // And the board's own search box asks the same question, because it is the
+    // same function now.
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const board = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?q=${encodeURIComponent('venue withdrawal')}`,
+    });
+    assert.equal(board.statusCode, 200);
+    assert.ok(board.body.includes('errors:venue-withdraw-stuck'));
+    assert.ok(!board.body.includes('ops:backups'));
   });
 
   it('reads a lapsed lease as free work, the way the board does', async () => {

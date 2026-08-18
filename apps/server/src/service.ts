@@ -1402,20 +1402,8 @@ async function listItems(
   const order: ItemOrder =
     query.order === 'id' ? 'id' : query.order === 'recent' ? 'recent' : 'urgency';
   const conditions: Record<string, unknown>[] = [...claimConditions];
-  if (query.q) {
-    // Slug or title, case insensitive, escaped: the query is somebody's words,
-    // not a pattern, and a stray bracket should find nothing rather than throw.
-    // The same reading the board's own search takes, because an agent asking
-    // for "the withdrawal one" and a person typing it into the board should not
-    // get two different answers.
-    const words = query.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    conditions.push({
-      $or: [
-        { slug: { $regex: words, $options: 'i' } },
-        { title: { $regex: words, $options: 'i' } },
-      ],
-    });
-  }
+  const words = wordsFilter(query.q);
+  if (words) conditions.push(words);
   if (query.since) conditions.push({ updatedAt: { $gte: query.since } });
   if (query.cursor) {
     const after = afterCursor(query.cursor, order);
@@ -1446,6 +1434,44 @@ async function listItems(
     .sort(sort)
     .limit(limit)
     .toArray() as Promise<ItemDoc[]>;
+}
+
+/**
+ * Somebody's words, turned into a filter over the slug and the title.
+ *
+ * Every word has to appear, in either field, in any order: typing two words
+ * that happen to sit at opposite ends of a title is the ordinary case, and a
+ * search that treats the whole string as one phrase answers nothing and reads
+ * as broken. Escaped, because these are words and not a pattern: a stray
+ * bracket finds nothing rather than throwing. Six words is the cap, since each
+ * one costs a scan and nobody searching a board types a sentence.
+ *
+ * Exported so the board's search box and the item list ask the same question.
+ * They had two copies of this, which agreed only by luck.
+ */
+export const SEARCH_MAX_CHARS = 120;
+
+export function wordsFilter(q: string | undefined): Record<string, unknown> | null {
+  // Cut rather than refused, and cut here so every door cuts at the same place.
+  // A search box that answers 400 on a long paste is worse than one that
+  // searches the first hundred characters of it.
+  const words = (q ?? '')
+    .trim()
+    .slice(0, SEARCH_MAX_CHARS)
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 6);
+  if (words.length === 0) return null;
+  return {
+    $and: words
+      .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .map((word) => ({
+        $or: [
+          { slug: { $regex: word, $options: 'i' } },
+          { title: { $regex: word, $options: 'i' } },
+        ],
+      })),
+  };
 }
 
 /**
@@ -1544,7 +1570,7 @@ export async function readItems(
     ...(input.source === undefined ? {} : { source: input.source }),
     ...(input.stale === undefined ? {} : { stale: input.stale }),
     ...(input.claimed === undefined ? {} : { claimed: input.claimed }),
-    ...(input.q ? { q: input.q.slice(0, 120) } : {}),
+    ...(input.q ? { q: input.q } : {}),
     ...(keyset === undefined ? {} : { cursor: keyset }),
     ...(since ? { since } : {}),
     limit,

@@ -199,8 +199,8 @@ const TOOLS: ToolDefinition[] = [
         },
         q: {
           type: 'string',
-          maxLength: 120,
-          description: 'Words to look for in the slug or the title, case insensitive.',
+          description:
+            'Words to look for in the slug or the title, case insensitive: every word has to appear, in either field, in any order. Past 120 characters or six words it is cut, not refused.',
         },
         limit: { type: 'integer', minimum: 1, maximum: 200 },
         order: {
