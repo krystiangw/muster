@@ -343,9 +343,17 @@ describe('what the link says about itself', () => {
     // earlier moment.
     const docs = await harness.server.inject({ method: 'GET', url: '/docs' });
     assert.equal(docs.statusCode, 200);
-    assert.match(docs.body, /the token is in the\s+address/);
+    assert.match(docs.body, /the token is in it/);
     assert.match(docs.body, /password rather than a bookmark/);
     assert.match(docs.body, /read-link\/rotate/);
+    // Every power it grants, not the three that came to mind: a warning that
+    // undersells the authority is worse than none, because it is believed.
+    for (const power of [/answers the questions/, /moves cards/, /sets owners and labels/, /replaces the\s+layout/]) {
+      assert.match(docs.body, power);
+    }
+    // And it is true only while the board is open by link, which is the state
+    // the sentence is about.
+    assert.match(docs.body, /Narrowing the project to its owner ends all of that/);
   });
 
   it('tells the reader what the address in their hand can do', async () => {
