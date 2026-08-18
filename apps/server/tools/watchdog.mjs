@@ -88,6 +88,36 @@ const checks = [
     })),
   },
 ];
+
+/**
+ * Can a person still submit a form on their own board?
+ *
+ * Nothing above answers that. Every check here speaks the way an agent does,
+ * with a bearer token and no browser headers, and the check a browser has to
+ * pass is a different one: on 2026-08-18 our own referrer policy blanked the
+ * Origin header, the same-site check read that as a stranger, and every form on
+ * the capability pages answered 403 for a night while all of this stayed green.
+ *
+ * The probe writes nothing. An unknown status word is refused after the link
+ * has been recognised and before anything is answered, so 400 means the whole
+ * path in front of the write is open: same-site check, read token, visibility.
+ * A 403 means the forms are dead again.
+ */
+const readUrl = checks.find((check) => check.name === 'api read')?.body?.read_url;
+if (readUrl) {
+  const form = await probe(`${readUrl}/escalations/e_watchdog_probe`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      // What a browser sends from one of our own pages, and what the check has
+      // to accept. Not curl's absent headers, which pass by a different rule.
+      origin: 'null',
+      'sec-fetch-site': 'same-origin',
+    },
+    body: 'status=watchdog-probe',
+  });
+  checks.push({ name: 'browser form', ok: form.status === 400, status: form.status || form.error });
+}
 const broken = checks.filter((check) => !check.ok);
 const now = new Date().toISOString();
 

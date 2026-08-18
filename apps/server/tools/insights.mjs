@@ -63,6 +63,7 @@ const [
   boardViews,
   unswept,
   oldestSweep,
+  refusedRows,
 ] = await Promise.all([
   count(events, { kind: 'discover' }),
   count(events, { kind: 'signup' }),
@@ -95,6 +96,7 @@ const [
     .sort({ sweptAt: 1 })
     .limit(1)
     .toArray(),
+  events.aggregate([{ $match: { kind: 'refused' } }, { $group: { _id: '$detail', n: { $sum: 1 } } }, { $sort: { n: -1 } }]).toArray(),
 ]);
 
 const hours = answered
@@ -220,6 +222,15 @@ for (const entry of drifted.slice(0, 5)) {
 }
 row('median answer, hours', median === null ? 'n/a' : median.toFixed(1));
 if (hours.length > 0) console.log(`  ${'  over the last'.padEnd(28)} ${String(hours.length).padStart(7)} answers`);
+
+// Ordinarily zero, and printed whether or not it is: a browser refused as
+// somebody else's page gets a page and tells nobody, and the agents never meet
+// this check at all. `cross-site` and `origin` climbing together is somebody
+// probing the forms; either one climbing while the boards are quiet is this
+// service refusing pages it served itself, which is what it did for a night.
+console.log('\nForms refused as somebody else\'s page');
+row('all of them', refusedRows.reduce((total, { n }) => total + n, 0));
+for (const { _id, n } of refusedRows) row(`  ${_id ?? 'unknown'}`, n);
 
 console.log('\nLast seven days');
 row('signups', weekSignups);

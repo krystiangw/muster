@@ -1060,7 +1060,13 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
   })();
 
   const sameOrigin = (request: FastifyRequest, reply: FastifyReply): boolean => {
-    const refuse = (came: string): boolean => {
+    const refuse = (came: string, reason: 'cross-site' | 'same-site' | 'origin'): boolean => {
+      // Counted, because this refusal is the one that cannot be seen from
+      // outside: a browser gets a page, the agents never hit it, and the number
+      // stays at zero until either somebody probes us or we break our own
+      // forms. The reason is one of three fixed words; the origin itself is
+      // caller supplied and never stored.
+      record(store, 'refused', { door: 'browser', detail: reason });
       void reply
         .code(403)
         .type('text/html; charset=utf-8')
@@ -1080,7 +1086,9 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     const site = request.headers['sec-fetch-site'];
     if (typeof site === 'string' && site !== '') {
       if (site === 'same-origin' || site === 'none') return true;
-      return refuse(site === 'same-site' ? 'another host on this domain' : 'another site');
+      return site === 'same-site'
+        ? refuse('another host on this domain', 'same-site')
+        : refuse('another site', 'cross-site');
     }
 
     const origin = request.headers.origin;
@@ -1092,7 +1100,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
       // Not a URL at all. Nothing a browser sends, so it is refused below.
     }
     if (sent === ourOrigin) return true;
-    return refuse(origin);
+    return refuse(origin, 'origin');
   };
 
   const limitWrites = (request: FastifyRequest, reply: FastifyReply): boolean => {

@@ -116,6 +116,16 @@ database: an alert that travels through the thing it watches is not an alert.
 It also files an escalation on the board, best effort, because a partial outage
 is the common case and the note belongs with the work.
 
+The same round posts a form the way a browser does, because every other check
+here speaks the way an agent does: a bearer token, no browser headers, and past
+the check a browser actually has to pass. On 2026-08-18 our own referrer policy
+blanked the `Origin` header, the same-site check read that as a stranger, and
+every form on the capability pages answered 403 for a night while both checks
+above stayed green. The probe writes nothing: an unknown status word is refused
+after the link has been recognised and before anything is answered, so a 400
+means the whole path in front of the write is open and a 403 means the forms are
+dead again.
+
 The same round checks something a liveness probe cannot see: whether hygiene is
 still running. The project read carries `swept_at`, written when a sweep
 finishes rather than when one starts, and a dyno that answers while its sweeper

@@ -802,27 +802,40 @@ describe('every form these pages render', () => {
     await post(project, '/escalations', { question: 'Ship it?', agent: 'agent', item_slug: 'work' });
 
     const session = await signIn(harness, 'owner@example.com');
-    await harness.store.projects.updateOne(
-      { _id: project.id },
-      { $set: { claimedBy: 'owner@example.com' } },
-    );
 
-    // Signed in and not, because the two states render different forms: a
-    // stranger is offered the project, its owner is offered the handover.
-    const pages: Array<[string, Record<string, string>]> = [
-      [`/r/${readToken}`, {}],
-      [`/r/${readToken}/board`, {}],
-      [`/r/${readToken}`, { cookie: session.cookie }],
-      ['/operator', { cookie: session.cookie }],
-    ];
-
+    // Three states, in the order that produces them. An unclaimed board offers
+    // a stranger the token form and its signed in reader the handover; a
+    // claimed one offers neither, and is what the operator's own page is about.
+    // Written as a sequence because claiming is one way: the forms have to be
+    // read off the earlier state before the later one exists.
     const forms: Rendered[] = [];
-    for (const [url, headers] of pages) {
+    const collect = async (url: string, headers: Record<string, string> = {}) => {
       const page = await harness.server.inject({ method: 'GET', url, headers });
       assert.equal(page.statusCode, 200, url);
       forms.push(...formsOn(url, page.body));
-    }
-    assert.ok(forms.length >= 16, `only ${forms.length} forms to submit, so this proves little`);
+    };
+
+    await collect(`/r/${readToken}`);
+    await collect(`/r/${readToken}`, { cookie: session.cookie });
+    await collect(`/r/${readToken}/board`);
+
+    await claimForEmail(project, 'owner@example.com');
+    await collect('/operator', { cookie: session.cookie });
+
+    // Counted by where they post, not by how many were rendered: the same page
+    // read twice would otherwise double the total and prove half as much. And
+    // the handover is named, because it is the one form that only the signed in
+    // state renders, and a project claimed a line too early would drop it
+    // silently.
+    const actions = new Set(forms.map((form) => form.action));
+    // Sixteen today. The floor is under that rather than at it, so adding a
+    // form does not fail the suite and a page that quietly stopped rendering
+    // its own still does.
+    assert.ok(actions.size >= 14, `only ${actions.size} distinct forms, so this proves little`);
+    assert.ok(
+      [...actions].some((action) => action.endsWith('/handover')),
+      'the signed in reader of an unclaimed board was never rendered',
+    );
 
     // Logging out is the one form that takes the session every other operator
     // form needs, so it goes last rather than being skipped.

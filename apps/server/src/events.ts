@@ -59,7 +59,19 @@ export type EventKind =
   /** A question was filed for a human. */
   | 'escalate'
   /** A human answered one. */
-  | 'answer';
+  | 'answer'
+  /**
+   * A form post refused as somebody else's page.
+   *
+   * Here because the failure it makes visible is invisible everywhere else. A
+   * browser that is refused gets a page and says nothing; the agents never
+   * meet this check at all, so the suite stayed green while every form on the
+   * capability pages answered 403 for a night. Ordinarily zero, or as close to
+   * it as a public address gets. A number that climbs is either somebody
+   * probing the forms or this service refusing pages it served itself, and
+   * both are worth a look.
+   */
+  | 'refused';
 
 /** Which door it came through. */
 export type EventDoor = 'http' | 'mcp' | 'oauth' | 'browser';
@@ -263,8 +275,16 @@ export interface Insights {
     medianAnswerHours: number | null;
     /** How many answers that median was taken over, so it can be read honestly. */
     answersSampled: number;
-    /** Items closed by the hygiene engine rather than by anybody. */
+      /** Items closed by the hygiene engine rather than by anybody. */
     closedByHygiene: number;
+    /**
+     * Form posts refused as somebody else's page, by reason.
+     *
+     * Ordinarily empty. Anything under `origin` or `cross-site` is either
+     * somebody probing the forms or this service refusing pages it served
+     * itself, and the second one is invisible everywhere else.
+     */
+    refusedForms: Record<string, number>;
   };
   busiestProjects: Array<{ project: string; name: string; items: number; agents: number }>;
 }
@@ -301,6 +321,7 @@ export async function insights(store: Store): Promise<Insights> {
     staleItems,
     answered,
     hygieneClosed,
+    refusedRows,
     busiest,
   ] = await Promise.all([
     store.events.countDocuments({ kind: 'discover' }),
@@ -372,6 +393,13 @@ export async function insights(store: Store): Promise<Insights> {
       status: { $in: ['done', 'dropped'] },
       'timeline.by': 'hygiene',
     }),
+    store.events
+      .aggregate<{ _id: string; count: number }>([
+        { $match: { kind: 'refused' } },
+        { $group: { _id: '$detail', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+      ])
+      .toArray(),
     store.projects
       .find({}, { projection: { name: 1, counts: 1 } })
       .sort({ 'counts.items': -1 })
@@ -410,6 +438,7 @@ export async function insights(store: Store): Promise<Insights> {
       medianAnswerHours: median(answerHours),
       answersSampled: answerHours.length,
       closedByHygiene: hygieneClosed,
+      refusedForms: Object.fromEntries(refusedRows.map((row) => [row._id, row.count])),
     },
     busiestProjects: busiest.map((project) => ({
       project: project._id,

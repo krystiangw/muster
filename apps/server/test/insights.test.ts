@@ -337,4 +337,49 @@ describe('counting the people, not the agents', () => {
     await flushEvents();
     assert.equal((await insights(harness.store)).pages.signup ?? 0, before + 1);
   });
+
+  /**
+   * The number that was missing the night every form on the capability pages
+   * answered 403: a browser that is refused gets a page and tells nobody, and
+   * the agents never meet the check at all.
+   */
+  it('counts a form refused as somebody else\'s page, by reason and not by origin', async () => {
+    const project = await createProject(harness, 'refusals');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const before = await insights(harness.store);
+
+    const refused = async (headers: Record<string, string>) =>
+      harness.server.inject({
+        method: 'POST',
+        url: `/r/${readToken}/board/owner`,
+        payload: 'slug=work&owner=alex',
+        headers: { 'content-type': 'application/x-www-form-urlencoded', ...headers },
+      });
+
+    assert.equal((await refused({ origin: 'https://not-us.example' })).statusCode, 403);
+    assert.equal((await refused({ 'sec-fetch-site': 'cross-site' })).statusCode, 403);
+    await flushEvents();
+
+    const after = (await insights(harness.store)).behaviour.refusedForms;
+    assert.equal((after.origin ?? 0) - (before.behaviour.refusedForms.origin ?? 0), 1);
+    assert.equal(
+      (after['cross-site'] ?? 0) - (before.behaviour.refusedForms['cross-site'] ?? 0),
+      1,
+    );
+
+    // Three fixed words and nothing else. The origin is whatever the caller
+    // typed, and this collection is built to hold no caller-supplied text.
+    const recorded = await harness.store.events.find({ kind: 'refused' }).toArray();
+    assert.ok(recorded.length > 0);
+    for (const event of recorded) {
+      assert.ok(
+        ['origin', 'cross-site', 'same-site'].includes(String(event.detail)),
+        `${event.detail} is not one of the three reasons`,
+      );
+    }
+
+    // And our own page still is not one of them.
+    const ours = await refused({ origin: 'null', 'sec-fetch-site': 'same-origin' });
+    assert.notEqual(ours.statusCode, 403);
+  });
 });
