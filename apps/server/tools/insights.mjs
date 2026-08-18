@@ -169,6 +169,35 @@ row(
 // disappears when it is healthy leaves a reader unable to tell the healthy
 // answer from a number nobody collected.
 row('  boards never swept', unswept);
+
+// Does the accounting agree with the work? The cap is enforced from the
+// counter, so a counter that has drifted is a project quietly refusing work or
+// quietly allowing too much of it. The repair fixes overcounts on its own; this
+// says whether it is keeping up, and it is the only place an undercount shows
+// at all. Bounded to the busiest boards, because it is one count each.
+const CHECKED = 50;
+const busiestForAudit = await projects
+  .find({ 'counts.items': { $gt: 0 } }, { projection: { name: 1, counts: 1 } })
+  .sort({ 'counts.items': -1 })
+  .limit(CHECKED)
+  .toArray();
+const drifted = [];
+for (const project of busiestForAudit) {
+  const open = await items.countDocuments({
+    projectId: project._id,
+    status: { $nin: ['done', 'dropped'] },
+  });
+  if (open !== project.counts.items) {
+    drifted.push({ project, open, counter: project.counts.items });
+  }
+}
+row(`counters checked (top ${CHECKED})`, busiestForAudit.length);
+row('  of those, drifted', drifted.length);
+for (const entry of drifted.slice(0, 5)) {
+  console.log(
+    `    ${(entry.project.name ?? entry.project._id).slice(0, 24).padEnd(24)} counter ${entry.counter}, open ${entry.open}`,
+  );
+}
 row('median answer, hours', median === null ? 'n/a' : median.toFixed(1));
 if (hours.length > 0) console.log(`  ${'  over the last'.padEnd(28)} ${String(hours.length).padStart(7)} answers`);
 
