@@ -15,7 +15,8 @@ import type { Config } from '../config.js';
 import type { Store } from '../db.js';
 import { redactAddress, type Mailer } from '../email.js';
 import { record, recordView } from '../events.js';
-import { ago, chip, escapeHtml, layout, when } from '../html.js';
+import { ago, chip, escapeHtml, when } from '../html.js';
+import { page } from '../page.js';
 import { avatar, who } from '../identity.js';
 import { fromOurPage, originOf } from '../origin.js';
 import { isValidHandle, newId, normalizeSlug } from '../ids.js';
@@ -42,8 +43,7 @@ import {
   verifyClaimCode,
   renameAgent,
 } from '../service.js';
-import { checkCsrf, csrfField, readSession,
-  hasSessionCookie,} from '../session.js';
+import { checkCsrf, csrfField, readSession } from '../session.js';
 import {
   ESCALATION_STATUSES,
   type EscalationDoc,
@@ -175,9 +175,8 @@ async function readableBy(
  * would answer, for anybody willing to guess, the one question the whole
  * feature exists to refuse: whether this token means anything.
  */
-function noSuchProject(): string {
-  return layout(
-    { title: 'No such project' },
+function noSuchProject(request: FastifyRequest): string {
+  return page(request, { title: 'No such project' },
     `<h1>No such project</h1>
      <p>That link is wrong, or the project expired and was deleted.</p>
      <p>If you believe it is yours, <a href="/operator">sign in</a>: a project can be narrowed to
@@ -375,12 +374,10 @@ reads the same thing you do. The server is <a href="https://github.com/krystiang
 GitHub</a>, and it runs on Node and MongoDB if you would rather host it yourself.</p>
 `;
     return reply.type('text/html; charset=utf-8').send(
-      layout(
-        {
+      page(request, {
           title: 'Muster',
           description:
             'Shared operational memory for long-lived agents: who is on duty, who owns what, what rotted and what needs a human.',
-          signedIn: hasSessionCookie(request),
         },
         body,
       ),
@@ -557,11 +554,9 @@ also how an existing inbox gets imported:</p>
     return reply
       .type('text/html; charset=utf-8')
       .send(
-        layout(
-          {
+        page(request, {
             title: 'Muster docs',
             description: 'Objects, statuses, hygiene rules and interfaces.',
-            signedIn: hasSessionCookie(request),
           },
           body,
         ),
@@ -616,11 +611,9 @@ There is no authorization code flow, because there is no end user to ask for con
     return reply
       .type('text/html; charset=utf-8')
       .send(
-        layout(
-          {
+        page(request, {
             title: 'Keys and access',
             description: 'Tokens, roles and programmatic key provisioning.',
-            signedIn: hasSessionCookie(request),
           },
           body,
         ),
@@ -674,11 +667,9 @@ want us to run it under an agreement, and the free tier stays.</p>
     return reply
       .type('text/html; charset=utf-8')
       .send(
-        layout(
-          {
+        page(request, {
             title: 'Muster pricing',
             description: 'Free tier limits, retention and self-hosting.',
-            signedIn: hasSessionCookie(request),
           },
           body,
         ),
@@ -706,11 +697,9 @@ curl -sX POST ${escapeHtml(base)}/p -H 'content-type: application/json' -d '{"na
     return reply
       .type('text/html; charset=utf-8')
       .send(
-        layout(
-          {
+        page(request, {
             title: 'Create a Muster project',
             description: 'One field, no account.',
-            signedIn: hasSessionCookie(request),
           },
           body,
         ),
@@ -725,8 +714,7 @@ curl -sX POST ${escapeHtml(base)}/p -H 'content-type: application/json' -d '{"na
         .code(429)
         .type('text/html; charset=utf-8')
         .send(
-          layout(
-            { title: 'Slow down' },
+          page(request, { title: 'Slow down' },
             `<h1>Too many projects</h1><p>Try again in ${verdict.retryAfterSeconds} seconds.</p>`,
           ),
         );
@@ -763,7 +751,7 @@ address. Claiming is free and raises the limits:</p>
 `;
     return reply
       .type('text/html; charset=utf-8')
-      .send(layout({ title: 'Project created', signedIn: hasSessionCookie(request) }, body));
+      .send(page(request, { title: 'Project created' }, body));
   });
 
   // ----------------------------------------------------------- read view
@@ -784,14 +772,13 @@ address. Claiming is free and raises the limits:</p>
    * already locked out. The lookup that decides it is one indexed read, which
    * is the cheap half of what this protects.
    */
-  const tooFast = (reply: FastifyReply, retryAfterSeconds: number): false => {
+  const tooFast = (request: FastifyRequest, reply: FastifyReply, retryAfterSeconds: number): false => {
     void reply
       .code(429)
       .header('retry-after', String(retryAfterSeconds))
       .type('text/html; charset=utf-8')
       .send(
-        layout(
-          { title: 'Slow down' },
+        page(request, { title: 'Slow down' },
           `<h1>Too many reads at once</h1><p>This link is being read faster than the board is meant to be read. Try again in ${retryAfterSeconds} seconds.</p>`,
         ),
       );
@@ -809,13 +796,13 @@ address. Claiming is free and raises the limits:</p>
    */
   const limitSeeking = (request: FastifyRequest, reply: FastifyReply): boolean => {
     const verdict = limiter.check(`rlseek:${clientIp(request)}`, config.rateLimits.read);
-    return verdict.ok ? true : tooFast(reply, verdict.retryAfterSeconds);
+    return verdict.ok ? true : tooFast(request, reply, verdict.retryAfterSeconds);
   };
 
   const limitReads = (request: FastifyRequest, reply: FastifyReply): boolean => {
     const { readToken } = request.params as { readToken: string };
     const verdict = limiter.check(`rlread:${readToken}`, config.rateLimits.read);
-    return verdict.ok ? true : tooFast(reply, verdict.retryAfterSeconds);
+    return verdict.ok ? true : tooFast(request, reply, verdict.retryAfterSeconds);
   };
 
   app.get('/r/:readToken', { schema: { hide: true } }, async (request, reply) => {
@@ -823,10 +810,10 @@ address. Claiming is free and raises the limits:</p>
     const { readToken } = request.params as { readToken: string };
     const project = await store.projects.findOne({ readToken });
     if (!project) {
-      return reply.code(404).type('text/html; charset=utf-8').send(noSuchProject());
+      return reply.code(404).type('text/html; charset=utf-8').send(noSuchProject(request));
     }
     if (!(await readableBy(store, request, project))) {
-      return reply.code(404).type('text/html; charset=utf-8').send(noSuchProject());
+      return reply.code(404).type('text/html; charset=utf-8').send(noSuchProject(request));
     }
     if (!limitReads(request, reply)) return reply;
     // Counted once the page is actually going to be drawn. A stale bookmark and
@@ -1164,7 +1151,7 @@ ${
 `;
     return reply
       .type('text/html; charset=utf-8')
-      .send(layout({ title: `${project.name} on Muster`, nav: true }, body));
+      .send(page(request, { title: `${project.name} on Muster`, nav: true }, body));
   });
 
   app.get('/r/:readToken/board', { schema: { hide: true } }, async (request, reply) => {
@@ -1172,10 +1159,10 @@ ${
     const { readToken } = request.params as { readToken: string };
     const project = await store.projects.findOne({ readToken });
     if (!project) {
-      return reply.code(404).type('text/html; charset=utf-8').send(noSuchProject());
+      return reply.code(404).type('text/html; charset=utf-8').send(noSuchProject(request));
     }
     if (!(await readableBy(store, request, project))) {
-      return reply.code(404).type('text/html; charset=utf-8').send(noSuchProject());
+      return reply.code(404).type('text/html; charset=utf-8').send(noSuchProject(request));
     }
     if (!limitReads(request, reply)) return reply;
     // Counted once the page is actually going to be drawn. A stale bookmark and
@@ -1408,12 +1395,10 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     return reply
       .type('text/html; charset=utf-8')
       .send(
-        layout(
-          {
+        page(request, {
             title: `${project.name} board`,
             description: project.description,
             wide: true,
-            signedIn: hasSessionCookie(request),
             // Every minute, except while a sheet is open. A reload throws away
             // whatever is half typed in it, and the note somebody was writing
             // is the one thing on this page that nothing else can recover.
@@ -1468,8 +1453,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
       .code(403)
       .type('text/html; charset=utf-8')
       .send(
-        layout(
-          { title: 'Not from this page' },
+        page(request, { title: 'Not from this page' },
           `<h1>That form did not come from here</h1>
            <p>The request arrived from ${escapeHtml(verdict.came)}, which is not this service.
            Nothing was changed. Open the board again and retry.</p>`,
@@ -1488,8 +1472,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
       .header('retry-after', String(verdict.retryAfterSeconds))
       .type('text/html; charset=utf-8')
       .send(
-        layout(
-          { title: 'Slow down' },
+        page(request, { title: 'Slow down' },
           `<h1>Too many changes at once</h1><p>Try again in ${verdict.retryAfterSeconds} seconds.</p>`,
         ),
       );
@@ -1961,8 +1944,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     const session = await readSession(store, request);
     if (!session) {
       return reply.type('text/html; charset=utf-8').send(
-        layout(
-          { title: 'Sign in first' },
+        page(request, { title: 'Sign in first' },
           `<h1>Sign in first</h1>
            <p>Asking for a board means saying which address should own it, and this one is not
            signed in. <a href="/operator">Sign in</a> with a six digit code and come back to this
@@ -1981,8 +1963,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
         .code(failure?.statusCode ?? 500)
         .type('text/html; charset=utf-8')
         .send(
-          layout(
-            { title: 'That did not go through' },
+          page(request, { title: 'That did not go through' },
             `<h1>That did not go through</h1>
              <p>${escapeHtml(failure?.message ?? 'Something went wrong asking for this board.')}</p>
              <p><a href="/r/${escapeHtml(readToken)}">Back to the project</a></p>`,
@@ -2057,16 +2038,14 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
         .header('retry-after', String(floodedFor))
         .type('text/html; charset=utf-8')
         .send(
-          layout(
-            { title: 'Slow down' },
+          page(request, { title: 'Slow down' },
             `<h1>Too many codes for this project</h1>
              <p>Use the code that was already sent, or try again in ${floodedFor} seconds.</p>`,
           ),
         );
     }
     return reply.type('text/html; charset=utf-8').send(
-      layout(
-        { title: ok ? 'Check your email' : 'Claim failed' },
+      page(request, { title: ok ? 'Check your email' : 'Claim failed' },
         ok
           ? `<h1>Check your email</h1>
              <p>A six digit code is on its way to ${escapeHtml(form.email ?? '')}. It is good for
@@ -2118,8 +2097,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
         .header('retry-after', String(verdict.retryAfterSeconds))
         .type('text/html; charset=utf-8')
         .send(
-          layout(
-            { title: 'Slow down' },
+          page(request, { title: 'Slow down' },
             `<h1>Too many tries</h1><p>Try again in ${verdict.retryAfterSeconds} seconds.</p>`,
           ),
         );
@@ -2143,8 +2121,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
         .code(error instanceof ServiceError ? error.statusCode : 500)
         .type('text/html; charset=utf-8')
         .send(
-          layout(
-            { title: 'That code did not work' },
+          page(request, { title: 'That code did not work' },
             `<h1>That code did not work</h1><p>${escapeHtml(message)}</p>
              <p><a href="/r/${escapeHtml(readToken)}">Back to the project</a> to start again.</p>`,
           ),
@@ -2152,8 +2129,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     }
     record(store, 'claim', { door: 'browser', projectId: project._id });
     return reply.type('text/html; charset=utf-8').send(
-      layout(
-        { title: 'Claimed' },
+      page(request, { title: 'Claimed' },
         `<h1>This project is yours</h1>
          <p>It no longer expires, the limits are raised, and it now appears in
          <a href="/operator">your projects</a> alongside anything else you own. Sign in there with

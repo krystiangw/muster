@@ -1,4 +1,5 @@
 import type { FastifyRequest } from 'fastify';
+import { page } from './page.js';
 import formbody from '@fastify/formbody';
 import swagger from '@fastify/swagger';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
@@ -293,8 +294,7 @@ export async function buildApp(
         .code(404)
         .type('text/html; charset=utf-8')
         .send(
-          layout(
-            { title: 'Not found' },
+          page(request, { title: 'Not found' },
             `<h1>Not found</h1><p>Nothing lives at <code>${request.url.replace(/[<>&"]/g, '')}</code>.
              The map is at <a href="/llms.txt">/llms.txt</a> and the protocol at
              <a href="/skill.md">/skill.md</a>.</p>`,

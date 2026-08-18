@@ -969,3 +969,18 @@ in, and twice that only moved the number at which the permalink silently stops
 opening anything. It is a lookup by slug now, and the history and the agent
 descriptions the sheet shows are fetched for it whether or not it made the
 slice.
+
+## The option every new page forgot, 2026-08-18
+
+The navigation asks one question: is somebody signed in. It was answered by a
+`signedIn` option on the layout, so it was right on the pages that remembered to
+pass it. It was reported once from a browser, fixed on the five pages that
+existed, and came back on the pages written after: a read link told its signed in
+reader to sign in on the same screen that addressed them by their email address,
+and the 404 and every rate limit notice did the same.
+
+**An option with a default is a question that will eventually be answered
+wrong.** Rendering goes through one helper that takes the request now, so the
+answer comes off the same place every time and there is nothing left to forget.
+The test that lists the pages is a check on the helper rather than the fix for
+the pages, which is the difference between the two attempts.

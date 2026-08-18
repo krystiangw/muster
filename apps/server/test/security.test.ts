@@ -494,15 +494,36 @@ describe('starting up against a database that has already run', () => {
     // Reported from a browser: signed in, click through to another page, and
     // the nav offers to sign you in. Only the operator page passed the flag, so
     // every other page told the same person they were a stranger.
+    // The list is the reason it came back: passing the flag was one more thing
+    // a page could forget, and the pages added after the first fix forgot it.
+    // A read link told its signed in reader to sign in on the same screen that
+    // addressed them by their email. Rendering goes through one helper that
+    // takes the request now, so this list is a check rather than the fix.
     const session = await signIn(harness, 'nav@example.com');
-    for (const url of ['/', '/docs', '/pricing', '/signup', '/docs/keys']) {
-      const anonymous = await harness.server.inject({ method: 'GET', url });
+    const project = await createProject(harness, 'nav project');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    for (const url of [
+      '/',
+      '/docs',
+      '/pricing',
+      '/signup',
+      '/docs/keys',
+      `/r/${readToken}`,
+      `/r/${readToken}/board`,
+      '/nothing-lives-here',
+    ]) {
+      // As a browser asks, which is what decides that the 404 is a page at all.
+      const anonymous = await harness.server.inject({
+        method: 'GET',
+        url,
+        headers: { accept: 'text/html' },
+      });
       assert.match(anonymous.body, /<a href="\/operator">sign in<\/a>/, `${url} for a stranger`);
 
       const known = await harness.server.inject({
         method: 'GET',
         url,
-        headers: { cookie: session.cookie },
+        headers: { accept: 'text/html', cookie: session.cookie },
       });
       assert.match(
         known.body,

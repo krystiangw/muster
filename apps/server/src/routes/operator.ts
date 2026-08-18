@@ -2,7 +2,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
 import type { Mailer } from '../email.js';
-import { chip, escapeHtml, layout, when } from '../html.js';
+import { chip, escapeHtml, when } from '../html.js';
+import { page } from '../page.js';
 import { who } from '../identity.js';
 import { fromOurPage, originOf } from '../origin.js';
 import { hashToken, newId, newOtpCode } from '../ids.js';
@@ -18,7 +19,6 @@ import {
   checkCsrf,
   csrfField,
   endSession,
-  hasSessionCookie,
   readSession,
   startSession,
   type OperatorSession,
@@ -101,7 +101,7 @@ export function registerOperator(app: FastifyInstance, deps: OperatorDeps): void
     reply
       .code(code)
       .type('text/html; charset=utf-8')
-      .send(layout({ title, signedIn: hasSessionCookie(request) }, body));
+      .send(page(request, { title }, body));
 
   /** Every action below belongs to whoever is signed in, and to nobody else. */
   async function requireSession(
