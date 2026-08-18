@@ -228,6 +228,61 @@ describe('one read, two doors', () => {
     );
   });
 
+  it('tells an agent over MCP what it tells one over HTTP about its own name', async () => {
+    // The warnings were composed in the HTTP route, so the door this product
+    // sells to model clients said nothing: not that the handle was
+    // unregistered, not that the write was outside a declared scope.
+    const project = await createProject(harness);
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/agents`,
+      headers: authed(project),
+      payload: { handle: 'errors-loop', scope: ['errors:'] },
+    });
+
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const answer = await harness.server.inject({
+        method: 'POST',
+        url: '/mcp',
+        headers: { authorization: `Bearer ${project.token}` },
+        payload: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } },
+      });
+      return answer.json().result.structuredContent as Record<string, unknown>;
+    };
+
+    const typo = await call('upsert_item', {
+      slug: 'errors:one',
+      title: 'one',
+      actor: 'errors_loop',
+    });
+    assert.match((typo.warnings as string[]).join(' '), /"errors-loop" is/);
+
+    const outside = await call('upsert_item', {
+      slug: 'trades:one',
+      title: 'one',
+      actor: 'errors-loop',
+    });
+    assert.match((outside.warnings as string[]).join(' '), /outside your declared scope/);
+
+    const noted = await call('append_note', {
+      slug: 'errors:one',
+      message: 'looked',
+      actor: 'errors_loop',
+    });
+    assert.match((noted.warnings as string[]).join(' '), /"errors-loop" is/);
+
+    const asked = await call('next_item', { agent: 'errors_loop' });
+    assert.match((asked.warnings as string[]).join(' '), /"errors-loop" is/);
+
+    // And a registered agent writing inside its scope hears nothing.
+    const quiet = await call('upsert_item', {
+      slug: 'errors:two',
+      title: 'two',
+      actor: 'errors-loop',
+    });
+    assert.deepEqual(quiet.warnings ?? [], []);
+  });
+
   it('windows by since in every order, not only in the change feed', async () => {
     // Reported by an agent on another board: "since is silently inert outside
     // order=recent". It was not. The cutoff used was older than every item on

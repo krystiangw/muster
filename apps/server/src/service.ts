@@ -809,6 +809,34 @@ export async function renameAgent(
 }
 
 /**
+ * Everything this write is worth telling its author, in one place.
+ *
+ * The name and the scope are the same kind of remark: the write went through,
+ * and something about who made it will cost somebody time later. They were
+ * composed in the HTTP route, which meant an agent working over MCP was told
+ * neither, on a service whose whole point is that both doors are the same door.
+ */
+export async function writeWarnings(
+  store: Store,
+  project: Pick<ProjectDoc, '_id' | 'rules'>,
+  actor: string,
+  item?: Pick<ItemDoc, 'slug' | 'labels' | 'owner'>,
+): Promise<string[]> {
+  if (!project.rules.scopeWarnings) return [];
+  const agent = actor ? await store.agents.findOne({ projectId: project._id, handle: actor }) : null;
+  if (!agent) {
+    const named = await nameWarning(store, project._id, actor);
+    return named ? [named] : [];
+  }
+  if (item && agent.scope.length > 0 && !itemInScope(agent.scope, item)) {
+    return [
+      `"${item.slug}" is outside your declared scope (${agent.scope.join(', ')}). The write went through; this is a boundary reminder, not a block.`,
+    ];
+  }
+  return [];
+}
+
+/**
  * What is wrong with the name on this write, if anything.
  *
  * A handle is free text on purpose: an agent writes before it registers, and

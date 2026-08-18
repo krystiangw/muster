@@ -24,6 +24,7 @@ import {
   registerAgent,
   shareProject,
   upsertItem,
+  writeWarnings,
 } from '../service.js';
 import {
   ESCALATION_PRIORITIES,
@@ -602,7 +603,15 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         return {
           item: itemJson(result.item),
           created: result.created,
-          warnings: result.warnings,
+          // The same remarks the other door makes. This one used to carry only
+          // what the write itself noticed, so an agent working over MCP was
+          // never told its handle was unregistered or its write outside its
+          // own scope, on a service whose whole claim is that both doors are
+          // the same door.
+          warnings: [
+            ...result.warnings,
+            ...(await writeWarnings(store, project, actor, result.item)),
+          ],
         };
       }
       case 'claim_item': {
@@ -623,14 +632,18 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
       }
       case 'append_note': {
         const item = await appendNote(store, project, str(args.slug), actor, str(args.message));
-        return { item: itemJson(item) };
+        const warnings = await writeWarnings(store, project, actor);
+        return { item: itemJson(item), ...(warnings.length > 0 ? { warnings } : {}) };
       }
       case 'next_item': {
         void maybeSweep(store, project).catch(() => undefined);
-        const result = await nextItem(store, project, str(args.agent));
+        const asked = str(args.agent);
+        const result = await nextItem(store, project, asked);
+        const warnings = asked ? await writeWarnings(store, project, asked) : [];
         return {
           item: result.item ? itemJson(result.item, true) : null,
           reason: result.reason,
+          ...(warnings.length > 0 ? { warnings } : {}),
         };
       }
       case 'list_items': {

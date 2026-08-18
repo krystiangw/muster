@@ -40,9 +40,8 @@ import {
   updateProject,
   getItem,
   heartbeatClaim,
-  itemInScope,
-  nameWarning,
   renameAgent,
+  writeWarnings,
   listApiKeys,
   escalationCursor,
   listEscalations,
@@ -588,22 +587,15 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         });
         if (result.created) recordFirstWrite(store, project._id, 'http');
 
-        const warnings = [...result.warnings];
-        if (project.rules.scopeWarnings) {
-          const agent = await store.agents.findOne({ projectId: project._id, handle: actor });
-          if (!agent) {
-            // An unregistered handle is accepted on purpose, because refusing a
-            // write over bookkeeping would lose the write, but nothing said so,
-            // and a typo in a handle produced a second silent identity on the
-            // board that `/next` then never offered work to.
-            const named = await nameWarning(store, project._id, actor);
-            if (named) warnings.push(named);
-          } else if (agent.scope.length > 0 && !itemInScope(agent.scope, result.item)) {
-            warnings.push(
-              `"${result.item.slug}" is outside your declared scope (${agent.scope.join(', ')}). The write went through; this is a boundary reminder, not a block.`,
-            );
-          }
-        }
+        // An unregistered handle is accepted on purpose, because refusing a
+        // write over bookkeeping would lose the write, but nothing said so, and
+        // a typo in a handle produced a second silent identity on the board
+        // that `/next` then never offered work to. Composed in the service, so
+        // the other door says the same thing.
+        const warnings = [
+          ...result.warnings,
+          ...(await writeWarnings(store, project, actor, result.item)),
+        ];
 
         void maybeSweep(store, project).catch(() => undefined);
         return reply
@@ -834,10 +826,8 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         // The same sentence the item door says, because a handle first appears
         // on whichever door the agent happened to use, and one door saying it
         // is one door away from every other door not saying it.
-        const named = project.rules.scopeWarnings
-          ? await nameWarning(store, project._id, actor)
-          : null;
-        return { item: itemJson(item, true), ...(named ? { warnings: [named] } : {}) };
+        const named = await writeWarnings(store, project, actor);
+        return { item: itemJson(item, true), ...(named.length > 0 ? { warnings: named } : {}) };
       },
     );
 
@@ -1024,14 +1014,11 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         // The earliest moment a mistyped handle can be caught: an agent asking
         // for work under a name nobody registered is offered everything, since
         // there is no scope to narrow by, and it never finds out why.
-        const named =
-          project.rules.scopeWarnings && agent
-            ? await nameWarning(store, project._id, agent)
-            : null;
+        const named = agent ? await writeWarnings(store, project, agent) : [];
         return {
           item: result.item ? itemJson(result.item, true) : null,
           reason: result.reason,
-          ...(named ? { warnings: [named] } : {}),
+          ...(named.length > 0 ? { warnings: named } : {}),
         };
       },
     );
