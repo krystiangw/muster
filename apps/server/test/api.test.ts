@@ -1912,3 +1912,27 @@ describe('a question filed on a board nobody owns', () => {
     assert.doesNotMatch(owned.json().hint, /Nobody has claimed/);
   });
 });
+
+describe('a refusal that clears by waiting', () => {
+  it('says which of the limits it was, since six of them answer the same way', async () => {
+    // An agent told only "too many requests" cannot pace itself: the read and
+    // write budgets are counted apart and published apart, and a developer on
+    // a shared address whose signups are capped would otherwise conclude the
+    // whole service is refusing them.
+    const isolated = await startHarness({ LIMIT_CREATE_PROJECTS_PER_HOUR: '1' });
+    try {
+      await isolated.server.inject({ method: 'POST', url: '/p', payload: { name: 'first' } });
+      const refused = await isolated.server.inject({
+        method: 'POST',
+        url: '/p',
+        payload: { name: 'second' },
+      });
+      assert.equal(refused.statusCode, 429);
+      assert.equal(refused.json().limit, 'new projects from this address');
+      assert.match(refused.json().message, /new projects from this address/);
+      assert.ok(Number(refused.headers['retry-after']) > 0);
+    } finally {
+      await isolated.stop();
+    }
+  });
+});

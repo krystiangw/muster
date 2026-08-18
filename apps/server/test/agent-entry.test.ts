@@ -211,6 +211,31 @@ describe('A. discovery', () => {
     }
   });
 
+  it('answers the handshake with a version it speaks, not with the one it was sent', async () => {
+    // It used to echo, so a client asking for 1999-01-01 was told yes: we
+    // claimed every revision that exists and several that do not, and a client
+    // relying on the one it named would find out by misbehaving.
+    const ask = async (protocolVersion: string) =>
+      (
+        await harness.server.inject({
+          method: 'POST',
+          url: '/mcp',
+          payload: {
+            jsonrpc: '2.0',
+            id: 1,
+            method: 'initialize',
+            params: { protocolVersion, capabilities: {} },
+          },
+        })
+      ).json().result.protocolVersion as string;
+
+    assert.equal(await ask('2025-06-18'), '2025-06-18', 'one we speak is answered as asked');
+    assert.equal(await ask('2024-11-05'), '2024-11-05', 'including an older one');
+    const invented = await ask('1999-01-01');
+    assert.notEqual(invented, '1999-01-01');
+    assert.equal(invented, '2025-06-18', 'and anything else gets the newest we have');
+  });
+
   it('says how a token reaches an MCP client, which cannot mint one mid-session', async () => {
     // create_project needs no auth and hands back a token, but a client sends
     // its headers when the session opens, so the session that made the token

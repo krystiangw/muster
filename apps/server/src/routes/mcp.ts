@@ -46,7 +46,21 @@ import {
  * API.
  */
 
-const DEFAULT_PROTOCOL_VERSION = '2025-06-18';
+/**
+ * The revisions of the protocol this speaks, newest first.
+ *
+ * The handshake used to answer with whatever the client asked for, which meant
+ * claiming to speak every revision that exists and several that do not: a
+ * client sending `1999-01-01` was told yes. A client that then relies on a
+ * behaviour of the revision it named finds out by misbehaving rather than by
+ * being told, which is the failure the negotiation exists to prevent.
+ *
+ * The rule the spec gives is the one implemented here: answer with the version
+ * the client asked for when it is one we speak, and otherwise with the newest
+ * we do, leaving the client to decide whether it can live with that.
+ */
+const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'] as const;
+const DEFAULT_PROTOCOL_VERSION = PROTOCOL_VERSIONS[0];
 
 /** How many JSON-RPC requests one batch may carry. */
 const MAX_BATCH = 25;
@@ -636,7 +650,9 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
             jsonrpc: '2.0',
             id,
             result: {
-              protocolVersion: requested || DEFAULT_PROTOCOL_VERSION,
+              protocolVersion: (PROTOCOL_VERSIONS as readonly string[]).includes(requested)
+                ? requested
+                : DEFAULT_PROTOCOL_VERSION,
               capabilities: { tools: { listChanged: false } },
               serverInfo: { name: 'muster', version: '0.1.0' },
               instructions:
@@ -848,7 +864,10 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
       throw new ServiceError(
         429,
         'rate_limited',
-        `Too many calls. Retry in ${verdict.retryAfterSeconds}s. Published limits live at ${config.baseUrl}/.well-known/agent-access.json.`,
+        // Which of the two token buckets, because they are counted apart and
+        // published apart: an agent told to slow down on writes has no reason
+        // to stop reading.
+        `Too many ${kind === 'w' ? 'writes' : 'reads'} for this token. Retry in ${verdict.retryAfterSeconds}s. Published limits live at ${config.baseUrl}/.well-known/agent-access.json.`,
       );
     }
 

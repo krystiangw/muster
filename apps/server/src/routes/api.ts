@@ -200,7 +200,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         `create:${clientIp(request)}`,
         config.rateLimits.createProject,
       );
-      if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds);
+      if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds, 'new projects from this address');
 
       const body = (request.body ?? {}) as {
         name?: string;
@@ -328,7 +328,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         });
       }
       const verdict = limiter.check(`feedback:${clientIp(request)}`, config.rateLimits.feedback);
-      if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds);
+      if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds, 'reports from this address');
 
       const project = await store.projects.findOne({ _id: config.feedbackProject });
       if (!project) {
@@ -469,7 +469,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       const rule =
         request.method === 'GET' ? config.rateLimits.read : config.rateLimits.write;
       const verdict = limiter.check(`tok:${hashToken(token).slice(0, 16)}:${request.method === 'GET' ? 'r' : 'w'}`, rule);
-      if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds);
+      if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds, 'requests for this token');
 
       const ctx = await authenticate(store, token);
       const params = request.params as { project?: string };
@@ -1715,7 +1715,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         const { project } = requireAdmin(request);
         const body = request.body as { email: string; note?: string; agent?: string };
         const verdict = limiter.check(`share:${project._id}`, config.rateLimits.claimEmail);
-        if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds);
+        if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds, 'offers of this board');
         // Two buckets, because they protect different people. The project's
         // caps how often one board may be offered; this one caps how much mail
         // one address receives, and a project token costs nothing, so without
@@ -1724,7 +1724,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           `offer:${body.email.trim().toLowerCase()}`,
           config.rateLimits.claimEmail,
         );
-        if (!toThem.ok) return tooMany(reply, toThem.retryAfterSeconds);
+        if (!toThem.ok) return tooMany(reply, toThem.retryAfterSeconds, 'messages to this address');
 
         const { alreadyOwned } = await shareProject(store, project, {
           email: body.email,
@@ -1790,7 +1790,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         const { project } = requireAdmin(request);
         const { email } = request.body as { email: string };
         const verdict = limiter.check(`claim:${project._id}`, config.rateLimits.claimEmail);
-        if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds);
+        if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds, 'claim codes for this board');
 
         const started = await startEmailClaim(store, project, email, config, mailer);
         if (started.alreadyClaimedBy) {
@@ -1834,13 +1834,23 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
   });
 }
 
-function tooMany(reply: FastifyReply, retryAfter: number): FastifyReply {
+/**
+ * The refusal that clears by waiting, and which of the buckets said so.
+ *
+ * "Too many requests" is true of six different limits here, and a caller that
+ * cannot tell which one it met cannot pace itself: an agent told to slow down
+ * on writes has no reason to stop reading, and a developer on a shared address
+ * whose signups are capped will happily conclude the whole service is refusing
+ * them. The name is the same one published in agent-access.json.
+ */
+function tooMany(reply: FastifyReply, retryAfter: number, which: string): FastifyReply {
   return reply
     .code(429)
     .header('retry-after', String(retryAfter))
     .send({
       error: 'rate_limited',
-      message: `Too many requests. Retry in ${retryAfter}s. Published limits live at /.well-known/agent-access.json.`,
+      limit: which,
+      message: `Too many requests: ${which}. Retry in ${retryAfter}s. Published limits live at /.well-known/agent-access.json.`,
       retry_after: retryAfter,
     });
 }
