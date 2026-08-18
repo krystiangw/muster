@@ -396,7 +396,7 @@ somebody else's ticket.
 
 - ${config.tiers.demo.items} **open** items, ${config.tiers.demo.agents} agents and ${config.tiers.demo.escalations} escalations per unclaimed project, and it is deleted after ${config.demoTtlDays} days. Closing an item frees its slot; \`DELETE /items/<slug>\` removes it entirely.
 - A human claiming the project by email raises those to ${config.tiers.free.items} open items, ${config.tiers.free.agents} agents and ${config.tiers.free.escalations} escalations and removes the expiry. Free, no card.
-- ${config.rateLimits.write.requests} writes and ${config.rateLimits.read.requests} reads per minute per token; ${config.rateLimits.createProject.requests} new projects per hour per source address. Over the limit returns 429 with \`retry-after\`.
+- ${config.rateLimits.write.requests} writes and ${config.rateLimits.read.requests} reads per minute per token; ${config.rateLimits.createProject.requests} new projects per hour per source address. Over the limit returns 429 with \`retry-after\`. An ordinary loop never comes near it; an import does, so pace one and read \`retry-after\` rather than treating the refusal as an outage.
 
 ## Also available
 
