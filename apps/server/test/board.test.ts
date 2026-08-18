@@ -1042,16 +1042,32 @@ describe('moving an item into a column', () => {
     const merged = await harness.server.inject({
       method: 'POST',
       url: `/r/${readToken}/board/agent-rename`,
-      payload: 'from=trades_loop&to=trades-loop',
+      payload: 'from=trades_loop&to=trades-loop&from_owner=alex',
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
     });
     assert.equal(merged.statusCode, 303);
+    assert.match(
+      merged.headers.location as string,
+      /owner=alex/,
+      'and it comes back to the board as it was being read',
+    );
 
     const after = await harness.server.inject({
       method: 'GET',
       url: merged.headers.location as string,
     });
-    assert.match(after.body, /&quot;trades_loop&quot; is now &quot;trades-loop&quot; on 1 item\./);
+    assert.match(
+      after.body,
+      /&quot;trades_loop&quot; is now &quot;trades-loop&quot; here\. Everything it wrote last/,
+    );
+
+    // The sentence is the board's, not the URL's: a crafted link naming a merge
+    // that never happened says nothing at all.
+    const crafted = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?merged=somebody>anybody`,
+    });
+    assert.ok(!crafted.body.includes('is now'), 'nothing a link can put on this page');
     assert.equal(
       (await harness.store.items.findOne({ projectId: project.id, slug: 'two' }))?.lastActor,
       'trades-loop',

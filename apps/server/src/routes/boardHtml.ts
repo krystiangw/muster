@@ -762,7 +762,7 @@ export function renderBoardFilters(
  * into the settings, because it rewrites whose work an item is and that is not
  * a control anybody should meet by accident.
  */
-function renderAgentMerge(facets: BoardFacets, action: string): string {
+function renderAgentMerge(facets: BoardFacets, action: string, keep: BoardFilter): string {
   if (facets.agents.length < 2) return '';
   const options = (selected: string) =>
     facets.agents
@@ -778,6 +778,7 @@ function renderAgentMerge(facets: BoardFacets, action: string): string {
 the second. The timelines keep what they said, because an agent calling itself that is what
 happened; the old name is kept on the agent so an old entry can still be read.</p>
 <form class="row" method="post" action="${escapeHtml(action)}/agent-rename">
+  ${keptFilter(keep)}
   <label for="merge-from">This name
     <select id="merge-from" name="from">${options('')}</select>
   </label>
@@ -806,7 +807,7 @@ export function renderBoardSettings(
     .join('\n')}
 <details class="layout">
 <summary>Layout: columns, swimlanes and presets</summary>
-${facets ? renderAgentMerge(facets, action) : ''}
+${facets ? renderAgentMerge(facets, action, view.filter) : ''}
 ${
     // Said here rather than above the board. It answers one question, asked
     // once by whoever writes the layout: why is my column missing from the

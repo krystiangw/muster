@@ -1298,17 +1298,23 @@ ${
               ? `Nothing was written to "${touched.slug}": the note was empty.`
               : `"${touched.slug}" is ${touched.owner ? `owned by ${touched.owner}` : 'unassigned'}.`
         : undefined;
-    // Said from the redirect rather than looked up: the two names are in it,
-    // and both were server written a moment ago by the route that did the work.
-    const mergedNotice = (() => {
+    // The URL names which merge to confirm; the board decides whether it
+    // happened. A parameter carrying the sentence itself is a link somebody can
+    // send that puts words on this page, and a count nothing stored can be any
+    // number they like: the alias on the surviving agent is the record, so that
+    // is what is read.
+    const mergedNotice = await (async () => {
       const said = one(query.merged);
       if (!said) return undefined;
       const [from, to] = said.split('>');
       if (!from || !to || !isValidHandle(from) || !isValidHandle(to)) return undefined;
-      const moved = Number.parseInt(one(query.what) ?? '', 10);
-      return `"${from}" is now "${to}"${
-        Number.isInteger(moved) ? ` on ${moved} item${moved === 1 ? '' : 's'}` : ''
-      }. The timelines still say what they said.`;
+      const survivor = await store.agents.findOne({
+        projectId: project._id,
+        handle: to,
+        aliases: from,
+      });
+      if (!survivor) return undefined;
+      return `"${from}" is now "${to}" here. Everything it wrote last is filed under the new name, and the timelines still say what they said.`;
     })();
 
     const notice = mergedNotice ?? (answeredHere
@@ -1597,7 +1603,6 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     const moved = await renameAgent(store, project, one(form.from) ?? '', one(form.to) ?? '');
     const params = new URLSearchParams({
       merged: `${moved.from}>${moved.to}`,
-      what: String(moved.items),
       ...keptParams(form),
     });
     return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);

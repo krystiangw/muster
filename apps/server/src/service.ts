@@ -797,6 +797,25 @@ export async function renameAgent(
       { _id: leaving._id },
       { $set: { handle: to, aliases, lastSeenAt: now } },
     );
+  } else {
+    // Neither name was ever registered, which is the case this exists for:
+    // work filed under two spellings nobody declared. The surviving one gets
+    // the registration, because a consolidated handle that is still only a
+    // string on an item is a handle the next writer can misspell again, and
+    // because the alias has to live somewhere for an old timeline entry to be
+    // readable at all.
+    await store.agents.insertOne({
+      _id: newId('a'),
+      projectId: project._id,
+      handle: to,
+      scope: [],
+      description: '',
+      registeredAt: now,
+      lastSeenAt: now,
+      aliases,
+      meta: {},
+    } as never);
+    await store.projects.updateOne({ _id: project._id }, { $inc: { 'counts.agents': 1 } });
   }
 
   return {
