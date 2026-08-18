@@ -673,25 +673,34 @@ address. Claiming is free and raises the limits:</p>
     void maybeSweep(store, project).catch(() => undefined);
 
     const ITEMS_SHOWN = 200;
-    const [items, escalations, agents, itemsHeld] = await Promise.all([
+    const [items, open, answered, agents, itemsHeld] = await Promise.all([
       store.items
         .find({ projectId: project._id }, { projection: { timeline: { $slice: -3 } } })
         .sort({ status: 1, priority: -1, updatedAt: -1 })
         .limit(ITEMS_SHOWN)
         .toArray(),
-      store.escalations.find({ projectId: project._id }).sort({ createdAt: -1 }).limit(50).toArray(),
+      // Open and answered asked for separately, and that is the whole point:
+      // one query for the newest fifty of both kinds loses an open question as
+      // soon as fifty newer ones have been answered, which is the exact bug the
+      // audit found in the MCP inbox and fixed there. The page kept it.
+      store.escalations
+        .find({ projectId: project._id, status: 'open' })
+        .sort({ priorityRank: -1, createdAt: 1 })
+        .limit(50)
+        .toArray(),
+      store.escalations
+        .find({ projectId: project._id, status: { $ne: 'open' } })
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .toArray(),
       store.agents.find({ projectId: project._id }).sort({ lastSeenAt: -1 }).limit(50).toArray(),
       store.items.countDocuments({ projectId: project._id }),
     ]);
 
-    // Urgent first, then oldest, which is what /operator has always done. This
-    // page used to show newest first: somebody with time for one question
-    // answered the least important one, and the two pages of the same product
-    // disagreed about what mattered.
-    const open = escalations
-      .filter((doc) => doc.status === 'open')
-      .sort((a, b) => b.priorityRank - a.priorityRank || a.createdAt.getTime() - b.createdAt.getTime());
-    const answered = escalations.filter((doc) => doc.status !== 'open');
+    // Urgent first, then oldest, which is what /operator has always done and is
+    // now what the query asks for. This page used to show newest first:
+    // somebody with time for one question answered the least important one, and
+    // the two pages of the same product disagreed about what mattered.
     const answeredId = one((request.query as { answered?: string }).answered);
     const justAnswered = answered.find((doc) => doc._id === answeredId) ?? null;
     // Who is reading, when they happen to be signed in. Only the unclaimed
@@ -762,7 +771,7 @@ ${
           )} picks it up on its next iteration, and this page will say when it did.</div>`
         : ''
     }
-<p>${items.length} item(s), ${agents.length} agent(s), ${open.length} question(s)
+<p>${itemsHeld} item(s), ${project.counts.agents} agent(s), ${project.counts.escalations} question(s)
 waiting for you.${project.expiresAt ? ` This project is unclaimed and will be deleted ${when(project.expiresAt)}.` : ''}</p>
 
 ${

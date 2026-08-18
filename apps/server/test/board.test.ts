@@ -1469,5 +1469,40 @@ describe('a layout that would trap finished work', () => {
     assert.equal(page.statusCode, 200);
     assert.match(page.body, /Showing 200 of 205/);
     assert.match(page.body, new RegExp(`/r/${readToken}/board`));
+    // And the line above the table says the same number, rather than reporting
+    // the size of the page as the size of the board.
+    assert.match(page.body, /205 item\(s\)/);
+  });
+
+  it('finds an open question behind a wall of answered ones', async () => {
+    // One query for the newest fifty of both kinds loses an open question as
+    // soon as fifty newer ones have been answered. The audit found exactly this
+    // in the MCP inbox and fixed it there; the page a person actually opens
+    // kept it, which is the door that matters most for a question.
+    const { createEscalation, answerEscalation } = await import('../src/service.js');
+    const project = await createProject(harness, 'a busy queue');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const doc = (await harness.store.projects.findOne({ _id: project.id }))!;
+
+    const old = await createEscalation(
+      harness.store,
+      doc,
+      { agent: 'a', question: 'the one nobody can see?' },
+      'http',
+    );
+    for (let index = 0; index < 60; index += 1) {
+      const later = await createEscalation(
+        harness.store,
+        doc,
+        { agent: 'a', question: `noise ${index}` },
+        'http',
+      );
+      await answerEscalation(harness.store, doc._id, later._id, 'resolved', 'done', 'http');
+    }
+
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}` });
+    assert.equal(page.statusCode, 200);
+    assert.match(page.body, /the one nobody can see\?/);
+    assert.match(page.body, new RegExp(`/r/${readToken}/escalations/${old._id}`));
   });
 });
