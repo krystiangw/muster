@@ -34,6 +34,7 @@ import {
 } from '../serialize.js';
 import {
   ServiceError,
+  looksLikeEmail,
   acknowledgeEscalation,
   answerEscalation,
   authenticate,
@@ -208,6 +209,26 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         owner_note?: string;
         agent?: string;
       };
+
+      // Both questions about the address are asked before anything is written.
+      // Asked afterwards, a refusal cost the caller the project it had just
+      // made and the token it was shown once: it cannot use what it created
+      // and its retry makes another one.
+      const offered = body.owner_email?.trim();
+      if (offered && !looksLikeEmail(offered)) {
+        return reply
+          .code(400)
+          .send({ error: 'bad_email', message: 'That does not look like an email address.' });
+      }
+      // Exhausted differs from malformed on purpose. A malformed address is the
+      // caller's mistake and nothing should exist because of it; a full bucket
+      // is somebody else's mail volume, and refusing the project over it would
+      // punish the wrong call. The board is created and the message is not
+      // sent, which the answer says.
+      const mayWrite =
+        offered === undefined || offered === ''
+          ? null
+          : limiter.check(`offer:${offered.toLowerCase()}`, config.rateLimits.claimEmail);
       const { project, adminToken } = await createProject(store, config, body, 'http');
       // Named before the token is even used once. The offer is recorded the
       // same way the share endpoint records one, so the person has the same
@@ -217,10 +238,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       // Rate limited on the address rather than on the caller: the caller is
       // already capped at five projects an hour, and the thing worth protecting
       // is a stranger's inbox, not our own throughput.
-      const offered = body.owner_email?.trim();
-      if (offered) {
-        const mail = limiter.check(`offer:${offered.toLowerCase()}`, config.rateLimits.claimEmail);
-        if (!mail.ok) return tooMany(reply, mail.retryAfterSeconds);
+      if (offered && mayWrite?.ok) {
         await shareProject(store, project, {
           email: offered,
           note: body.owner_note,
@@ -242,6 +260,14 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         board_url: `${config.baseUrl}/r/${project.readToken}/board`,
         expires_at: project.expiresAt,
         limits: project.limits,
+        ...(offered
+          ? mayWrite?.ok
+            ? { owner_notified: offered }
+            : {
+                owner_notified: false,
+                owner_notice: `That address has been written to enough for now, so nothing was sent. The board exists: hand them ${config.baseUrl}/r/${project.readToken} yourself, or offer it again in ${mayWrite?.retryAfterSeconds ?? 0}s.`,
+              }
+          : {}),
         next: {
           instructions: `${config.baseUrl}/skill.md`,
           claim_to_keep: `${config.baseUrl}/v1/${project._id}/claim`,
@@ -656,6 +682,12 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
                 },
                 additionalProperties: false,
               },
+              blocked_by: {
+                type: 'array',
+                maxItems: 20,
+                items: { type: 'string', minLength: 1, maxLength: 96 },
+                description: 'The cards this one is waiting on, by slug. Data and not a status: nothing on the server moves an item because of it, and `blocked` still means waiting on a person. What it does is keep this card out of what /next offers and refuse a claim on it, naming what is unfinished, so a fleet stops picking up work whose prerequisite is not done. An empty array clears it. A slug nobody has filed counts as unfinished and the refusal says so.',
+              },
               must_exist: {
                 type: 'boolean',
                 description:
@@ -703,6 +735,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           // domain and reachable from one side only.
           expect: body.expect as UpsertItemInput['expect'],
           then: body.then as UpsertItemInput['then'],
+          blockedBy: body.blocked_by as string[] | undefined,
           mustExist: body.must_exist as boolean | undefined,
           actor,
         });
@@ -1675,6 +1708,15 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         const body = request.body as { email: string; note?: string; agent?: string };
         const verdict = limiter.check(`share:${project._id}`, config.rateLimits.claimEmail);
         if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds);
+        // Two buckets, because they protect different people. The project's
+        // caps how often one board may be offered; this one caps how much mail
+        // one address receives, and a project token costs nothing, so without
+        // it a fleet of fresh projects is a fleet of fresh senders.
+        const toThem = limiter.check(
+          `offer:${body.email.trim().toLowerCase()}`,
+          config.rateLimits.claimEmail,
+        );
+        if (!toThem.ok) return tooMany(reply, toThem.retryAfterSeconds);
 
         const { alreadyOwned } = await shareProject(store, project, {
           email: body.email,

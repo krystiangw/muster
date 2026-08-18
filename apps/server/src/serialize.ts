@@ -30,6 +30,10 @@ export function itemJson(item: ItemDoc, includeTimeline = false): Record<string,
     // What this card files when it finishes, so an agent reading it can see
     // the rest of the pipeline without being told about it separately.
     ...(item.then ? { then: item.then } : {}),
+    // Only when it says something. Every card carrying an empty array would
+    // make the common answer bigger to say that nothing is waiting, which the
+    // absence of the field already says.
+    ...(item.blockedBy && item.blockedBy.length > 0 ? { blocked_by: item.blockedBy } : {}),
     stale: item.stale,
     // Who touched it last. On a board with six agents this is the difference
     // between a queue of work and a queue of anonymous work.

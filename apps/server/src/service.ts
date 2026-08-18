@@ -64,6 +64,16 @@ function badRequest(code: string, message: string): ServiceError {
   return new ServiceError(400, code, message);
 }
 
+/**
+ * How many cards one card may say it waits on.
+ *
+ * A ceiling rather than a rule about work: the list is read on the claim path
+ * and printed in a refusal, and neither is worth doing for a hundred names. A
+ * card with more prerequisites than this is a plan, and a plan belongs in the
+ * body where a person can read it.
+ */
+const MAX_BLOCKERS = 20;
+
 export function normalizeUpsertInput(input: UpsertItemInput): UpsertItemInput {
   if (input.status !== undefined && !ITEM_STATUSES.includes(input.status)) {
     throw badRequest(
@@ -121,6 +131,30 @@ export function normalizeUpsertInput(input: UpsertItemInput): UpsertItemInput {
     }
   }
 
+  let blockedBy: string[] | undefined;
+  if (input.blockedBy !== undefined) {
+    if (!Array.isArray(input.blockedBy) || input.blockedBy.some((s) => typeof s !== 'string')) {
+      throw badRequest('bad_blocked_by', 'blocked_by is an array of slugs this card waits on.');
+    }
+    if (input.blockedBy.length > MAX_BLOCKERS) {
+      throw badRequest(
+        'bad_blocked_by',
+        `A card waits on at most ${MAX_BLOCKERS} others. More than that is a plan, and a plan belongs in the body.`,
+      );
+    }
+    const own = normalizeSlug(input.slug);
+    const seen = new Set<string>();
+    for (const raw of input.blockedBy) {
+      const slug = normalizeSlug(raw);
+      if (!slug) continue;
+      if (slug === own) {
+        throw badRequest('bad_blocked_by', 'A card cannot wait on itself.');
+      }
+      seen.add(slug);
+    }
+    blockedBy = [...seen];
+  }
+
   let expect: UpsertItemInput['expect'];
   if (input.expect !== undefined) {
     if (typeof input.expect !== 'object' || input.expect === null || Array.isArray(input.expect)) {
@@ -151,6 +185,7 @@ export function normalizeUpsertInput(input: UpsertItemInput): UpsertItemInput {
   return {
     ...input,
     then: input.then === null ? null : then,
+    blockedBy,
     expect,
     title: clamp(input.title, 300),
     body: clamp(input.body, 20_000),
@@ -312,6 +347,14 @@ export async function updateProject(
 }
 
 /**
+ * The one shape test for an address, so a door that has to refuse before it
+ * writes anything asks the same question the write would have asked.
+ */
+export function looksLikeEmail(value: string): boolean {
+  return /^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(value.trim().toLowerCase());
+}
+
+/**
  * Offers a project to an operator. Nothing changes for them until they accept
  * it from a view they already hold a link to, so this cannot be used to push a
  * board into somebody's queue.
@@ -322,7 +365,7 @@ export async function shareProject(
   input: { email: string; offeredBy?: string; note?: string },
 ): Promise<{ share: ShareDoc; alreadyOwned: boolean }> {
   const email = input.email.trim().toLowerCase();
-  if (!/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(email)) {
+  if (!looksLikeEmail(email)) {
     throw badRequest('bad_email', 'That does not look like an email address.');
   }
   const now = new Date();
@@ -1103,6 +1146,13 @@ export interface UpsertItemInput {
    * than two cards.
    */
   then?: ItemSuccessor | null;
+  /**
+   * The cards this one is waiting on, by slug. Send an empty array to clear it.
+   *
+   * Inert on purpose: see `ItemDoc.blockedBy`. It refuses a claim and it keeps
+   * the item out of what `/next` offers; it never writes a status.
+   */
+  blockedBy?: string[];
 }
 
 export interface UpsertItemResult {
@@ -1301,6 +1351,7 @@ export async function upsertItem(
   assign('fields', input.fields, {});
   assign('source', input.source, null);
   assign('then', input.then, null);
+  assign('blockedBy', input.blockedBy, []);
 
   if (input.title !== undefined) {
     if (input.insertOnly) setOnInsert.titleKey = titleKey(input.title);
@@ -1615,6 +1666,84 @@ function takingIt(agent: string, now: Date, ttl: number, expiresAt: Date) {
   };
 }
 
+/**
+ * What a card is waiting on that has not finished, as a sentence.
+ *
+ * One query, on the claim path only, and only for a card that says it waits on
+ * something. That is the whole cost of the feature: no counter, no index, no
+ * fan-out write when a blocker closes, and so nothing that can drift out of
+ * agreement with the board.
+ *
+ * A named card nobody has filed counts as unmet and says so. Ignoring it would
+ * make a typo silently do nothing, and "waiting on a card that is not on this
+ * board" is something an agent can fix in one write.
+ */
+export async function unmetBlockers(
+  store: Store,
+  projectId: string,
+  item: Pick<ItemDoc, 'blockedBy'>,
+): Promise<Array<{ slug: string; title: string | null; status: ItemStatus | null }>> {
+  const waiting = item.blockedBy ?? [];
+  if (waiting.length === 0) return [];
+  const rows = (await store.items
+    .find(
+      { projectId, slug: { $in: waiting } },
+      { projection: { slug: 1, title: 1, status: 1 } },
+    )
+    .toArray()) as Array<Pick<ItemDoc, 'slug' | 'title' | 'status'>>;
+  const found = new Map(rows.map((row) => [row.slug, row]));
+  return waiting
+    .map((slug) => {
+      const row = found.get(slug);
+      return row
+        ? { slug, title: row.title, status: row.status }
+        : { slug, title: null, status: null };
+    })
+    .filter((row) => row.status === null || !TERMINAL_STATUSES.includes(row.status));
+}
+
+/** The refusal, in the words the agent has to act on. */
+function blockedMessage(
+  slug: string,
+  unmet: Array<{ slug: string; title: string | null; status: ItemStatus | null }>,
+): string {
+  const named = unmet
+    .map((row) =>
+      row.status === null
+        ? `${row.slug} (not on this board)`
+        : `${row.slug} (${row.status}${row.title ? `: ${row.title}` : ''})`,
+    )
+    .join(', ');
+  return `${slug} is waiting on ${named}. Finish or drop ${
+    unmet.length === 1 ? 'it' : 'them'
+  }, or take this card off the list with blocked_by if it is not really waiting.`;
+}
+
+/**
+ * The slugs this project is not offering, because they are waiting on
+ * something. Empty on every board that does not use the field, for one query
+ * that matches nothing.
+ */
+async function waitingSlugs(store: Store, projectId: string): Promise<string[]> {
+  const waiting = (await store.items
+    .find(
+      { projectId, status: 'open', blockedBy: { $exists: true, $ne: [] } },
+      { projection: { slug: 1, blockedBy: 1 }, limit: 200 },
+    )
+    .toArray()) as Array<Pick<ItemDoc, 'slug' | 'blockedBy'>>;
+  if (waiting.length === 0) return [];
+  const named = [...new Set(waiting.flatMap((row) => row.blockedBy ?? []))];
+  const rows = (await store.items
+    .find({ projectId, slug: { $in: named } }, { projection: { slug: 1, status: 1 } })
+    .toArray()) as Array<Pick<ItemDoc, 'slug' | 'status'>>;
+  const finished = new Set(
+    rows.filter((row) => TERMINAL_STATUSES.includes(row.status)).map((row) => row.slug),
+  );
+  return waiting
+    .filter((row) => (row.blockedBy ?? []).some((slug) => !finished.has(slug)))
+    .map((row) => row.slug);
+}
+
 export async function claimItem(
   store: Store,
   project: ProjectDoc,
@@ -1632,6 +1761,22 @@ export async function claimItem(
   const ttl = Math.min(Math.max(ttlMinutes ?? project.rules.claimTtlMinutes, 1), 1440);
   const expiresAt = new Date(now.getTime() + ttl * 60_000);
   const normalized = normalizeSlug(slug);
+
+  // Read before the lease is taken, because the refusal has to name what it is
+  // refusing over. Only a card that says it waits on something costs the extra
+  // query, and only on this path: reading the board never pays for it.
+  const before = await store.items.findOne(
+    { projectId: project._id, slug: normalized },
+    { projection: { blockedBy: 1 } },
+  );
+  if (before) {
+    const unmet = await unmetBlockers(store, project._id, before as Pick<ItemDoc, 'blockedBy'>);
+    if (unmet.length > 0) {
+      throw new ServiceError(409, 'blocked_by', blockedMessage(normalized, unmet), {
+        blocked_by: unmet.map((row) => ({ slug: row.slug, title: row.title, status: row.status })),
+      });
+    }
+  }
 
   const claimed = await store.items.findOneAndUpdate(
     {
@@ -2238,6 +2383,14 @@ export async function nextItemHeld(
       returnDocument: 'after',
     });
 
+  // A card whose blockers are unfinished is not offered, because offering it
+  // and then refusing the claim is a loop an agent cannot get out of. Computed
+  // per call rather than kept as a counter: two queries when a board uses the
+  // field at all, nothing to maintain when a blocker closes, and nothing that
+  // can drift.
+  const waiting = await waitingSlugs(store, project._id);
+  if (waiting.length > 0) Object.assign(free, { slug: { $nin: waiting } });
+
   const scope = agent?.scope ?? [];
   if (scope.length > 0) {
     const scoped = await take({
@@ -2313,11 +2466,20 @@ export async function nextItem(
     }
   }
 
-  const base = {
+  const base: Record<string, unknown> = {
     projectId: project._id,
     status: 'open' as const,
     $or: [{ claim: null }, { 'claim.expiresAt': { $lte: now } }],
   };
+  // Same rule as the call that takes one: an offer a claim would refuse is
+  // worse than no offer, and the count is said out loud so a board that looks
+  // emptier than it is explains itself.
+  const waiting = await waitingSlugs(store, project._id);
+  if (waiting.length > 0) base.slug = { $nin: waiting };
+  const alsoWaiting =
+    waiting.length === 0
+      ? ''
+      : `; ${waiting.length} ${waiting.length === 1 ? 'item is' : 'items are'} waiting on other cards`;
   const sort = { priority: -1 as const, touchedAt: 1 as const };
 
   const scope = agent?.scope ?? [];
@@ -2346,15 +2508,15 @@ export async function nextItem(
       item: null,
       reason:
         otherCount > 0
-          ? `nothing open in your scope; ${otherCount} open ${otherCount === 1 ? 'item belongs' : 'items belong'} to other scopes. Widen your scope on purpose, or leave them alone.`
-          : 'nothing open in this project',
+          ? `nothing open in your scope; ${otherCount} open ${otherCount === 1 ? 'item belongs' : 'items belong'} to other scopes. Widen your scope on purpose, or leave them alone.${alsoWaiting}`
+          : `nothing open in this project${alsoWaiting}`,
     };
   }
 
   const any = await store.items.find(base).sort(sort).limit(1).toArray();
   return any[0]
     ? { item: any[0] as ItemDoc, reason: 'oldest untouched open item' }
-    : { item: null, reason: 'nothing open in this project' };
+    : { item: null, reason: `nothing open in this project${alsoWaiting}` };
 }
 
 function escapeRegex(value: string): string {

@@ -180,7 +180,12 @@ export function createNotifier(deps: {
       try {
         const delivery = await mailer.sendBoardOffer(offer.email, {
           projectName: project.name,
-          agent: (offer.offeredBy ?? 'An agent').slice(0, 48),
+          // Blank is absent, not a name. Both doors accept an empty handle and
+          // nullish coalescing let it through, so the message opened with a
+          // space and the word "created".
+          agent: (offer.offeredBy ?? '').trim() === ''
+            ? 'An agent'
+            : offer.offeredBy!.trim().slice(0, 48),
           note: (offer.note ?? '').slice(0, 500),
           readUrl: `${config.baseUrl}/r/${project.readToken}`,
           expiresInDays: config.demoTtlDays,

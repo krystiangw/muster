@@ -195,6 +195,29 @@ card that is already there is updated instead of duplicated. A card cannot name
 itself. If the successor cannot be filed, for instance because the project is at
 its cap, the finish still stands and the answer says so in \`warnings\`.
 
+### 2d. Saying what a card is waiting on
+
+\`then\` runs forwards, one card to one card. When several things have to be
+finished before one can start, say so on the card that waits:
+
+\`\`\`bash
+curl -sX POST $MUSTER/items -H "authorization: Bearer $TOKEN" \\
+  -H 'content-type: application/json' \\
+  -d '{"slug":"ops:cutover","title":"Cut traffic over to the new venue",
+       "blocked_by":["ops:bridge-or-wait","errors:venue-withdraw-stuck"],"actor":"ops-loop"}'
+\`\`\`
+
+This is data, not a status. Nothing on the server moves an item because of it,
+and \`blocked\` still means what it meant: waiting on somebody who is not an
+agent. What \`blocked_by\` does is two things an agent meets rather than reads
+about. \`/next\` does not offer a card whose blockers are unfinished, and says
+how many it held back. Claiming one is refused with \`blocked_by\`, naming each
+unfinished card, its status and its title.
+
+A slug nobody has filed counts as unfinished, and the refusal says so instead of
+pretending a typo is a finished prerequisite. Send an empty array to clear the
+list, and take a name off it rather than inventing a card to satisfy it.
+
 ### 3. Claim it before you work on it
 
 \`\`\`bash
@@ -780,7 +803,8 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
         method: 'POST',
         url: `${base}/v1/{project}/items/{slug}/claim`,
         request: { agent: 'errors-loop', ttl_minutes: 60 },
-        notes: 'Lease with TTL. ok:false means somebody else holds it and the holder is named.',
+        notes:
+          'Lease with TTL. ok:false means somebody else holds it and the holder is named. A 409 blocked_by means the card is waiting on others, which the message names with their statuses.',
       },
       {
         // The same name the MCP tool carries. These read as operation names and
@@ -955,6 +979,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       'Scope is advisory. Muster warns about cross-scope writes and never blocks them.',
       `The read link is not read-only: whoever holds it ${READ_LINK_GRANTS}, with no sign in at all. Hand it to your operator, not to a channel.`,
       'Deleting an item needs an admin token. A worker key can close work but never erase the record of it.',
+      'A card that says blocked_by is not offered by /next and cannot be claimed until the cards it names are done or dropped. The refusal names them. Nothing here writes the blocked status for you: that one means waiting on a person.',
     ],
     ...(config.contactEmail ? { contact: config.contactEmail } : {}),
   };

@@ -25,6 +25,14 @@ export interface Item {
   last_actor: string | null;
   claim: { agent: string; expires_at: string; heartbeat_at: string } | null;
   absence: { count: number; since: string | null } | null;
+  /**
+   * The cards this one waits on, by slug. Absent when it waits on nothing.
+   *
+   * Data, not a status: the server never moves an item because of it. What it
+   * does is keep the card out of what `next` offers and refuse a claim on it,
+   * naming what is unfinished.
+   */
+  blocked_by?: string[];
   created_at: string;
   updated_at: string;
   touched_at: string;
@@ -89,6 +97,8 @@ export interface UpsertInput {
    * migration cannot duplicate them. Needs an admin token.
    */
   history?: HistoryEntry[];
+  /** The cards this one waits on, by slug. An empty array clears the list. */
+  blocked_by?: string[];
 }
 
 export interface UpsertResult {

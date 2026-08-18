@@ -11,6 +11,7 @@ import { loadBoard, moveItem } from '../board.js';
 import { boardApplyJson, boardJson, escalationJson, itemJson } from '../serialize.js';
 import {
   ServiceError,
+  looksLikeEmail,
   authenticate,
   claimItem,
   createEscalation,
@@ -236,6 +237,11 @@ const TOOLS: ToolDefinition[] = [
             labels: { type: 'array', items: { type: 'string' } },
             owner: { type: 'string' },
           },
+        },
+        blocked_by: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'The cards this one is waiting on, by slug. Data and not a status: nothing on the server moves an item because of it, and `blocked` still means waiting on a person. What it does is keep this card out of what /next offers and refuse a claim on it, naming what is unfinished, so a fleet stops picking up work whose prerequisite is not done. An empty array clears it. A slug nobody has filed counts as unfinished and the refusal says so.',
         },
         must_exist: {
           type: 'boolean',
@@ -706,6 +712,19 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           `Too many new projects from this address. Retry in ${verdict.retryAfterSeconds}s. If you already have a project, use its token instead of making another.`,
         );
       }
+      // Both questions about the address, before anything is written: a
+      // refusal after the fact costs the caller the project it just made and
+      // the token it was shown once, and its retry makes another one. Same
+      // split as the HTTP door: a malformed address creates nothing, a full
+      // bucket is somebody else's mail volume and does not cost this caller
+      // its board.
+      const offered = text(args.owner_email, 'owner_email')?.trim();
+      if (offered && !looksLikeEmail(offered)) {
+        throw new ServiceError(400, 'bad_email', 'That does not look like an email address.');
+      }
+      const mayWrite = offered
+        ? limiter.check(`offer:${offered.toLowerCase()}`, config.rateLimits.claimEmail)
+        : null;
       const { project, adminToken } = await createProject(
         store,
         config,
@@ -715,20 +734,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         },
         'mcp',
       );
-      // Same behaviour as POST /p, from the same two calls, because a door
-      // that offers a board and a door that does not is how the two surfaces
-      // drift. Rate limited on the address: the caller is already capped at
-      // five projects an hour and the inbox being protected is not ours.
-      const offered = text(args.owner_email, 'owner_email')?.trim();
-      if (offered) {
-        const mail = limiter.check(`offer:${offered.toLowerCase()}`, config.rateLimits.claimEmail);
-        if (!mail.ok) {
-          throw new ServiceError(
-            429,
-            'rate_limited',
-            `That address has been written to enough for now. Retry in ${mail.retryAfterSeconds}s. The project exists either way: hand them ${config.baseUrl}/r/${project.readToken} yourself.`,
-          );
-        }
+      if (offered && mayWrite?.ok) {
         await shareProject(store, project, {
           email: offered,
           note: text(args.owner_note, 'owner_note') ?? '',
@@ -748,6 +754,14 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         api: `${config.baseUrl}/v1/${project._id}`,
         read_url: `${config.baseUrl}/r/${project.readToken}`,
         expires_at: project.expiresAt,
+        ...(offered
+          ? mayWrite?.ok
+            ? { owner_notified: offered }
+            : {
+                owner_notified: false,
+                owner_notice: `That address has been written to enough for now, so nothing was sent. Hand them ${config.baseUrl}/r/${project.readToken} yourself, or offer it again in ${mayWrite?.retryAfterSeconds ?? 0}s.`,
+              }
+          : {}),
         notice:
           'Store this token. It is shown once. Have a human claim the project by email to remove the expiry.',
       };
@@ -848,6 +862,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           // service, which is where every door's arguments meet the filter.
           expect: args.expect as { title?: string; body?: string } | undefined,
           then: args.then as UpsertItemInput['then'],
+          blockedBy: texts(args.blocked_by, 'blocked_by'),
           mustExist: args.must_exist === true,
           actor,
         });
@@ -989,6 +1004,23 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
       }
       case 'share_project': {
         const email = str(args.email);
+        // The bucket that protects the person being written to rather than the
+        // board being offered. The HTTP door caps offers per project; this one
+        // had nothing, and a project token costs nothing to obtain, so a fleet
+        // of fresh projects was a fleet of fresh senders pointed at one inbox.
+        if (looksLikeEmail(email)) {
+          const toThem = limiter.check(
+            `offer:${email.trim().toLowerCase()}`,
+            config.rateLimits.claimEmail,
+          );
+          if (!toThem.ok) {
+            throw new ServiceError(
+              429,
+              'rate_limited',
+              `That address has been written to enough for now. Retry in ${toThem.retryAfterSeconds}s, or hand them ${config.baseUrl}/r/${project.readToken} yourself.`,
+            );
+          }
+        }
         const { alreadyOwned } = await shareProject(store, project, {
           email,
           note: str(args.note),

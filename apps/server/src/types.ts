@@ -134,6 +134,22 @@ export interface ItemDoc {
    * so re-finishing it writes the same card instead of a second copy.
    */
   then?: ItemSuccessor | null;
+  /**
+   * The cards this one is waiting on, by slug.
+   *
+   * Data, and deliberately nothing more. The engine never sets it, never
+   * clears it, and never moves a status because of it: `blocked` is published
+   * as the queue for work waiting on a person, and an engine writing it for a
+   * dependency two agents can resolve between themselves would put work no
+   * human can act on into a human's list. What this field does is refuse a
+   * claim and get skipped by the offer, both of which an agent reads and can
+   * fix in one write.
+   *
+   * A blocker nobody has filed yet blocks, and the refusal says so rather than
+   * pretending the name is finished: "waiting on a card that is not on this
+   * board" is a thing an agent can act on, and silently ignoring a typo is not.
+   */
+  blockedBy?: string[];
   absence: Absence;
   stale: boolean;
   staleSince: Date | null;

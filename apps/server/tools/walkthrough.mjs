@@ -154,6 +154,7 @@ const run = async () => {
     // The document those two send an agent to for the signup itself.
     ['/agent-signup.md', 'POST', 'text/markdown'],
     ['/.well-known/mcp.json', 'mcp', 'application/json'],
+    ['/.well-known/ai-catalog.json', 'urn:air:', 'application/json'],
     ['/openapi.json', '"openapi"', 'application/json'],
     ['/docs', 'Muster', 'text/html'],
   ]) {

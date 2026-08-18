@@ -2633,3 +2633,79 @@ describe('a layout that would trap finished work', () => {
     assert.match(page.body, /Showing the 50 most urgent of 55/, 'and the list says it is a slice');
   });
 });
+
+describe('a card that waits on another', () => {
+  it('is not offered, refuses a claim, and names what is unfinished', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'first', title: 'the prerequisite', body: 'b', actor: 'a' });
+    await post(project, '/items', {
+      slug: 'second',
+      title: 'the one that waits',
+      body: 'b',
+      blocked_by: ['first'],
+      actor: 'a',
+    });
+
+    // The offer skips it and says how many it held back, because a board that
+    // looks emptier than it is should explain itself.
+    const offered = await read(project, '/next?agent=a');
+    assert.equal(offered.json().item.slug, 'first');
+
+    const claim = await post(project, '/items/second/claim', { agent: 'a' });
+    assert.equal(claim.statusCode, 409);
+    assert.equal(claim.json().error, 'blocked_by');
+    assert.match(claim.json().message, /first/);
+    assert.match(claim.json().message, /open/, 'the status of what it waits on');
+
+    // Finishing the blocker is all it takes: no sweep, no second write, nothing
+    // to keep in step.
+    await post(project, '/items', { slug: 'first', status: 'done', actor: 'a' });
+    const now = await post(project, '/items/second/claim', { agent: 'a' });
+    assert.equal(now.statusCode, 200);
+    assert.equal(now.json().ok, true);
+  });
+
+  it('waits on a card nobody filed, and says that rather than pretending', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', {
+      slug: 'typo',
+      title: 'waits on a name that does not exist',
+      body: 'b',
+      blocked_by: ['ops:nothing-like-this'],
+      actor: 'a',
+    });
+    const claim = await post(project, '/items/typo/claim', { agent: 'a' });
+    assert.equal(claim.statusCode, 409);
+    assert.match(claim.json().message, /not on this board/);
+
+    // And clearing the list is one write, not a support ticket.
+    await post(project, '/items', { slug: 'typo', blocked_by: [], actor: 'a' });
+    const after = await post(project, '/items/typo/claim', { agent: 'a' });
+    assert.equal(after.statusCode, 200);
+  });
+
+  it('refuses to wait on itself', async () => {
+    const project = await createProject(harness);
+    const written = await post(project, '/items', {
+      slug: 'ouroboros',
+      title: 't',
+      blocked_by: ['ouroboros'],
+      actor: 'a',
+    });
+    assert.equal(written.statusCode, 400);
+    assert.equal(written.json().error, 'bad_blocked_by');
+  });
+
+  it('takes the next item that is not waiting, when one call does both', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'blocked-one', title: 'waits', body: 'b', priority: 9, blocked_by: ['nobody-filed-this'], actor: 'a' });
+    await post(project, '/items', { slug: 'free-one', title: 'ready', body: 'b', priority: 1, actor: 'a' });
+
+    // Priority would have handed over the blocked card first. Offering work a
+    // claim would refuse is a loop an agent cannot get out of.
+    const taken = await post(project, '/next', { agent: 'worker' });
+    assert.equal(taken.statusCode, 200);
+    assert.equal(taken.json().item.slug, 'free-one');
+    assert.equal(taken.json().claimed, true);
+  });
+});

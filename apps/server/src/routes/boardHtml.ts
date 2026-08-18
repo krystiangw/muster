@@ -204,6 +204,17 @@ function preview(
         : ''
     }
     ${
+      // What an agent will be refused over. Printed as the slugs it was given
+      // rather than as their statuses, because the person reading this wants
+      // the names to look for on the board; whether each is finished is on the
+      // card it belongs to.
+      (item.blockedBy ?? []).length > 0
+        ? `<p class="why">Waiting on ${(item.blockedBy ?? [])
+            .map((slug) => `<code>${escapeHtml(slug)}</code>`)
+            .join(', ')}. An agent asking for work is not offered this one until they are done.</p>`
+        : ''
+    }
+    ${
       timeline.length > 0
         ? `<ul class="timeline">
 ${timeline
