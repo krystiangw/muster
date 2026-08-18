@@ -140,6 +140,13 @@ td .face { vertical-align:-3px; margin-right:4px; }
 .asked .label { color:var(--accent); margin:0 0 6px; }
 .asked textarea { width:100%; min-height:52px; }
 .asked form { max-width:none; display:flex; flex-direction:column; gap:8px; margin:8px 0 0; }
+/* Filing a card, above the board it lands on. One line on a desktop, stacked on
+   a phone, and never taller than the thing it sits over. */
+.newitem { display:flex; flex-wrap:wrap; gap:8px; align-items:flex-start; max-width:none;
+  margin:0 0 14px; }
+.newitem label { font-size:12px; align-self:center; font-family:var(--mono); color:var(--muted); }
+.newitem input { flex:1 1 220px; }
+.newitem textarea { flex:2 1 320px; min-height:44px; }
 .edit button.tag { font-family:var(--mono); font-size:11px; padding:3px 8px; border-radius:999px; }
 /* A control revealed by hover is a control that does not exist on a phone. */
 @media (hover: none) { .col .card .move { opacity:1; } }

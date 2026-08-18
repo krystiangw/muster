@@ -17,7 +17,14 @@ import { redactAddress, type Mailer } from '../email.js';
 import { record, recordView } from '../events.js';
 import { ago, chip, escapeHtml, layout, when } from '../html.js';
 import { avatar, who } from '../identity.js';
-import { renderBoard, renderBoardFilters, renderBoardSettings } from './boardHtml.js';
+import { normalizeSlug } from '../ids.js';
+import {
+  renderBoard,
+  renderBoardFilters,
+  renderBoardSettings,
+  renderNewItem,
+  type BoardQuestion,
+} from './boardHtml.js';
 import { DEMO_AGENTS, demoBoard } from './demoBoard.js';
 import { maybeSweep } from '../hygiene.js';
 import { codeAttemptKey, type RateLimiter } from '../rateLimit.js';
@@ -165,6 +172,9 @@ function noSuchProject(): string {
  * form carries an owner because somebody is changing it, and treating that as
  * the narrowing would drop the person onto a different board every time.
  */
+/** As much of a note as goes into a timeline entry, at both doors. */
+const NOTE_MAX_CHARS = 2_000;
+
 interface KeptFilter {
   from_owner?: string;
   from_agent?: string;
@@ -1128,6 +1138,7 @@ ${
       agent?: string;
       label?: string;
       q?: string;
+      answered?: string;
     };
     const narrowing = {
       ...(query.owner ? { owner: query.owner.slice(0, 48) } : {}),
@@ -1168,20 +1179,33 @@ ${
         )
         .toArray(),
     ]);
-    const questions = new Map(
-      waitingOn
-        .filter((doc) => typeof doc.itemSlug === 'string' && doc.itemSlug !== '')
-        .map((doc) => [
-          doc.itemSlug as string,
-          {
-            id: doc._id,
-            agent: doc.agent,
-            question: doc.question,
-            context: doc.context ?? '',
-          },
-        ]),
-    );
+    // Every open question a card carries, in the order they were asked. Two
+    // agents waiting on one item is ordinary, and a map of one per slug would
+    // show whichever was read last and hide the rest until it was answered.
+    const questions = new Map<string, BoardQuestion[]>();
+    for (const doc of waitingOn) {
+      if (typeof doc.itemSlug !== 'string' || doc.itemSlug === '') continue;
+      const asked = questions.get(doc.itemSlug) ?? [];
+      asked.push({
+        id: doc._id,
+        agent: doc.agent,
+        question: doc.question,
+        context: doc.context ?? '',
+      });
+      questions.set(doc.itemSlug, asked);
+    }
     const agents = await agentDescriptions(store, project._id, view);
+
+    // A question can be answered from a card now, and an answer that reloads
+    // the page silently is how somebody answers the same thing twice. Read from
+    // the stored question, never from the URL, which only names which one.
+    const answeredHere = query.answered
+      ? ((await store.escalations.findOne({
+          projectId: project._id,
+          _id: query.answered.slice(0, 64),
+          status: { $ne: 'open' },
+        })) as EscalationDoc | null)
+      : null;
 
     // A move redirects back here saying what it did. The message is built from
     // the board's own columns rather than carried in the URL, so a crafted link
@@ -1229,13 +1253,17 @@ ${
           ? `"${touched.slug}" is now tagged ${
               touched.labels.length > 0 ? touched.labels.join(', ') : 'nothing'
             }.`
-          : query.what === 'note'
+          : query.what === 'new'
+            ? `"${touched.slug}" is on the board. Every agent reading this project sees it now.`
+            : query.what === 'note'
             ? `Your note is on "${touched.slug}", where every agent that reads it will see it.`
             : query.what === 'nothing'
               ? `Nothing was written to "${touched.slug}": the note was empty.`
               : `"${touched.slug}" is ${touched.owner ? `owned by ${touched.owner}` : 'unassigned'}.`
         : undefined;
-    const notice = movedNotice ?? doneNotice;
+    const notice = answeredHere
+      ? `Answered. ${answeredHere.agent} picks it up on its next iteration, and the card will say when it did.`
+      : (movedNotice ?? doneNotice);
 
     const boardUrl = `/r/${escapeHtml(readToken)}/board`;
     const body = `
@@ -1248,6 +1276,7 @@ ${project.description ? `<p class="lead">${escapeHtml(project.description)}</p>`
       : 'questions and timeline'
   }</a></p>
 
+${renderNewItem(boardUrl, project.rules.requireBodyAfterHours ?? null)}
 ${renderBoard(view, {
   moveAction: `${boardUrl}/move`,
   questions,
@@ -1510,6 +1539,50 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
    * Under `operator`, like every other write through this link, so an agent
    * reading the item can tell a human's sentence from its own.
    */
+  /**
+   * A person filing a card.
+   *
+   * The slug comes from the title, because a slug is an idempotency key an
+   * agent needs and jargon a person should not have to meet. Which means this
+   * route, unlike every other write here, must not upsert: two people filing
+   * "check the bridge" a week apart mean two pieces of work, and landing the
+   * second on top of the first would rewrite a card somebody else is holding.
+   * So it looks first and walks the name along until it is free.
+   */
+  app.post('/r/:readToken/board/new', { schema: { hide: true } }, async (request, reply) => {
+    if (!limitWrites(request, reply)) return reply;
+    const { readToken } = request.params as { readToken: string };
+    const form = (request.body ?? {}) as { title?: string; body?: string } & KeptFilter;
+    const project = await store.projects.findOne({ readToken });
+    if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
+    if (!(await readableBy(store, request, project))) {
+      throw new ServiceError(404, 'not_found', 'No such project.');
+    }
+
+    const title = (one(form.title) ?? '').trim().slice(0, 200);
+    if (title === '') throw new ServiceError(400, 'bad_request', 'An item needs a title.');
+    const body = (one(form.body) ?? '').trim().slice(0, 4000);
+
+    const base = normalizeSlug(title) || 'item';
+    let slug = base;
+    for (let attempt = 2; attempt <= 20; attempt += 1) {
+      if (!(await store.items.findOne({ projectId: project._id, slug }, { projection: { _id: 1 } }))) {
+        break;
+      }
+      slug = `${base.slice(0, 90)}-${attempt}`;
+    }
+
+    await upsertItem(store, project, {
+      slug,
+      title,
+      body,
+      actor: 'operator',
+      note: 'filed from the board',
+    });
+    const params = new URLSearchParams({ done: slug, what: 'new', ...keptParams(form) });
+    return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
+  });
+
   app.post('/r/:readToken/board/note', { schema: { hide: true } }, async (request, reply) => {
     if (!limitWrites(request, reply)) return reply;
     const { readToken } = request.params as { readToken: string };
@@ -1521,7 +1594,10 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     }
     if (!form.slug) throw new ServiceError(400, 'bad_request', 'Which item?');
 
-    const message = (one(form.message) ?? '').trim();
+    // Cut here, not only in the textarea: `maxlength` is a courtesy to a browser
+    // and a suggestion to anybody posting straight at this route, and a timeline
+    // is inside the item document, which has a ceiling of its own.
+    const message = (one(form.message) ?? '').trim().slice(0, NOTE_MAX_CHARS);
     // An empty note is a slip of the hand, not an instruction to write nothing:
     // it goes back to the board having changed nothing rather than filing a
     // blank line into a timeline everybody reads.
@@ -1570,7 +1646,11 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
   app.post('/r/:readToken/escalations/:id', { schema: { hide: true } }, async (request, reply) => {
     if (!limitWrites(request, reply)) return reply;
     const { readToken, id } = request.params as { readToken: string; id: string };
-    const form = (request.body ?? {}) as { status?: string; answer?: string; back?: string };
+    const form = (request.body ?? {}) as {
+      status?: string;
+      answer?: string;
+      back?: string;
+    } & KeptFilter;
     const project = await store.projects.findOne({ readToken });
     if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
     // Writing through the link is exactly what the link is for, so a project
@@ -1592,11 +1672,14 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     // they were reading is how a board loses its place. One fixed alternative
     // rather than a URL from the form: a redirect target somebody can type is
     // a redirect target somebody else can send.
-    const back =
-      (form.back ?? '') === 'board'
-        ? `/r/${readToken}/board?answered=${encodeURIComponent(id)}`
-        : `/r/${readToken}?answered=${encodeURIComponent(id)}`;
-    return reply.redirect(back, 303);
+    if ((form.back ?? '') !== 'board') {
+      return reply.redirect(`/r/${readToken}?answered=${encodeURIComponent(id)}`, 303);
+    }
+    // Back to the board as it was being read, narrowing included: answering a
+    // question from a filtered board and landing on the unfiltered one is the
+    // board losing somebody's place for them.
+    const params = new URLSearchParams({ answered: id, ...keptParams(form) });
+    return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
   });
 
   /**

@@ -291,13 +291,13 @@ export interface BoardQuestion {
  * The same form, deliberately: two forms for one decision drift, and the one
  * that drifts is always the one somebody found second.
  */
-function questionForm(question: BoardQuestion, action: string): string {
+function questionForm(question: BoardQuestion, action: string, keep: BoardFilter): string {
   return `<div class="asked">
   <p class="label">${escapeHtml(question.agent)} is waiting on you</p>
   <p style="font-size:16px;margin:0 0 6px"><b>${escapeHtml(question.question)}</b></p>
   ${question.context ? `<p class="why" style="white-space:pre-wrap">${escapeHtml(question.context)}</p>` : ''}
   <form method="post" action="${escapeHtml(action)}/escalations/${escapeHtml(question.id)}">
-    <input type="hidden" name="back" value="board">
+    <input type="hidden" name="back" value="board">${keptFilter(keep)}
     <label>Your answer
       <textarea name="answer" rows="2" placeholder="The decision, in your words."></textarea>
     </label>
@@ -333,7 +333,7 @@ export interface BoardRenderOptions {
    * who opened the card it named saw a card with nothing to say and no way to
    * reply. What waits on somebody has to be answerable where they meet it.
    */
-  questions?: Map<string, BoardQuestion>;
+  questions?: Map<string, BoardQuestion[]>;
   /** Where an answer posts, when questions are offered. */
   answerAction?: string;
   /**
@@ -472,12 +472,45 @@ ${shown
       options.moveAction && options.facets
         ? editForms(item, options.facets, options.moveAction.replace(/\/move$/, ''), view.filter)
         : '',
-      options.questions?.get(item.slug) && options.answerAction
-        ? questionForm(options.questions.get(item.slug)!, options.answerAction)
+      // Every open question on this card, not the last one to be read off the
+      // list: two agents can be waiting on the same item, and showing one of
+      // them hides the other until this one is answered.
+      options.answerAction
+        ? (options.questions?.get(item.slug) ?? [])
+            .map((question) => questionForm(question, options.answerAction!, view.filter))
+            .join('\n')
         : '',
     ),
   )
   .join('\n')}`;
+}
+
+/**
+ * Filing a card, from the board.
+ *
+ * The UI grew read first: agents wrote the work and people read it, moved it
+ * and answered questions about it. Nobody decided that a person may not file
+ * anything, it simply was never built, and the result was an operator with a
+ * board full of work and a curl command as the only way to add to it.
+ *
+ * A slug is derived from the title rather than asked for. It is an idempotency
+ * key an agent needs and a piece of jargon a person should never have to meet,
+ * and the route keeps it from landing on top of an existing card.
+ *
+ * The description is optional and says what happens when it is left out,
+ * because on most boards the hygiene rule drops an item nobody described.
+ */
+export function renderNewItem(action: string, requireBodyAfterHours: number | null): string {
+  return `<form class="newitem" method="post" action="${escapeHtml(action)}/new">
+  <label for="new-title">Add an item</label>
+  <input id="new-title" name="title" size="40" maxlength="200" required
+    placeholder="What needs doing">
+  <textarea name="body" rows="2" maxlength="4000"
+    placeholder="What it is, in enough words that whoever picks it up knows${
+      requireBodyAfterHours === null ? '' : `. Left empty, this board drops it after ${requireBodyAfterHours}h`
+    }"></textarea>
+  <button type="submit">add</button>
+</form>`;
 }
 
 /**

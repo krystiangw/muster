@@ -705,6 +705,55 @@ describe('moving an item into a column', () => {
     );
   });
 
+  it('files a card from the board, and never on top of one already there', async () => {
+    // Asked in a browser: there was no way to add an item except curl. Nobody
+    // decided that a person may not file work, it was never built.
+    const project = await createProject(harness, 'filing');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const file = (title: string, body = '') =>
+      harness.server.inject({
+        method: 'POST',
+        url: `/r/${readToken}/board/new`,
+        payload: `title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}`,
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      });
+
+    const first = await file('Check the bridge fee', 'the venue keeps quoting two numbers');
+    assert.equal(first.statusCode, 303);
+    assert.match(first.headers.location as string, /done=check-the-bridge-fee/);
+    const item = await harness.store.items.findOne({
+      projectId: project.id,
+      slug: 'check-the-bridge-fee',
+    });
+    assert.equal(item?.title, 'Check the bridge fee');
+    assert.equal(item?.status, 'open');
+    assert.equal(item?.lastActor, 'operator');
+
+    // The same words a week later are a second piece of work, not an edit of
+    // the first: a slug derived from a title must not land on top of a card
+    // somebody else is holding.
+    const second = await file('Check the bridge fee', 'again, on the other venue');
+    assert.match(second.headers.location as string, /done=check-the-bridge-fee-2/);
+    assert.equal(
+      await harness.store.items.countDocuments({ projectId: project.id }),
+      2,
+      'two cards, not one rewritten',
+    );
+    const kept = await harness.store.items.findOne({
+      projectId: project.id,
+      slug: 'check-the-bridge-fee',
+    });
+    assert.equal(kept?.body, 'the venue keeps quoting two numbers', 'the first is untouched');
+
+    // A title is the one thing it cannot do without.
+    const empty = await file('   ');
+    assert.equal(empty.statusCode, 400);
+
+    // And the form is on the page that files it.
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(page.body, new RegExp(`action="/r/${readToken}/board/new"`));
+  });
+
   it('carries a question on the card it was asked about, answerable there', async () => {
     // Reported from a browser: a card that something is waiting on showed the
     // work and no way to reply. The question lived on the other page, and
@@ -750,6 +799,15 @@ describe('moving an item into a column', () => {
     assert.equal(doc?.status, 'answered');
     assert.equal(doc?.answer, 'yes, pay it');
 
+    // And the board it lands on says so, from the stored question rather than
+    // from the URL: four buttons that look alike and a silent reload is how
+    // somebody answers the same thing twice.
+    const landed = await harness.server.inject({
+      method: 'GET',
+      url: answered.headers.location as string,
+    });
+    assert.match(landed.body, /Answered\. errors-loop picks it up/);
+
     // Answered, so the card stops asking. The question stays in the timeline,
     // where it belongs: what was asked and what was decided is the history of
     // the work, and only the form goes away.
@@ -759,6 +817,62 @@ describe('moving an item into a column', () => {
       'the form is gone',
     );
     assert.match(after.body, /asked the operator: Do we pay the bridge fee\?/, 'the record stays');
+  });
+
+  it('shows every open question on a card, not the last one read', async () => {
+    // Two agents can be waiting on one item. Keyed by slug, one of them would
+    // wait invisibly until the other was answered.
+    const project = await createProject(harness, 'two waiting');
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'shared', title: 'the shared one', actor: 'a' },
+    });
+    for (const [agent, question] of [
+      ['errors-loop', 'Do we pay the fee?'],
+      ['pm-loop', 'Do we tell the venue first?'],
+    ]) {
+      await harness.server.inject({
+        method: 'POST',
+        url: `${project.api}/escalations`,
+        headers: authed(project),
+        payload: { agent, question, item_slug: 'shared' },
+      });
+    }
+
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(page.body, /Do we pay the fee\?/);
+    assert.match(page.body, /Do we tell the venue first\?/);
+  });
+
+  it('keeps the narrowing when a question is answered from a filtered board', async () => {
+    const project = await createProject(harness, 'narrowed answer');
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'card', title: 'card', owner: 'alex', actor: 'a' },
+    });
+    const asked = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/escalations`,
+      headers: authed(project),
+      payload: { agent: 'a', question: 'Which one?', item_slug: 'card' },
+    });
+    const id = asked.json().escalation.id;
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    const answered = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/escalations/${id}`,
+      payload: 'status=answered&answer=this+one&back=board&from_owner=alex&from_q=card',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    const location = answered.headers.location as string;
+    assert.match(location, /owner=alex/, 'the board comes back as it was being read');
+    assert.match(location, /q=card/);
   });
 
   it('lets a person write a note into the timeline the agents read', async () => {
