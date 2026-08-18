@@ -249,6 +249,10 @@ const run = async () => {
     body: JSON.stringify({
       slug: `${SLUG}-chain`,
       title: 'The first half of a chain',
+      // Open, explicitly: a chain fires on the crossing into a terminal
+      // status, so a card left finished by a run whose clean up failed would
+      // never cross again and this check would fail for ever after.
+      status: 'open',
       actor: AGENT,
       then: { slug: `${SLUG}-chained`, title: 'The second half, filed by the first' },
     }),
@@ -264,7 +268,14 @@ const run = async () => {
     JSON.stringify(finished.body?.chained ?? finished.body?.warnings),
   );
   for (const slug of [`${SLUG}-chain`, `${SLUG}-chained`]) {
-    await json(`${api}/items/${encodeURIComponent(slug)}`, { method: 'DELETE', headers: authed });
+    // The token and nothing else: `authed` carries a JSON content type, and a
+    // DELETE with that header and no body is refused as an empty JSON body, so
+    // the tidying quietly did nothing.
+    const gone = await json(`${api}/items/${encodeURIComponent(slug)}`, {
+      method: 'DELETE',
+      headers: { authorization: authed.authorization },
+    });
+    check(`${slug} is cleared away again`, gone.status === 200, gone.status);
   }
 
   const open = await json(`${api}/escalations?status=open`, { headers: authed });
