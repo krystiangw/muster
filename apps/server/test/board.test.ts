@@ -1016,6 +1016,75 @@ describe('moving an item into a column', () => {
     assert.match(location, /q=card/);
   });
 
+  it('lets a person say how urgent, filing it and afterwards', async () => {
+    // Filing existed and prioritising did not, so a card a person asked for sat
+    // behind everything the agents had filed at +5: /next offers by priority.
+    const project = await createProject(harness, 'urgency');
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    const filed = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/new`,
+      payload: 'title=Call+the+venue&body=they+quote+two+numbers&priority=5',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    assert.equal(filed.statusCode, 303);
+    const item = await harness.store.items.findOne({
+      projectId: project.id,
+      slug: 'call-the-venue',
+    });
+    assert.equal(item?.priority, 5, 'filed as urgent');
+
+    // And it is what an agent is handed next, which is the whole point.
+    const next = (
+      await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/next?agent=any-loop`,
+        headers: authed(project),
+      })
+    ).json();
+    assert.equal(next.item.slug, 'call-the-venue');
+
+    // Changed afterwards, from the card.
+    const lowered = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/priority`,
+      payload: 'slug=call-the-venue&priority=-3',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    assert.equal(lowered.statusCode, 303);
+    const after = await harness.store.items.findOne({
+      projectId: project.id,
+      slug: 'call-the-venue',
+    });
+    assert.equal(after?.priority, -3);
+    assert.match(after!.timeline.at(-1)!.message, /urgency set to -3/, 'and it says who changed it');
+    assert.equal(after!.timeline.at(-1)!.by, 'operator');
+
+    // Nonsense is refused rather than stored.
+    const nonsense = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/priority`,
+      payload: 'slug=call-the-venue&priority=99',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    assert.equal(nonsense.statusCode, 400);
+
+    // Filing without one is ordinary work, the same as an agent filing without
+    // one, so the two doors agree on the same silence.
+    await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/new`,
+      payload: 'title=Something+else',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    const plain = await harness.store.items.findOne({
+      projectId: project.id,
+      slug: 'something-else',
+    });
+    assert.equal(plain?.priority, 0);
+  });
+
   it('lets a person write a note into the timeline the agents read', async () => {
     // Reported from a browser: opening a card offered assign, tag and move, and
     // nowhere to say why. A board a person may only rearrange is not shared.

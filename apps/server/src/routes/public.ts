@@ -1262,7 +1262,9 @@ ${
           ? `"${touched.slug}" is now tagged ${
               touched.labels.length > 0 ? touched.labels.join(', ') : 'nothing'
             }.`
-          : query.what === 'new'
+          : query.what === 'priority'
+            ? `"${touched.slug}" is urgency ${touched.priority > 0 ? '+' : ''}${touched.priority}. Every queue here sorts by it, so this is what an agent is offered next.`
+            : query.what === 'new'
             ? `"${touched.slug}" is on the board. Every agent reading this project sees it now.`
             : query.what === 'note'
             ? `Your note is on "${touched.slug}", where every agent that reads it will see it.`
@@ -1567,7 +1569,11 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
   app.post('/r/:readToken/board/new', { schema: { hide: true } }, async (request, reply) => {
     if (!limitWrites(request, reply)) return reply;
     const { readToken } = request.params as { readToken: string };
-    const form = (request.body ?? {}) as { title?: string; body?: string } & KeptFilter;
+    const form = (request.body ?? {}) as {
+      title?: string;
+      body?: string;
+      priority?: string;
+    } & KeptFilter;
     const project = await store.projects.findOne({ readToken });
     if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
     if (!(await readableBy(store, request, project))) {
@@ -1577,6 +1583,10 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     const title = (one(form.title) ?? '').trim().slice(0, 200);
     if (title === '') throw new ServiceError(400, 'bad_request', 'An item needs a title.');
     const body = (one(form.body) ?? '').trim().slice(0, 4000);
+    // Absent or nonsense reads as ordinary work, which is what an agent filing
+    // without a priority gets, so the two doors agree on the same silence.
+    const asked = Number.parseInt(one(form.priority) ?? '', 10);
+    const priority = Number.isInteger(asked) ? Math.max(-10, Math.min(10, asked)) : 0;
 
     // Two steps, and each one answers a different question. The lookup handles
     // the ordinary case, a name already in use, and picks the next one along.
@@ -1597,6 +1607,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
           slug,
           title,
           body,
+          priority,
           actor: 'operator',
           insertOnly: true,
         });
@@ -1620,6 +1631,46 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
       );
     }
     const params = new URLSearchParams({ done: slug, what: 'new', ...keptParams(form) });
+    return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
+  });
+
+  /**
+   * How urgent, from the board.
+   *
+   * Filing existed and prioritising did not, which put a person's card behind
+   * everything the agents had filed at +5: `/next` offers by priority, so work
+   * a person asked for first arrived last. The scale is the item's own, and the
+   * page offers four points on it rather than the number, because a board is
+   * read by somebody who should not have to learn that -10 to 10 exists to say
+   * "this one first".
+   */
+  app.post('/r/:readToken/board/priority', { schema: { hide: true } }, async (request, reply) => {
+    if (!limitWrites(request, reply)) return reply;
+    const { readToken } = request.params as { readToken: string };
+    const form = (request.body ?? {}) as { slug?: string; priority?: string } & KeptFilter;
+    const project = await store.projects.findOne({ readToken });
+    if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
+    if (!(await readableBy(store, request, project))) {
+      throw new ServiceError(404, 'not_found', 'No such project.');
+    }
+    if (!form.slug) throw new ServiceError(400, 'bad_request', 'Which item?');
+
+    const priority = Number.parseInt(one(form.priority) ?? '', 10);
+    if (!Number.isInteger(priority) || priority < -10 || priority > 10) {
+      throw new ServiceError(400, 'bad_priority', 'Priority is a whole number from -10 to 10.');
+    }
+    await upsertItem(store, project, {
+      slug: form.slug,
+      priority,
+      actor: 'operator',
+      note: `urgency set to ${priority > 0 ? '+' : ''}${priority}`,
+      mustExist: true,
+    });
+    const params = new URLSearchParams({
+      done: form.slug,
+      what: 'priority',
+      ...keptParams(form),
+    });
     return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
   });
 

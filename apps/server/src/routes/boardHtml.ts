@@ -224,6 +224,24 @@ ${timeline
  * wrote is not one. What is typed here lands in the same timeline an agent
  * writes to, under `operator`, and every agent that reads the item sees it.
  */
+/**
+ * The urgency scale, in words a person can pick from.
+ *
+ * The number is the real thing and every queue here sorts by it, but a board is
+ * read by somebody who does not want to learn that -10 to 10 exists before they
+ * can say "this one first". The values are spread rather than consecutive so
+ * there is room left for an agent to file something between two of them.
+ *
+ * An item filed from the board with no urgency is ordinary work, which is what
+ * an agent filing without a priority also gets, so the two doors agree.
+ */
+const PRIORITIES: Array<{ value: number; title: string }> = [
+  { value: 5, title: 'urgent (+5)' },
+  { value: 2, title: 'next (+2)' },
+  { value: 0, title: 'ordinary (0)' },
+  { value: -3, title: 'when there is time (-3)' },
+];
+
 function editForms(item: ItemDoc, facets: BoardFacets, action: string, keep: BoardFilter): string {
   const id = escapeHtml(item._id);
   const labels = item.labels ?? [];
@@ -248,6 +266,20 @@ function editForms(item: ItemDoc, facets: BoardFacets, action: string, keep: Boa
       ${facets.labels.map((name) => `<option value="${escapeHtml(name)}"></option>`).join('')}
     </datalist>
     <button type="submit">tag</button>
+  </form>
+  <form class="row" method="post" action="${escapeHtml(action)}/priority">
+    <input type="hidden" name="slug" value="${escapeHtml(item.slug)}">${keptFilter(keep)}
+    <label for="pri-${id}">Urgency
+      <select id="pri-${id}" name="priority">
+        ${PRIORITIES.map(
+          (level) =>
+            `<option value="${level.value}"${
+              (item.priority ?? 0) === level.value ? ' selected' : ''
+            }>${escapeHtml(level.title)}</option>`,
+        ).join('')}
+      </select>
+    </label>
+    <button type="submit">set</button>
   </form>
   <form class="note" method="post" action="${escapeHtml(action)}/note">
     <input type="hidden" name="slug" value="${escapeHtml(item.slug)}">${keptFilter(keep)}
@@ -513,6 +545,15 @@ export function renderNewItem(action: string, requireBodyAfterHours: number | nu
     <form class="newitem" method="post" action="${escapeHtml(action)}/new">
       <label for="new-title">Title</label>
       <input id="new-title" name="title" maxlength="200" required placeholder="What needs doing">
+      <label for="new-priority">Urgency</label>
+      <select id="new-priority" name="priority">
+        ${PRIORITIES.map(
+          (level) =>
+            `<option value="${level.value}"${level.value === 0 ? ' selected' : ''}>${escapeHtml(
+              level.title,
+            )}</option>`,
+        ).join('')}
+      </select>
       <label for="new-body">Description</label>
       <textarea id="new-body" name="body" rows="4" maxlength="4000"
         placeholder="What it is, in enough words that whoever picks it up knows."></textarea>
