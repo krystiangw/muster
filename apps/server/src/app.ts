@@ -270,7 +270,10 @@ export async function buildApp(
    * the schemas say which fields take one.
    */
   server.addHook('preValidation', async (request, reply) => {
-    const type = String(request.headers['content-type'] ?? '');
+    // Lowercased, because a media type is case insensitive and Fastify parses
+    // `Application/X-Www-Form-Urlencoded` as a form body all the same: a check
+    // that reads it literally is a guard with a spelling for a key.
+    const type = String(request.headers['content-type'] ?? '').toLowerCase();
     if (!type.startsWith('application/x-www-form-urlencoded')) return;
     const body = request.body;
     if (typeof body !== 'object' || body === null) return;

@@ -996,6 +996,17 @@ describe('a form that says two things', () => {
       assert.match(refused.body, /said two things/, where);
     }
 
+    // A media type is case insensitive, and Fastify parses this as a form body
+    // just the same: a guard that reads the header literally has a spelling
+    // for a key.
+    const shouted = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/note`,
+      payload: 'slug=work&slug=other&message=hi',
+      headers: { 'content-type': 'Application/X-Www-Form-Urlencoded', accept: 'text/html' },
+    });
+    assert.equal(shouted.statusCode, 400);
+
     // Nothing was written by any of them, and the ordinary form still is.
     const untouched = await harness.store.items.findOne({ projectId: project.id, slug: 'work' });
     assert.equal(untouched?.timelineCount ?? 0, 1, 'the filing entry and nothing else');
