@@ -243,8 +243,44 @@ describe('A. discovery', () => {
 
   it('lists every admin-only call the routes actually have', async () => {
     // Written out by hand twice and wrong twice: first claiming a worker key
-    // makes every other call, then leaving one out. The routes decide, and a
-    // worker key finding out by 403 is the failure this replaces.
+    // makes every other call, then leaving one out. So the list is not
+    // written out here either. The routes are read, every one that calls
+    // `requireAdmin` is collected, and the protocol has to name it: adding an
+    // admin-only route without documenting it fails this.
+    const source = readFileSync(new URL('../src/routes/api.ts', import.meta.url), 'utf8');
+    const routes = [...source.matchAll(/scoped\.(get|post|put|patch|delete)\(\s*\n\s*'([^']+)'/g)];
+    const adminOnly: Array<{ method: string; path: string }> = [];
+    routes.forEach((route, index) => {
+      const from = route.index ?? 0;
+      const to = routes[index + 1]?.index ?? source.length;
+      if (source.slice(from, to).includes('requireAdmin(request)')) {
+        adminOnly.push({ method: route[1]!.toUpperCase(), path: route[2]! });
+      }
+    });
+    assert.ok(adminOnly.length >= 12, 'the routes were read, not guessed');
+
+    const protocol = (await harness.server.inject({ method: 'GET', url: '/skill.md' })).body;
+    const named = protocol.slice(protocol.indexOf('The whole admin-only list'));
+    for (const { path } of adminOnly) {
+      // The tail of the path is what the document writes, since it writes them
+      // relative to $MUSTER. Items are the exception the sentence itself
+      // makes: an ordinary upsert is not admin, one carrying `history` is.
+      const bare = path.replace('/v1/:project', '');
+      // The document names a parameter the way that reads, and the routes name
+      // it the way Fastify wants, so both spellings count.
+      const tails = ['<slug>', '<id>', '<handle>'].map((placeholder) =>
+        bare.replace(/:slug|:id|:handle/g, placeholder),
+      );
+      const written =
+        tails.some((tail) => named.includes(tail)) ||
+        (bare === '/items' && named.includes('history')) ||
+        (bare.startsWith('/keys') && named.includes('everything under')) ||
+        (bare === '' && named.includes('the project itself'));
+      assert.ok(written, `${path} needs an admin token, so the protocol has to say so`);
+    }
+  });
+
+  it('refuses those calls to a worker key, which is what the list is about', async () => {
     const project = await createProject(harness);
     const worker = (
       await harness.server.inject({
@@ -256,26 +292,22 @@ describe('A. discovery', () => {
     ).json() as { token: string };
     const asWorker = { authorization: `Bearer ${worker.token}`, 'content-type': 'application/json' };
 
-    const protocol = (await harness.server.inject({ method: 'GET', url: '/skill.md' })).body;
-    const admin: Array<[string, string, unknown]> = [
-      ['PATCH', `${project.api}/rules`, { claimTtlMinutes: 30 }],
+    const calls: Array<[string, string, Record<string, unknown> | undefined]> = [
+      ['PATCH', `${project.api}/rules`, { claim_ttl_minutes: 30 }],
       ['PUT', `${project.api}/board`, { columns: [{ key: 'a', title: 'A', match: {} }] }],
       ['POST', `${project.api}/read-link/rotate`, {}],
       ['POST', `${project.api}/share`, { email: 'nobody@example.com' }],
+      ['POST', `${project.api}/keys`, { name: 'another', role: 'write' }],
+      ['PATCH', project.api, { name: 'renamed' }],
     ];
-    for (const [method, url, payload] of admin) {
+    for (const [method, url, payload] of calls) {
       const refused = await harness.server.inject({
         method: method as 'PATCH',
         url,
         headers: asWorker,
-        payload: payload as Record<string, unknown>,
+        ...(payload ? { payload } : {}),
       });
       assert.equal(refused.statusCode, 403, `${method} ${url} is admin only`);
-      const named = url.replace(project.api, '');
-      assert.ok(
-        protocol.includes(named) || protocol.includes(named.replace('/', '')),
-        `${named} is refused to a worker key, so the protocol has to name it`,
-      );
     }
   });
 

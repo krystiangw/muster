@@ -530,8 +530,10 @@ warned about: \`POST /share\`, \`POST /claim\` and \`POST /claim/verify\`,
 \`POST /read-link/rotate\`, \`PATCH /rules\`, \`PATCH\` on the project itself,
 everything under \`/keys\`, and an upsert that carries \`history\`. The five calls this document
 opens with are not on that list, which is the point: the work an agent does all
-day needs the smaller key. Taking it
-over lifts the limits and stops it expiring, so do this early:
+day needs the smaller key.
+
+Somebody taking the board over lifts the limits and stops it expiring, so do
+this early:
 
 \`\`\`bash
 curl -sX POST $MUSTER/share -H "authorization: Bearer $ADMIN_TOKEN" \\
