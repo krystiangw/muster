@@ -191,25 +191,21 @@ export function registerOAuth(app: FastifyInstance, deps: OAuthDeps): void {
       }
 
       const client = await store.oauthClients.findOne({ _id: clientId });
-      const now = new Date();
-      // Expiry is checked here rather than left to the TTL index. Mongo deletes
-      // on its own schedule, a minute or so behind, and a credential that is
-      // over should not work for that minute: the answer would be a token for a
-      // project that is on its way out.
       if (!client || client.secretHash !== hashToken(clientSecret)) {
         return reply.code(401).send({ error: 'invalid_client' });
       }
-      if (client.expiresAt && client.expiresAt <= now) {
-        return reply.code(401).send({
-          error: 'invalid_client',
-          error_description: 'This client expired with its project. Register again for a new one.',
-        });
-      }
+      // The project decides, not the copy of its deadline on the client
+      // document: claiming clears the project's expiry and the children are
+      // updated separately, so a child whose update lagged would otherwise
+      // lock out a client whose board has become permanent.
+      //
+      // Checked here rather than left to the TTL index, which deletes on its
+      // own schedule about a minute behind. The clock is read now rather than
+      // before the lookup, because the lookup is where the time went.
       const project = await store.projects.findOne({ _id: client.projectId });
-      if (!project || (project.expiresAt && project.expiresAt <= now)) {
-        return reply
-          .code(400)
-          .send({ error: 'invalid_client', error_description: 'The project behind this client is gone.' });
+      const gone = { error: 'invalid_client', error_description: 'The project behind this client is gone.' };
+      if (!project || (project.expiresAt && project.expiresAt <= new Date())) {
+        return reply.code(400).send(gone);
       }
 
       // An hour, and the key document dies with it.
@@ -226,12 +222,19 @@ export function registerOAuth(app: FastifyInstance, deps: OAuthDeps): void {
         role: 'admin',
         ttlMs: TOKEN_TTL_MS,
       });
+      // A key is capped at the project's own deadline, so a request that
+      // arrived a second before it produces a token that authentication
+      // rejects on sight. Better to say the project is gone than to answer 200
+      // with something already dead.
+      const secondsLeft = expiresAt
+        ? Math.round((expiresAt.getTime() - Date.now()) / 1000)
+        : TOKEN_TTL_MS / 1000;
+      if (secondsLeft < 1) return reply.code(400).send(gone);
+
       return reply.send({
         access_token: token,
         token_type: 'Bearer',
-        expires_in: expiresAt
-          ? Math.max(1, Math.round((expiresAt.getTime() - Date.now()) / 1000))
-          : TOKEN_TTL_MS / 1000,
+        expires_in: secondsLeft,
         scope: `project:${project._id}`,
         project: project._id,
         api: `${config.baseUrl}/v1/${project._id}`,

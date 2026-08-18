@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
-import { createProject, startHarness, type Harness } from './helper.js';
+import { authed, createProject, startHarness, type Harness } from './helper.js';
 
 /**
  * The Let Agents In scorecard, as tests.
@@ -216,26 +216,38 @@ describe('B. agent entry', () => {
 
     // A client whose project is over stops working at the moment it is over,
     // not whenever the TTL monitor next runs, which is a minute or so behind.
+    // The project is what decides: the copy of the deadline on the client
+    // document is updated separately, and a client whose board was claimed in
+    // the meantime must not be locked out by a stale copy.
     const doomed = await harness.server.inject({
       method: 'POST',
       url: '/oauth/register',
       payload: { client_name: 'expiring' },
     });
     const dead = doomed.json();
+    const tokenFor = async () =>
+      harness.server.inject({
+        method: 'POST',
+        url: '/oauth/token',
+        payload: {
+          grant_type: 'client_credentials',
+          client_id: dead.client_id,
+          client_secret: dead.client_secret,
+        },
+      });
+
     await harness.store.oauthClients.updateOne(
       { _id: dead.client_id },
       { $set: { expiresAt: new Date(Date.now() - 1000) } },
     );
-    const refused = await harness.server.inject({
-      method: 'POST',
-      url: '/oauth/token',
-      payload: {
-        grant_type: 'client_credentials',
-        client_id: dead.client_id,
-        client_secret: dead.client_secret,
-      },
-    });
-    assert.equal(refused.statusCode, 401);
+    assert.equal((await tokenFor()).statusCode, 200, 'a stale copy on the child decides nothing');
+
+    await harness.store.projects.updateOne(
+      { _id: dead.project },
+      { $set: { expiresAt: new Date(Date.now() - 1000) } },
+    );
+    const refused = await tokenFor();
+    assert.equal(refused.statusCode, 400);
     assert.equal(refused.json().error, 'invalid_client');
 
     const token = await harness.server.inject({
@@ -320,6 +332,50 @@ describe('B. agent entry', () => {
     });
     assert.equal(board.statusCode, 200);
     assert.equal(board.headers['content-encoding'], undefined);
+  });
+
+  it('every call skill.md prints is a call this server answers', async () => {
+    // The protocol document is the product's onboarding, and an example that
+    // 404s costs an agent the one thing it has: the assumption that the file it
+    // is reading is true. The check is deliberately shallow, existence and
+    // method rather than semantics, because that is the part that rots when a
+    // route is renamed and the prose is not.
+    const project = await createProject(harness, 'documented');
+    const doc = await harness.server.inject({ method: 'GET', url: '/skill.md' });
+    assert.equal(doc.statusCode, 200);
+
+    const calls: Array<{ method: string; url: string }> = [];
+    for (const line of doc.body.split('\n')) {
+      if (!line.trimStart().startsWith('curl')) continue;
+      // -sX POST, not just -X POST: the flags are written together.
+      const method = /-[a-z]*X\s*([A-Z]+)/.exec(line)?.[1] ?? 'GET';
+      const token = line
+        .split(/\s+/)
+        .map((part) => part.replace(/^["']|["'\\]+$/g, ''))
+        .find((part) => part.startsWith('$MUSTER') || part.startsWith(harness.config.baseUrl));
+      if (!token) continue;
+      const url = token
+        .replace('$MUSTER', `/v1/${project.id}`)
+        .replace(harness.config.baseUrl, '')
+        .replace(/<[a-z_]+>/g, 'x')
+        .replace(/\$[A-Z_]+/g, 'x');
+      calls.push({ method, url });
+    }
+    assert.ok(calls.length >= 15, `found ${calls.length} documented calls, which is too few to be right`);
+
+    for (const call of calls) {
+      const answer = await harness.server.inject({
+        method: call.method as 'GET',
+        url: call.url,
+        headers: authed(project),
+        ...(call.method === 'GET' ? {} : { payload: {} }),
+      });
+      const message = String((answer.json() as { message?: string }).message ?? '');
+      assert.ok(
+        !message.startsWith('No route for'),
+        `${call.method} ${call.url} is in skill.md and this server has no such route`,
+      );
+    }
   });
 
   it('answers an MCP handshake differently from a generic POST', async () => {
