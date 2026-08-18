@@ -155,10 +155,10 @@ describe('B. agent entry', () => {
     assert.equal(mcp.statusCode, 200);
     assert.equal(mcp.json().transport, 'streamable-http');
 
-    // Three surfaces told a newcomer to run `npm install @muster/sdk`, and the
-    // registry answered 404: the package is written and not published, and the
-    // name is still the operator's to choose. Publishing is the moment to put
-    // the line back, on both surfaces, which is why this ties them together.
+    // Three surfaces once told a newcomer to run `npm install @muster/sdk`
+    // while the registry answered 404. The package is published now, under the
+    // name its owner chose, and this is what keeps the two ends together: the
+    // day it is unpublished or renamed, the install line has to go with it.
     if (json.sdk?.published !== true) {
       assert.equal(json.sdk?.npm, undefined, 'no package name until there is a package');
       const skill = await harness.server.inject({ method: 'GET', url: '/skill.md' });

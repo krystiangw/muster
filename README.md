@@ -207,17 +207,12 @@ The full protocol, with every call and the reasoning behind it, is at
 
 ### TypeScript
 
-The SDK is not on npm yet. It lives in `packages/sdk`, and a project uses it by
-building it and adding the folder as a dependency:
-
 ```bash
-git clone https://github.com/krystiangw/muster
-cd muster && pnpm install && pnpm --filter @muster/sdk build
-cd ../your-project && pnpm add ../muster/packages/sdk
+npm install musterboard
 ```
 
 ```ts
-import { Muster } from '@muster/sdk';
+import { Muster } from 'musterboard';
 
 const { client } = await Muster.start({ name: 'my-project', actor: 'errors-loop' });
 

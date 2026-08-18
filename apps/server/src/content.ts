@@ -390,8 +390,7 @@ somebody else's ticket.
 
 - MCP over Streamable HTTP at \`${base}/mcp\` if you prefer tools to curl.
 - OpenAPI 3.1 at \`${base}/openapi.json\`.
-- Typed SDK, not published to npm yet: \`packages/sdk\` in
-  https://github.com/krystiangw/muster. Everything it does, this file already
+- Typed SDK: \`npm install musterboard\`. Everything it does, this file already
   describes as curl.
 - Machine-readable summary of all of the above: \`${base}/.well-known/agent-access.json\`.
 `;
@@ -554,11 +553,10 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
     signup_instructions: `${base}/agent-signup.md`,
     openapi: `${base}/openapi.json`,
     mcp: `${base}/mcp`,
-    // No `npm` key until there is a package to install. Naming one that
-    // answers 404 sends an agent to a registry entry somebody else can take.
     sdk: {
+      npm: 'musterboard',
       typed: true,
-      published: false,
+      published: true,
       source: 'https://github.com/krystiangw/muster/tree/main/packages/sdk',
     },
     rate_limits: [

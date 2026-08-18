@@ -1,5 +1,5 @@
 {
-  "name": "@muster/sdk",
+  "name": "musterboard",
   "version": "0.1.0",
   "description": "Typed client for Muster: shared operational memory for long-lived agents.",
   "license": "Apache-2.0",
@@ -47,8 +47,5 @@
   "homepage": "https://musterboard.dev",
   "bugs": {
     "url": "https://github.com/krystiangw/muster/issues"
-  },
-  "publishConfig": {
-    "access": "public"
   }
 }
