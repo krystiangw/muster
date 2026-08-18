@@ -667,6 +667,30 @@ describe('items', () => {
       await harness.store.items.findOne({ projectId: project.id, slug: 'second' }),
       'the card it files next is on the board',
     );
+    assert.equal(moved.json().chained.slug, 'second', 'and the move says what it set going');
+  });
+
+  it('files the successor into the slot the finish just freed', async () => {
+    // At the cap, closing one card frees exactly one slot, which is the slot
+    // the next card needs. The caller's copy of the counts still said full.
+    const project = await createProject(harness);
+    await harness.store.projects.updateOne({ _id: project.id }, { $set: { 'limits.items': 1 } });
+    await post(project, '/items', {
+      slug: 'only',
+      title: 'the only open card',
+      actor: 'a',
+      then: { slug: 'after', title: 'what comes after' },
+    });
+
+    const finished = await post(project, '/items', { slug: 'only', status: 'done', actor: 'a' });
+    assert.equal(finished.statusCode, 200, finished.body);
+    assert.equal(finished.json().chained?.slug, 'after', JSON.stringify(finished.json().warnings));
+    // The only remark is the usual one about an unregistered handle: nothing
+    // said the successor could not be filed.
+    assert.ok(
+      !finished.json().warnings.some((line: string) => line.includes('was not created')),
+      JSON.stringify(finished.json().warnings),
+    );
   });
 
   it('enforces the project item cap', async () => {

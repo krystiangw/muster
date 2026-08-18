@@ -1478,10 +1478,14 @@ export async function upsertItem(
   // The successor, filed by the item that finished. After the write and only on
   // the crossing: an item that was already done and is written to again files
   // nothing, or every note on a closed card would file the next one afresh.
+  // Only the write that owned the crossing files it. Two requests closing the
+  // same open item both start with `wasTerminal === false`, and the one whose
+  // guarded transition matched nothing would otherwise read the now-terminal
+  // item here and file the successor a second time. A creation owns its own
+  // crossing, because only one insert wins.
+  const crossed = created ? isTerminal : ownsTransition && isTerminal && !wasTerminal;
   const chained =
-    isTerminal && !wasTerminal && item.then?.slug
-      ? await fileSuccessor(store, project, item, input.actor)
-      : null;
+    crossed && item.then?.slug ? await fileSuccessor(store, project, item, input.actor) : null;
   if (chained) warnings.push(...chained.warnings);
 
   return { item, created, warnings, ...(chained ? { chained: chained.item } : {}) };
@@ -1508,7 +1512,12 @@ async function fileSuccessor(
 ): Promise<{ item: ItemDoc | null; warnings: string[] }> {
   const next = finished.then!;
   try {
-    const { item } = await upsertItem(store, project, {
+    // Read again rather than reuse the snapshot this write started with: the
+    // finish above freed a slot, and the caller's copy of the counts still
+    // says the project is full. Filing the next card into the room the
+    // previous one just left is the ordinary case at the cap, not the corner.
+    const now = (await store.projects.findOne({ _id: project._id })) ?? project;
+    const { item } = await upsertItem(store, now, {
       slug: next.slug,
       ...(next.title === undefined ? {} : { title: next.title }),
       ...(next.body === undefined ? {} : { body: next.body }),
@@ -1520,7 +1529,7 @@ async function fileSuccessor(
     });
     await appendNote(
       store,
-      project,
+      now,
       finished.slug,
       actor,
       `finished, so "${next.slug}" is filed`,

@@ -950,6 +950,8 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           item: itemJson(result.item),
           applied: boardApplyJson(result.applied),
           landed_in: result.landedIn,
+          ...(result.chained ? { chained: itemJson(result.chained) } : {}),
+          ...(result.warnings && result.warnings.length > 0 ? { warnings: result.warnings } : {}),
           ...(result.warning === undefined ? {} : { warning: result.warning }),
         };
       },

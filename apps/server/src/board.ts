@@ -590,6 +590,16 @@ export interface MoveResult {
   landedIn: string | null;
   /** Set when the item did not end up where it was sent. */
   warning?: string;
+  /**
+   * The card this move filed, when the column it landed in finished the item.
+   *
+   * A move is a write like any other, and the write it goes through can set a
+   * pipeline going. An agent that had to read the board back to find that out
+   * is an agent doing a round trip for a fact this answer already holds.
+   */
+  chained?: ItemDoc | null;
+  /** What the write said, when it had something to say. */
+  warnings?: string[];
 }
 
 /**
@@ -762,6 +772,8 @@ export async function moveItem(
   };
 
   let current: ItemDoc;
+  let chained: ItemDoc | null = null;
+  let said: string[] = [];
   try {
     const result = await upsertItem(store, project, {
       slug,
@@ -773,6 +785,11 @@ export async function moveItem(
       ...(apply.priority === undefined ? {} : { priority: apply.priority }),
     });
     current = result.item;
+    // A move into a column that finishes the item runs the same write every
+    // other door runs, so it can set a pipeline going. What it set going is
+    // carried back rather than left for the caller to discover.
+    chained = result.chained ?? null;
+    said = result.warnings;
   } catch (error) {
     await undoClaim();
     throw error;
@@ -879,6 +896,8 @@ export async function moveItem(
     item: current,
     applied: apply,
     landedIn: landed?.key ?? null,
+    ...(chained ? { chained } : {}),
+    ...(said.length > 0 ? { warnings: said } : {}),
     // A column can filter on more than a move can set, and an honest board says
     // so instead of showing the card somewhere the caller did not send it.
     ...(landed?.key === column.key
