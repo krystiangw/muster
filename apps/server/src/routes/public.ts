@@ -686,42 +686,26 @@ address. Claiming is free and raises the limits:</p>
     // carries a capability and is therefore never compressed. The board next
     // door has the search and the filters for anybody who came to browse.
     const ITEMS_SHOWN = 25;
-    const [items, open, answered, agents, itemsHeld] = await Promise.all([
-      // Ranked rather than sorted by the status word. Sorting on the string put
-      // "blocked" first and "open" last, alphabetically, so the live work sat
-      // underneath every finished card and a table with a limit on it would
-      // have shown none of it at all.
+    const ROW = {
+      slug: 1,
+      title: 1,
+      status: 1,
+      stale: 1,
+      claim: 1,
+      updatedAt: 1,
+      timeline: { $slice: -3 },
+    } as const;
+    const [unfinished, open, answered, agents, itemsHeld] = await Promise.all([
+      // Live work first, and asked for as live work rather than sorted into
+      // place afterwards. Ranking the statuses in the pipeline meant every load
+      // of this page read the whole collection and sorted it in memory: fifty
+      // thousand documents examined to show twenty five, measured, and it grows
+      // with the board. This asks the `queue` index for the unfinished ones,
+      // and the query below fills the rest of the page from `recent`.
       store.items
-        .aggregate<ItemDoc>([
-          { $match: { projectId: project._id } },
-          {
-            $addFields: {
-              rank: {
-                $switch: {
-                  branches: [
-                    { case: { $eq: ['$status', 'blocked'] }, then: 0 },
-                    { case: { $eq: ['$status', 'open'] }, then: 1 },
-                    { case: { $eq: ['$status', 'done'] }, then: 2 },
-                  ],
-                  default: 3,
-                },
-              },
-            },
-          },
-          { $sort: { rank: 1, priority: -1, updatedAt: -1 } },
-          { $limit: ITEMS_SHOWN },
-          {
-            $project: {
-              slug: 1,
-              title: 1,
-              status: 1,
-              stale: 1,
-              claim: 1,
-              updatedAt: 1,
-              timeline: { $slice: ['$timeline', -3] },
-            },
-          },
-        ])
+        .find({ projectId: project._id, status: { $in: ['blocked', 'open'] } }, { projection: ROW })
+        .sort({ priority: -1, touchedAt: 1 })
+        .limit(ITEMS_SHOWN)
         .toArray(),
       // Open and answered asked for separately, and that is the whole point:
       // one query for the newest fifty of both kinds loses an open question as
@@ -745,6 +729,25 @@ address. Claiming is free and raises the limits:</p>
       store.agents.find({ projectId: project._id }).sort({ lastSeenAt: -1 }).limit(50).toArray(),
       store.items.countDocuments({ projectId: project._id }),
     ]);
+
+    // Whatever was touched most recently fills the rest of the page, minus the
+    // rows already on it. Not "the finished ones", which reads better and asks
+    // the database for something it has no index for: filtering on status and
+    // sorting by date made it walk twenty one thousand documents to find
+    // twenty five. This walks the twenty five it returns. A board with a full
+    // page of live work never runs it at all.
+    const shown = unfinished.map((item) => item._id);
+    const items =
+      unfinished.length >= ITEMS_SHOWN
+        ? unfinished
+        : [
+            ...unfinished,
+            ...(await store.items
+              .find({ projectId: project._id, _id: { $nin: shown } }, { projection: ROW })
+              .sort({ updatedAt: -1 })
+              .limit(ITEMS_SHOWN - unfinished.length)
+              .toArray()),
+          ];
 
     // Urgent first, then oldest, which is what /operator has always done and is
     // now what the query asks for. This page used to show newest first:

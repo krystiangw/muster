@@ -314,7 +314,26 @@ export async function ensureIndexes(store: Store): Promise<void> {
       // Powers the "somebody already filed this" hint on insert.
       { key: { projectId: 1, titleKey: 1 }, name: 'titleKey' },
       { key: { projectId: 1, 'claim.expiresAt': 1 }, name: 'claims', sparse: true },
-      { key: { projectId: 1, updatedAt: -1 }, name: 'recent' },
+      // The three orders a page of items can be asked for, each with the
+      // tiebreaker the keyset cursor pages on, because a sort the index cannot
+      // finish is a sort of the whole project in memory: measured at fifty
+      // thousand keys walked for a page of fifty.
+      { key: { projectId: 1, priority: -1, updatedAt: -1, _id: -1 }, name: 'urgency' },
+      { key: { projectId: 1, updatedAt: -1, _id: -1 }, name: 'recent' },
+      { key: { projectId: 1, _id: 1 }, name: 'stable' },
+      // Stale work, across a fleet, for the operator's page. Partial because
+      // the flag is rare by design: an index over the ones that are not stale
+      // would be the collection again, paid for on every write.
+      {
+        key: { projectId: 1, staleSince: 1 },
+        name: 'stale',
+        partialFilterExpression: { stale: true },
+      },
+      // The other direction, for the pass that decides what became stale: not
+      // terminal, not already flagged, untouched since a cutoff. It is the most
+      // expensive thing hygiene does, it runs every five minutes per project,
+      // and without this it reads every open item the project holds.
+      { key: { projectId: 1, status: 1, stale: 1, touchedAt: 1 }, name: 'staleScan' },
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
     ]),
     ensure(store.escalations, [
@@ -326,6 +345,11 @@ export async function ensureIndexes(store: Store): Promise<void> {
       // Not sparse: a question with no `notifiedAt` at all is exactly the one
       // it is looking for.
       { key: { status: 1, notifiedAt: 1, createdAt: 1 }, name: 'missed' },
+      // Answered, newest first: the history on the project page and the recent
+      // list on the operator's. Sorted by when the decision was made rather
+      // than when the question was asked, which is the order those two read
+      // and the one `inbox` cannot serve.
+      { key: { projectId: 1, answeredAt: -1 }, name: 'answered' },
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
     ]),
     ensure(store.keys, [

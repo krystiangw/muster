@@ -197,7 +197,12 @@ export async function markStale(
     {
       projectId,
       status: { $nin: [...TERMINAL_STATUSES] },
-      stale: { $ne: true },
+      // `$in` rather than `$ne`, and this is about the index rather than the
+      // meaning: a negation cannot be an equality bound, so `$ne: true` made
+      // this walk every open item the project has ever had, every five minutes.
+      // `null` is in the list because an item written before the field existed
+      // has no `stale` at all, and that one is still not stale.
+      stale: { $in: [false, null] } as unknown as boolean,
       touchedAt: { $lte: cutoff },
       $or: [{ claim: null }, { 'claim.expiresAt': { $lte: now } }],
     },

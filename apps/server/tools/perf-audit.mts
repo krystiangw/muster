@@ -261,6 +261,46 @@ await timed('GET /v1/:project/board', inject(`${api}/board`, authed));
 await timed('GET /v1/:project/next?agent=errors-loop', inject(`${api}/next?agent=errors-loop`, authed));
 await timed('GET /v1/:project/inbox', inject(`${api}/inbox`, authed));
 await timed('GET /v1/:project/escalations?limit=50', inject(`${api}/escalations?limit=50`, authed));
+// The same call again, once the sweep the first one kicked off has finished.
+// Every read fires a throttled hygiene pass in the background, and on a board
+// this size that pass is real work competing for the same database.
+await timed('GET /v1/:project/items?limit=50 (again)', inject(`${api}/items?limit=50`, authed));
+
+// Where the time in a page of items actually goes: the query, the service
+// around it, or the route on top.
+const { readItems } = await import('../src/service.js');
+const fresh = (await store.projects.findOne({ _id: main._id }))!;
+await timed('readItems({limit: 50}) in process', async () => readItems(store, fresh, { limit: 50 } as never));
+await timed('the same page, straight from the driver', async () =>
+  store.items
+    .find({ projectId: main._id })
+    .sort({ priority: -1, updatedAt: -1, _id: -1 })
+    .limit(50)
+    .toArray(),
+);
+// The one query in this service that cannot be indexed: a case insensitive
+// substring, in either field, for every word. Measured with a word that matches
+// almost nothing, which is the case that has to read the whole collection.
+await timed('search for a common word', async () =>
+  readItems(store, fresh, { q: 'build', limit: 50 } as never),
+);
+await timed('search for a word that matches nothing', async () =>
+  readItems(store, fresh, { q: 'zzzznotathing', limit: 50 } as never),
+);
+
+say('\nthe work that runs beside the requests');
+const { sweepProject, expireClaims, resolveAbsent, dropContentless, markStale, correctOvercount } =
+  await import('../src/hygiene.js');
+await timed('a full hygiene sweep of this board', async () => sweepProject(store, main), 3);
+// Where a sweep spends itself, because it runs every five minutes per project
+// and on the request path behind a throttle.
+await timed('  expireClaims', async () => expireClaims(store, main._id, new Date()), 3);
+await timed('  resolveAbsent', async () => resolveAbsent(store, main._id, main.rules, new Date()), 3);
+await timed('  dropContentless', async () => dropContentless(store, main._id, main.rules, new Date()), 3);
+await timed('  markStale', async () => markStale(store, main._id, main.rules, new Date()), 3);
+await timed('  correctOvercount', async () => correctOvercount(store, main._id), 3);
+const { insights } = await import('../src/events.js');
+await timed('the insights report', async () => insights(store), 3);
 
 say('\nthe pages a person opens');
 await timed('GET /r/:token (the mail link)', inject(`/r/${main.readToken}`));
@@ -296,10 +336,17 @@ await explain('the oldest unannounced question', () =>
     .limit(1)
     .explain('executionStats') as never,
 );
-await explain('the project page table', () =>
+await explain('the project page table, live work', () =>
   store.items
-    .find({ projectId: main._id })
-    .sort({ status: 1, priority: -1, updatedAt: -1 })
+    .find({ projectId: main._id, status: { $in: ['blocked', 'open'] } })
+    .sort({ priority: -1, touchedAt: 1 })
+    .limit(25)
+    .explain('executionStats') as never,
+);
+await explain('the project page table, the rest', () =>
+  store.items
+    .find({ projectId: main._id, _id: { $nin: ['i_none'] } })
+    .sort({ updatedAt: -1 })
     .limit(25)
     .explain('executionStats') as never,
 );
@@ -310,12 +357,24 @@ await explain('answered questions, newest first', () =>
     .limit(50)
     .explain('executionStats') as never,
 );
-await explain('the items list, one page', () =>
+// The sorts below are the ones the code actually issues, tiebreaker included.
+// An audit that measures a simpler sort measures an index that is never used.
+await explain('the items list, urgency order', () =>
   store.items
     .find({ projectId: main._id })
-    .sort({ priority: -1, touchedAt: 1 })
+    .sort({ priority: -1, updatedAt: -1, _id: -1 })
     .limit(50)
     .explain('executionStats') as never,
+);
+await explain('the items list, recent order', () =>
+  store.items
+    .find({ projectId: main._id })
+    .sort({ updatedAt: -1, _id: -1 })
+    .limit(50)
+    .explain('executionStats') as never,
+);
+await explain('the items list, stable order for an export', () =>
+  store.items.find({ projectId: main._id }).sort({ _id: 1 }).limit(200).explain('executionStats') as never,
 );
 await explain('the board scan', () =>
   store.items
