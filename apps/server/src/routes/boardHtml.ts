@@ -607,64 +607,6 @@ export function renderNewItem(action: string, requireBodyAfterHours: number | nu
 }
 
 /**
- * The narrowing controls. A GET form, so the result is a URL somebody can keep:
- * an agent's own board is a bookmark, not a session.
- */
-/** How much of an agent's own description an option can carry before it wraps. */
-const FACET_DESCRIPTION = 44;
-
-function option(value: string, label: string, selected: string | undefined): string {
-  return `<option value="${escapeHtml(value)}"${value === selected ? ' selected' : ''}>${escapeHtml(label)}</option>`;
-}
-
-/**
- * Every name this board can be narrowed to, including the one already chosen.
- *
- * A filter that silently forgets the name it is currently applying is worse
- * than no filter: the page says it is showing one agent's work, and pressing
- * Show quietly means everybody. A name can arrive from the URL, or be pushed
- * past the ceiling by a busy project, so the current value is put back in
- * whenever the lists do not already have it.
- */
-function agentOptions(agents: AgentFacet[], selected: string | undefined): string {
-  const describe = (agent: AgentFacet): string =>
-    agent.description === ''
-      ? agent.handle
-      : `${agent.handle} - ${
-          agent.description.length > FACET_DESCRIPTION
-            ? `${agent.description.slice(0, FACET_DESCRIPTION - 1).trimEnd()}...`
-            : agent.description
-        }`;
-
-  const group = (title: string, members: AgentFacet[]): string =>
-    members.length === 0
-      ? ''
-      : `<optgroup label="${escapeHtml(title)}">
-        ${members.map((agent) => option(agent.handle, describe(agent), selected)).join('\n        ')}
-      </optgroup>`;
-
-  const missing =
-    selected && !agents.some((agent) => agent.handle === selected)
-      ? option(selected, selected, selected)
-      : '';
-
-  return [
-    `<option value="">any agent</option>`,
-    missing,
-    group(
-      'Registered here',
-      agents.filter((agent) => agent.registered),
-    ),
-    group(
-      'Seen on items',
-      agents.filter((agent) => !agent.registered),
-    ),
-  ]
-    .filter((part) => part !== '')
-    .join('\n      ');
-}
-
-/**
  * The narrowing controls, as links rather than a form with a button.
  *
  * There is no JavaScript on this page and there is not going to be, so a
@@ -705,14 +647,14 @@ function filterRow(
   key: 'owner' | 'agent' | 'label',
   title: string,
   anyLabel: string,
-  values: Array<{ value: string; note?: string }>,
+  values: Array<{ value: string; note?: string; loose?: boolean }>,
   omitted: number,
 ): string {
   if (values.length === 0) return '';
   const current = filter[key];
-  const chip = (entry: { value: string; note?: string }) => {
+  const chip = (entry: { value: string; note?: string; loose?: boolean }) => {
     const on = entry.value === current;
-    return `<a class="chip-link${on ? ' on' : ''}"${
+    return `<a class="chip-link${on ? ' on' : ''}${entry.loose ? ' loose' : ''}"${
       entry.note ? ` title="${escapeHtml(entry.note)}"` : ''
     } href="${escapeHtml(
       narrowedUrl(action, filter, { [key]: on ? undefined : entry.value }),
@@ -782,9 +724,20 @@ ${filterRow(
       filter.agent,
     ).map((handle) => {
       const agent = facets.agents.find((entry) => entry.handle === handle);
+      // A handle nobody registered is drawn loosely rather than filed under a
+      // second heading: the two groups the dropdown used to have cost a row to
+      // say what a dashed border says. What the agent is for rides along as the
+      // tooltip, because a handle is a line number and the description is the
+      // name.
+      const registered = agent?.registered === true;
       return {
         value: handle,
-        ...(agent && agent.description !== '' ? { note: agent.description } : {}),
+        note: registered
+          ? agent && agent.description !== ''
+            ? agent.description
+            : 'registered here'
+          : 'seen on items, not registered here',
+        ...(registered ? {} : { loose: true }),
       };
     }),
     facets.omitted.agents,

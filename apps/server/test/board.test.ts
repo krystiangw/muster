@@ -1714,13 +1714,13 @@ describe('a board many agents write to', () => {
     );
     assert.match(
       page.body,
-      /<a class="chip-link"[^>]*>idle-loop<\/a>/,
+      /<a class="chip-link" title="registered here"[^>]*>idle-loop<\/a>/,
       'registered and silent still gets offered',
     );
     assert.match(
       page.body,
-      /<a class="chip-link"[^>]*>passer-by<\/a>/,
-      'and so does a name that only ever wrote',
+      /<a class="chip-link loose" title="seen on items, not registered here"[^>]*>passer-by<\/a>/,
+      'and a name that only ever wrote is drawn as one',
     );
 
     const described = (
@@ -1771,7 +1771,7 @@ describe('a board many agents write to', () => {
     });
     assert.match(
       page.body,
-      /<a class="chip-link on"[^>]*>gone-loop<\/a>/,
+      /<a class="chip-link on loose"[^>]*>gone-loop<\/a>/,
       'so the control that turned it on can turn it off',
     );
   });

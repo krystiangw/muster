@@ -279,6 +279,9 @@ button.ghost { background:transparent; color:var(--accent); }
   border:1px solid var(--rule); color:var(--ink-2); text-decoration:none; }
 .chip-link:hover { border-color:var(--accent); color:var(--accent); }
 .chip-link.on { background:var(--accent); border-color:var(--accent); color:var(--surface); }
+/* A name nobody registered. Drawn as what it is, a handle read off an item,
+   rather than filed under a second heading that costs a row to say the same. */
+.chip-link.loose { border-style:dashed; }
 .filter-more { display:inline; }
 .filter-more summary { display:inline; font-family:var(--mono); font-size:12px;
   color:var(--muted); cursor:pointer; }
