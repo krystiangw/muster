@@ -148,6 +148,28 @@ const run = async () => {
   const authed = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
   const board = `/r/${readToken}/board`;
 
+  console.log('\nwhat an agent finds before it signs up');
+  // The names an agent probes on its way in. A refactor that moves one of them
+  // is a product nobody can find the protocol for, and every one of them is
+  // cheap to ask for.
+  for (const [path, marker, type] of [
+    ['/skill.md', '# Muster', 'text/markdown'],
+    ['/llms.txt', 'musterboard', 'text/plain'],
+    ['/.well-known/agent-access.json', 'signup', 'application/json'],
+    ['/.well-known/mcp.json', 'mcp', 'application/json'],
+    ['/openapi.json', '"openapi"', 'application/json'],
+    ['/docs', 'Muster', 'text/html'],
+  ]) {
+    const found = await html(path);
+    check(
+      `${path} answers, and says what it is`,
+      found.status === 200 &&
+        (found.headers.get('content-type') ?? '').includes(type) &&
+        found.body.includes(marker),
+      `${found.status} ${found.headers.get('content-type')}`,
+    );
+  }
+
   console.log('\nthe agent door');
   const registered = await json(`${api}/agents`, {
     method: 'POST',
