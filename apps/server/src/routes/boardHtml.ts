@@ -619,9 +619,10 @@ Anything that matches nothing is reported above the board rather than hidden.</p
 
 <h3>What a move does</h3>
 <p>By default, the column's own filter read back at it: the one status it asks for, the first label
-it requires, every label it excludes, the one owner it names, a claim where it asks for held items
-and a release where it asks for free ones. Declaring <code>apply</code> replaces that reading
-entirely, so spell out everything the move should do, not only the part the filter got wrong.</p>
+it requires, every label it excludes, the one owner it names, a claim where it asks for held items,
+a release where it asks for free ones, and a touch where it asks for work that is not stale.
+Declaring <code>apply</code> replaces that reading entirely, so spell out everything the move should
+do, not only the part the filter got wrong.</p>
 <div class="scroll"><table>
 <thead><tr><th>Key</th><th>What moving a card here does</th></tr></thead>
 <tbody>
@@ -632,7 +633,7 @@ entirely, so spell out everything the move should do, not only the part the filt
 <tr><td class="mono">priority</td><td>Sets the priority, -10 to 10.</td></tr>
 <tr><td class="mono">claim</td><td><code>true</code> takes the lease in the mover's name, and the move is refused if somebody else is holding the card.</td></tr>
 <tr><td class="mono">release</td><td><code>true</code> hands the lease back. One column cannot do both.</td></tr>
-<tr><td class="mono">touch</td><td>Only <code>true</code>, for a column whose filter is just freshness: the move is itself the write that clears the flag.</td></tr>
+<tr><td class="mono">touch</td><td>Only <code>true</code>. Names the write every move already makes, the one that clears the stale flag. Worth declaring where a column asks for fresh work and nothing else a move can set, since a column with nothing to apply is not a destination at all.</td></tr>
 </tbody></table></div>
 <p>A column with nothing to apply is a view. The board leaves it out of the move control, and a move
 sent straight to the API is refused rather than quietly doing nothing.</p>
