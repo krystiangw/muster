@@ -346,3 +346,44 @@ meaning, so the twelve identity hues avoid the red of a blocked item, the amber
 of a stale one, the green of a finished one and the teal of the accent. A handle
 that landed on the danger red read as a status, which was the whole point of
 having colours in the first place, inverted.
+
+
+## One behaviour, two doors, 2026-08-18
+
+The audit had already found this shape once: the HTTP inbox learned to tell
+"not answered yet" from "never filed", and the MCP inbox, a second
+implementation of the same thing, had already drifted away from it. The fix
+then was one function behind both.
+
+A night of looking for the same shape elsewhere found it in the read. Over HTTP
+a caller could page with a cursor, ask for a stable export order, poll a change
+feed with `since`, and filter by claim state. Over MCP it could do none of
+those: nothing past the limit existed on that door at all, and the tool
+description had been promising a claim filter the schema never had. Both call
+`readItems` now, and the tool description is true.
+
+Then paging itself turned out to be lying in a way neither door had noticed.
+`as_of` is the moment a caller hands back as `since`, and it was stamped fresh
+on every page. A write that lands while somebody is on page three sorts above
+their cursor, so it is on no later page; it is newer than the first page's
+checkpoint, so keeping *that* one picks it up next poll. Keeping the last
+page's, which is what the documentation told them to do, steps over it for
+good. The checkpoint travels inside the cursor now, so every page of one walk
+reports the moment the walk began. A cursor with no checkpoint is one issued
+before this existed and gets a fresh one; a cursor with a damaged one is
+refused, because carrying on would recreate the loss.
+
+Two more from the same night, both the same fault in different clothing: a
+filter that read the stored field rather than the meaning. The board has always
+treated an expired claim as no claim, and the list filter compared the field to
+null, so between a lease running out and the next sweep an item with no holder
+listed as held. And `swept_at`, which the watchdog now reads to notice a dead
+sweeper, was first wired to `lastSweptAt`, which is the throttle claim taken
+*before* the work: on a deployment where every pass threw, it would have
+reported a freshly tidied board for ever.
+
+The lesson is not "check the twin", and it is not "compare against the docs".
+It is that a value written for one purpose gets read for another, and the
+second reader inherits assumptions nobody wrote down. Naming what a field means
+in the type, next to the field, is the cheapest place to break that chain.
+
