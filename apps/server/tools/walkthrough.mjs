@@ -143,11 +143,6 @@ async function mcp(token, method, params) {
 
 const run = async () => {
   console.log(`walkthrough of ${BASE}`);
-  const { project: id, token, readToken } = await project();
-  const api = `/v1/${id}`;
-  const authed = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
-  const board = `/r/${readToken}/board`;
-
   console.log('\nwhat an agent finds before it signs up');
   // The names an agent probes on its way in. A refactor that moves one of them
   // is a product nobody can find the protocol for, and every one of them is
@@ -156,6 +151,8 @@ const run = async () => {
     ['/skill.md', '# Muster', 'text/markdown'],
     ['/llms.txt', 'musterboard', 'text/plain'],
     ['/.well-known/agent-access.json', 'signup', 'application/json'],
+    // The document those two send an agent to for the signup itself.
+    ['/agent-signup.md', 'POST', 'text/markdown'],
     ['/.well-known/mcp.json', 'mcp', 'application/json'],
     ['/openapi.json', '"openapi"', 'application/json'],
     ['/docs', 'Muster', 'text/html'],
@@ -169,6 +166,13 @@ const run = async () => {
       `${found.status} ${found.headers.get('content-type')}`,
     );
   }
+  // Asked for before the project, because that is the order an agent meets
+  // them in: everything above is what it reads to decide whether to sign up at
+  // all, and a signup that fails must not take the answer with it.
+  const { project: id, token, readToken } = await project();
+  const api = `/v1/${id}`;
+  const authed = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+  const board = `/r/${readToken}/board`;
 
   console.log('\nthe agent door');
   const registered = await json(`${api}/agents`, {

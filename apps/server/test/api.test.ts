@@ -1231,6 +1231,34 @@ describe('who is writing, and by what name', () => {
     );
   });
 
+  it('answers a refused field with what the schema says about it', async () => {
+    // The validator answers in its own language: "body/priority must be <= 10"
+    // is true and teaches nothing, and it was the one refusal here that did not
+    // name the fix. The description is written already, for the OpenAPI
+    // document; the refusal says it too.
+    const project = await createProject(harness);
+    const refused = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'too-urgent', title: 'x', actor: 'a', priority: 99 },
+    });
+    assert.equal(refused.statusCode, 400);
+    assert.match(refused.json().message, /must be <= 10/, 'what the validator found');
+    assert.match(refused.json().message, /Higher is more urgent/, 'and what it means');
+
+    // A field with nothing written about it is answered as before rather than
+    // with an empty sentence after a full stop.
+    const short = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { title: 'no slug at all', actor: 'a' },
+    });
+    assert.equal(short.statusCode, 400);
+    assert.ok(!short.json().message.endsWith('. '), short.json().message);
+  });
+
   it('consolidates a handle that was already written two ways', async () => {
     // The warnings catch a typo the first time it is used, which does nothing
     // for a board that collected work under both spellings before anybody read

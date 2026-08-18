@@ -56,6 +56,31 @@ const COMPRESS_MIN_BYTES = 1400;
  * for codings the header never mentions.
  */
 /**
+ * What the schema already says about the field that was refused.
+ *
+ * A validator answers in its own language: "body/priority must be <= 10" is
+ * true and teaches nothing, and it was the one refusal here that did not name
+ * the fix. The field's description is written already, for the OpenAPI
+ * document, so the refusal says it too: "Higher is more urgent. 0 is ordinary
+ * work and the default." Generic on purpose, so writing a description is the
+ * only thing anybody has to remember.
+ */
+function schemaSays(request: FastifyRequest, error: FastifyError): string {
+  const first = (error as { validation?: Array<Record<string, any>> }).validation?.[0];
+  if (!first) return '';
+  const field =
+    (first.params as { missingProperty?: string } | undefined)?.missingProperty ??
+    String(first.instancePath ?? '')
+      .split('/')
+      .filter(Boolean)[0];
+  if (!field) return '';
+  const where = (error as { validationContext?: string }).validationContext ?? 'body';
+  const schema = (request.routeOptions?.schema as Record<string, any> | undefined)?.[where];
+  const said = schema?.properties?.[field]?.description;
+  return typeof said === 'string' && said !== '' ? `. ${said}` : '';
+}
+
+/**
  * One more thing this response varies by, without dropping what was there.
  *
  * `reply.header('vary', ...)` replaces, and two hooks have something to say
@@ -300,7 +325,7 @@ export async function buildApp(
     if ((error as { validation?: unknown }).validation) {
       return reply.code(400).send({
         error: 'invalid_request',
-        message: error.message,
+        message: `${error.message}${schemaSays(request, error)}`,
         docs: `${config.baseUrl}/openapi.json`,
       });
     }
