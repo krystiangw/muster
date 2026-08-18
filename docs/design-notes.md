@@ -883,3 +883,53 @@ on the page still said the link could answer questions and change the board, the
 protocol file still said it could answer questions, and both were written when
 that was the whole list. A link whose warning is a version behind is a link
 somebody shares on the wrong reading of it.
+
+## The board learned to take writing, 2026-08-18
+
+For a day and a half this board was a place people read and agents wrote. The
+person could move a card, assign it and tag it, and could not say why; could not
+file work; could not answer a question from the card it was about; could not fix
+a typo in a title. Every one of those was reported from a browser within an hour
+of somebody actually using it, which is the fastest review this product has had.
+
+**A note adds to the record, an edit replaces part of it.** They are different
+enough to be different controls: the note field is open on the card, the edit is
+folded behind a summary, and the difference is worth one click. The edit carries
+the values it was rendered with, writes only the fields that actually changed,
+and the expectation travels with the write as part of its filter rather than as
+a check before it, because between reading a card and writing it there is room
+for exactly the change the check exists to protect. A field somebody else moved
+underneath is a 409 and nothing is written. An unrelated correction never costs
+the other side its work.
+
+**A slug is an idempotency key an agent needs and jargon a person should never
+meet.** Filing from the board derives it from the title, which makes this the one
+write here that must not upsert: two people filing "check the bridge fee" a week
+apart mean two pieces of work. The lookup handles the ordinary case, a name
+already in use, and `insertOnly` handles the race the lookup cannot see.
+
+**Every queue here sorts by priority, so a person who cannot set it has filed
+work that arrives last.** Four points on the item's own scale, in words, and
+whatever number the item actually carries if an agent filed it off them, because
+a control that shows the first option for a card at +7 quietly moves it to +5 the
+moment somebody presses the button beside it.
+
+**A filter with a button is a choice that has not happened yet.** There is no
+JavaScript on these pages, so a `select` cannot apply itself: it needs a submit
+beside it. Every value is a link instead. Choosing keeps whatever else is
+narrowed, choosing what is already chosen clears it, so one control turns a
+filter on and off and there is no small x to hunt for; the value in force leads
+the row so it can never hide inside the fold. The search stays a form of one
+field, because it is typed, and a browser submits that on Enter unasked.
+
+**The reload is not a switch.** It was one for an afternoon, off by default, on
+the reasoning that a page reloading under somebody's hands throws away the note
+they were typing. That is still true and it is the wrong trade: this board is
+written to by agents while somebody is looking at it, so a page that changes only
+when a person presses something is wrong most of the time, and asking them to opt
+into being told the truth is asking the wrong question.
+
+**A capability has to say what it grants on the day it grants it.** Filing, notes
+and urgency all went behind the read link, and the warning on the page still
+described the shorter list it was written for. A link whose warning is a version
+behind is a link somebody shares on the wrong reading of it.
