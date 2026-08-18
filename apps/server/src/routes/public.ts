@@ -1169,7 +1169,7 @@ ${
       const kept = new URLSearchParams();
       for (const [name, value] of raw.entries()) if (value !== '') kept.append(name, value);
       const canonical = kept.toString();
-      return reply.redirect(`/r/${readToken}/board${canonical === '' ? '' : `?${canonical}`}`, 303);
+      return reply.redirect(`/r/${encodeURIComponent(readToken)}/board${canonical === '' ? '' : `?${canonical}`}`, 303);
     }
 
     if (!limitSeeking(request, reply)) return reply;
@@ -1531,7 +1531,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     // the layout itself, every time it is drawn, which is both safer and more
     // useful: the trap is visible whenever somebody looks, not only in the
     // second after they saved.
-    return reply.redirect(`/r/${readToken}/board`, 303);
+    return reply.redirect(`/r/${encodeURIComponent(readToken)}/board`, 303);
   });
 
   /**
@@ -1566,7 +1566,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
       what: 'owner',
       ...keptParams(form),
     });
-    return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
+    return reply.redirect(`/r/${encodeURIComponent(readToken)}/board?${params.toString()}`, 303);
   });
 
   /**
@@ -1613,7 +1613,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
       what: 'label',
       ...keptParams(form),
     });
-    return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
+    return reply.redirect(`/r/${encodeURIComponent(readToken)}/board?${params.toString()}`, 303);
   });
 
   /**
@@ -1658,7 +1658,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
       merged: `${moved.from}>${moved.to}`,
       ...keptParams(form),
     });
-    return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
+    return reply.redirect(`/r/${encodeURIComponent(readToken)}/board?${params.toString()}`, 303);
   });
 
   app.post('/r/:readToken/board/new', { schema: { hide: true } }, async (request, reply) => {
@@ -1726,7 +1726,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
       );
     }
     const params = new URLSearchParams({ done: slug, what: 'new', ...keptParams(form) });
-    return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
+    return reply.redirect(`/r/${encodeURIComponent(readToken)}/board?${params.toString()}`, 303);
   });
 
   /**
@@ -1766,7 +1766,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
       what: 'priority',
       ...keptParams(form),
     });
-    return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
+    return reply.redirect(`/r/${encodeURIComponent(readToken)}/board?${params.toString()}`, 303);
   });
 
   /**
@@ -1835,7 +1835,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
       what: Object.keys(changed).length > 0 ? 'edit' : 'unchanged',
       ...keptParams(form),
     });
-    return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
+    return reply.redirect(`/r/${encodeURIComponent(readToken)}/board?${params.toString()}`, 303);
   });
 
   app.post('/r/:readToken/board/note', { schema: { hide: true } }, async (request, reply) => {
@@ -1864,7 +1864,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
       what: message === '' ? 'nothing' : 'note',
       ...keptParams(form),
     });
-    return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
+    return reply.redirect(`/r/${encodeURIComponent(readToken)}/board?${params.toString()}`, 303);
   });
 
   app.post('/r/:readToken/board/move', { schema: { hide: true } }, async (request, reply) => {
@@ -1895,7 +1895,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
       landed: result.landedIn ?? '',
       ...keptParams(form),
     });
-    return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
+    return reply.redirect(`/r/${encodeURIComponent(readToken)}/board?${params.toString()}`, 303);
   });
 
   app.post('/r/:readToken/escalations/:id', { schema: { hide: true } }, async (request, reply) => {
@@ -1928,13 +1928,13 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     // rather than a URL from the form: a redirect target somebody can type is
     // a redirect target somebody else can send.
     if ((form.back ?? '') !== 'board') {
-      return reply.redirect(`/r/${readToken}?answered=${encodeURIComponent(id)}`, 303);
+      return reply.redirect(`/r/${encodeURIComponent(readToken)}?answered=${encodeURIComponent(id)}`, 303);
     }
     // Back to the board as it was being read, narrowing included: answering a
     // question from a filtered board and landing on the unfiltered one is the
     // board losing somebody's place for them.
     const params = new URLSearchParams({ answered: id, ...keptParams(form) });
-    return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
+    return reply.redirect(`/r/${encodeURIComponent(readToken)}/board?${params.toString()}`, 303);
   });
 
   /**
@@ -1995,7 +1995,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
       return explain(error);
     }
     record(store, 'handover_request', { door: 'browser', projectId: project._id });
-    return reply.redirect(`/r/${readToken}`, 303);
+    return reply.redirect(`/r/${encodeURIComponent(readToken)}`, 303);
   });
 
   app.post('/r/:readToken/claim', { schema: { hide: true } }, async (request, reply) => {

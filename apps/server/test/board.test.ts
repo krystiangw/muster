@@ -1910,6 +1910,27 @@ describe('a board many agents write to', () => {
     assert.equal(await views(), before + 1, 'the page it lands on is a read');
   });
 
+  it('sends the token back the way it arrived, whatever it was', async () => {
+    // The tidy-up bounce runs before anything has looked the token up, so what
+    // it puts in the Location is whatever was in the path. Fastify hands it
+    // over decoded: a token written as `..%2f%2felsewhere` came back as
+    // `/r/..//elsewhere/board`, which is our own host by the rules of a
+    // relative redirect and nobody else's by any of them, but it is still a
+    // path this service never meant to name.
+    const crafted = await harness.server.inject({
+      method: 'GET',
+      url: '/r/..%2f%2felsewhere.example/board?owner=',
+    });
+    assert.equal(crafted.statusCode, 303);
+    const location = String(crafted.headers.location);
+    assert.ok(!location.includes('//'), `a redirect with an authority in it: ${location}`);
+    assert.equal(location, '/r/..%2F%2Felsewhere.example/board');
+
+    // And what it lands on is the 404 any unknown token gets.
+    const landed = await harness.server.inject({ method: 'GET', url: location });
+    assert.equal(landed.statusCode, 404);
+  });
+
   it('keeps the agent it is already filtered by in the list', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'one', title: 'one', actor: 'errors-loop' });
