@@ -26,6 +26,7 @@ import { createStore, ensureIndexes, type Store } from '../src/db.js';
 import { newId, newToken, hashToken } from '../src/ids.js';
 import {
   DEFAULT_BOARD,
+  DEFAULT_RULES,
   type AgentDoc,
   type EscalationDoc,
   type EventDoc,
@@ -77,7 +78,10 @@ const main: ProjectDoc = {
   tier: 'free',
   limits: config.tiers.free,
   counts: { items: 0, agents: 0, escalations: 0 },
-  rules: { staleAfterHours: 48, absenceResolve: null },
+  // The rules a real project gets, not a subset: a rule left undefined reads as
+  // "not null" and runs with a nonsense cutoff, which measures a query nobody
+  // issues.
+  rules: DEFAULT_RULES,
   board: DEFAULT_BOARD,
   readToken: newId('r', 16),
   claimedBy: 'operator@example.com',
@@ -116,13 +120,16 @@ say(`seeding ${ITEMS} items, ${ESCALATIONS} questions, ${AGENTS} agents, ${PROJE
 await bulk('items', ITEMS, (index) => {
   const status = pick(STATUSES);
   const touched = ago(random() * 365);
+  // A fleet files a few titles it never describes. They are what the partial
+  // index is for, and seeding none of them would measure an empty index.
+  const contentless = random() < 0.02;
   return {
     _id: newId('i'),
     projectId: main._id,
     slug: `${pick(LABELS)}:${index}-${Math.floor(random() * 1000)}`,
     title: `work item ${index} about ${pick(LABELS)} and ${pick(AGENT_HANDLES)}`,
     titleKey: `work item ${index}`,
-    body: 'A description of the problem, long enough to be realistic but not a novel. '.repeat(3),
+    body: contentless ? '' : 'A description of the problem, long enough to be realistic but not a novel. '.repeat(3),
     status,
     owner: pick(OWNERS),
     priority: Math.floor(random() * 7) - 1,
@@ -137,13 +144,13 @@ await bulk('items', ITEMS, (index) => {
         ? { agent: pick(AGENT_HANDLES), expiresAt: new Date(now.getTime() + 3_600_000), heartbeatAt: now }
         : null,
     absence: { count: 0, since: null },
-    timeline: Array.from({ length: 5 }, (_, entry) => ({
+    timeline: Array.from({ length: contentless ? 0 : 5 }, (_, entry) => ({
       at: ago(random() * 365),
       by: pick(AGENT_HANDLES),
       kind: 'note' as const,
       message: `iteration ${entry}: what changed and why, in the words the agent used`,
     })),
-    timelineCount: 5,
+    timelineCount: contentless ? 0 : 5,
     createdAt: ago(365),
     updatedAt: touched,
     touchedAt: touched,
@@ -196,7 +203,7 @@ await bulk('projects', PROJECTS, (index) => ({
   tier: 'free',
   limits: config.tiers.free,
   counts: { items: 20, agents: 3, escalations: 2 },
-  rules: { staleAfterHours: 48, absenceResolve: null },
+  rules: DEFAULT_RULES,
   board: DEFAULT_BOARD,
   readToken: newId('r', 16),
   claimedBy: index % 3 === 0 ? 'operator@example.com' : `somebody${index}@example.com`,
@@ -294,6 +301,12 @@ const { sweepProject, expireClaims, resolveAbsent, dropContentless, markStale, c
 await timed('a full hygiene sweep of this board', async () => sweepProject(store, main), 3);
 // Where a sweep spends itself, because it runs every five minutes per project
 // and on the request path behind a throttle.
+//
+// Whichever of these touches an unindexed collection first pays for reading it:
+// the same pass measured 680ms as the first thing to run and 70ms once the
+// pages were in cache. So the line above is a cold number and the ones below it
+// are warm ones, which is also the pair a deployment sees, the first sweep after
+// a restart against every one after it.
 await timed('  expireClaims', async () => expireClaims(store, main._id, new Date()), 3);
 await timed('  resolveAbsent', async () => resolveAbsent(store, main._id, main.rules, new Date()), 3);
 await timed('  dropContentless', async () => dropContentless(store, main._id, main.rules, new Date()), 3);
@@ -301,6 +314,22 @@ await timed('  markStale', async () => markStale(store, main._id, main.rules, ne
 await timed('  correctOvercount', async () => correctOvercount(store, main._id), 3);
 const { insights } = await import('../src/events.js');
 await timed('the insights report', async () => insights(store), 3);
+
+// The four distincts behind the filter dropdowns on the board page, measured
+// before deciding whether they are worth an index each.
+const { boardFacets } = await import('../src/board.js');
+await timed('the board page facets', async () => boardFacets(store, (await store.projects.findOne({ _id: main._id }))!), 3);
+// Split out, because the total says the board page costs a sixth of a second
+// and not which of the four reads is spending it. Three of them are a walk of
+// the distinct values; the fourth is an array field, and no index spares it the
+// documents behind the keys.
+await timed('  distinct owner', async () => store.items.distinct('owner', { projectId: main._id }), 3);
+await timed('  distinct labels', async () => store.items.distinct('labels', { projectId: main._id }), 3);
+await timed('  distinct lastActor', async () => store.items.distinct('lastActor', { projectId: main._id }), 3);
+await timed('  distinct claim.agent (live only)', async () =>
+  store.items.distinct('claim.agent', { projectId: main._id, 'claim.expiresAt': { $gt: new Date() } }),
+  3,
+);
 
 say('\nthe pages a person opens');
 await timed('GET /r/:token (the mail link)', inject(`/r/${main.readToken}`));
@@ -348,6 +377,20 @@ await explain('the project page table, the rest', () =>
     .find({ projectId: main._id, _id: { $nin: ['i_none'] } })
     .sort({ updatedAt: -1 })
     .limit(25)
+    .explain('executionStats') as never,
+);
+await explain('the inbox: answers not acted on', () =>
+  store.escalations
+    .find({ projectId: main._id, status: { $ne: 'open' }, acknowledgedAt: null })
+    .sort({ answeredAt: -1 })
+    .limit(50)
+    .explain('executionStats') as never,
+);
+await explain('the inbox: questions still waiting', () =>
+  store.escalations
+    .find({ projectId: main._id, status: 'open' })
+    .sort({ createdAt: 1 })
+    .limit(50)
     .explain('executionStats') as never,
 );
 await explain('answered questions, newest first', () =>
@@ -419,6 +462,77 @@ await explain('the stale list', () =>
     .limit(20)
     .explain('executionStats') as never,
 );
+
+/**
+ * What the reads above cost the writes.
+ *
+ * Four indexes were added to make those numbers, and every one of them is paid
+ * for on every write to the collection it sits on. An audit that measures only
+ * the half it improved is an argument, not a measurement.
+ */
+const { upsertItem, appendNote, claimItem, releaseItem, createEscalation } = await import(
+  '../src/service.js'
+);
+const { moveItem } = await import('../src/board.js');
+
+// A hundred at a time, because one write is under a millisecond and the whole
+// question here is what a fifth index adds to that. Timing single writes would
+// print zero twice and prove nothing.
+const BLOCK = 100;
+const writes = async (label: string) => {
+  say(`\n${label} (per ${BLOCK})`);
+  const project = (await store.projects.findOne({ _id: main._id }))!;
+  let n = 0;
+  const block = (name: string, once: (index: number) => Promise<unknown>) =>
+    timed(name, async () => {
+      for (let index = 0; index < BLOCK; index += 1) await once(index);
+    }, 3);
+
+  await block('create an item', async () => {
+    n += 1;
+    return upsertItem(store, project, { slug: `perf:new-${label}-${n}`, title: 'a new item', actor: 'perf' });
+  });
+  await upsertItem(store, project, { slug: `perf:hot-${label}`, title: 'the same item, again', actor: 'perf' });
+  await block('update the same item', async () =>
+    upsertItem(store, project, { slug: `perf:hot-${label}`, title: 'the same item, again', body: 'changed', actor: 'perf' }),
+  );
+  await block('append a note', async () => appendNote(store, project, `perf:hot-${label}`, 'perf', 'a note'));
+  await block('claim and release', async () => {
+    await claimItem(store, project, `perf:hot-${label}`, 'perf', 5);
+    return releaseItem(store, project, `perf:hot-${label}`, 'perf');
+  });
+  await block('move a card', async () =>
+    moveItem(store, project, { slug: `perf:hot-${label}`, column: 'doing', actor: 'perf' }),
+  );
+  await block('file a question', async () => {
+    n += 1;
+    return createEscalation(store, project, { agent: 'perf', question: `a question ${n}` }, 'http');
+  });
+};
+
+// The cap counts open items, and this board has twenty three thousand of them
+// on purpose, so the writes below would be refused before they were measured.
+// The audit lifts the cap rather than the tier: what is under test is what a
+// write costs against a large collection, not the accounting that guards it.
+await store.projects.updateOne(
+  { _id: main._id },
+  { $set: { tier: 'pro', limits: { ...config.tiers.pro, items: 10_000_000, escalations: 100_000 } } },
+);
+
+await writes('writes, with the indexes this service now has');
+
+// Every index added today, plus `recent` back to the shape it had before the
+// tiebreaker was appended. What is left is the index set of this morning.
+for (const name of ['urgency', 'stable', 'stale', 'staleScan', 'owners', 'actors', 'undescribed']) {
+  await store.items.dropIndex(name).catch(() => undefined);
+}
+for (const name of ['answered', 'unread']) {
+  await store.escalations.dropIndex(name).catch(() => undefined);
+}
+await store.items.dropIndex('recent').catch(() => undefined);
+await store.items.createIndexes([{ key: { projectId: 1, updatedAt: -1 }, name: 'recent' }]);
+
+await writes('the same writes, on this morning\'s indexes');
 
 await server.close();
 await store.close();

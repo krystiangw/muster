@@ -204,6 +204,22 @@ export function buildBoard(
   };
 }
 
+/**
+ * Whether this layout puts finished work on the board.
+ *
+ * Closed work is off the board unless a column asks for it, which keeps the
+ * scan bounded on a project with a long history. A column with no status filter
+ * asks for every status, including the closed ones: a catch-all column that
+ * silently dropped finished work would be the board hiding work again.
+ */
+function boardShowsClosed(config: BoardConfig): boolean {
+  return config.columns.some((column) => {
+    const statuses = column.match.status;
+    if (!statuses || statuses.length === 0) return true;
+    return statuses.some((status) => status === 'done' || status === 'dropped');
+  });
+}
+
 export async function loadBoard(
   store: Store,
   project: ProjectDoc,
@@ -211,17 +227,7 @@ export async function loadBoard(
 ): Promise<BoardView> {
   const config = boardConfigOf(project);
 
-  // Closed work is off the board unless a column asks for it, which keeps the
-  // scan bounded on a project with a long history. A column with no status
-  // filter asks for every status, including the closed ones: a catch-all column
-  // that silently dropped finished work would be the board hiding work again.
-  const wantsClosed =
-    options.includeClosed ??
-    config.columns.some((column) => {
-      const statuses = column.match.status;
-      if (!statuses || statuses.length === 0) return true;
-      return statuses.some((status) => status === 'done' || status === 'dropped');
-    });
+  const wantsClosed = options.includeClosed ?? boardShowsClosed(config);
 
   const query: Record<string, unknown> = { projectId: project._id };
   if (!wantsClosed) query.status = { $nin: ['done', 'dropped'] };
@@ -278,7 +284,7 @@ export interface AgentFacet {
 export interface BoardFacets {
   owners: string[];
   agents: AgentFacet[];
-  /** Every label in use, so a filter never offers one with nothing behind it. */
+  /** Every label on the work this board shows, so no filter comes back empty. */
   labels: string[];
   /** Names left out for length. Zero on every project anybody actually has. */
   omitted: { owners: number; agents: number; labels: number };
@@ -312,12 +318,24 @@ export const FACET_LIMIT = 400;
  * a name that is only a leftover on an old item is the one worth losing first.
  */
 export async function boardFacets(store: Store, project: ProjectDoc): Promise<BoardFacets> {
+  // The same work the board itself scans. A layout that keeps finished work off
+  // the board used to be offered the labels and owners of a year of closed
+  // items: picking one narrowed the board to nothing, which is the empty filter
+  // this function exists to avoid. It is also what these reads cost. The cap on
+  // a project counts what is still open, so the closed items behind a board are
+  // bounded by nothing, and a `distinct` over an array field has to read every
+  // document behind the keys whatever it is indexed by.
+  const scope: Record<string, unknown> = { projectId: project._id };
+  if (!boardShowsClosed(boardConfigOf(project))) {
+    scope.status = { $nin: ['done', 'dropped'] };
+  }
+
   const [owners, labels, actors, holders, registered] = await Promise.all([
-    store.items.distinct('owner', { projectId: project._id }),
-    store.items.distinct('labels', { projectId: project._id }),
-    store.items.distinct('lastActor', { projectId: project._id }),
+    store.items.distinct('owner', scope),
+    store.items.distinct('labels', scope),
+    store.items.distinct('lastActor', scope),
     store.items.distinct('claim.agent', {
-      projectId: project._id,
+      ...scope,
       'claim.expiresAt': { $gt: new Date() },
     }),
     store.agents

@@ -916,6 +916,58 @@ describe('a board many agents write to', () => {
     assert.ok(facets.agents.includes('idle-loop'), 'a registered agent counts even before it writes');
   });
 
+  it('offers nothing that only closed work carries, when the board hides it', async () => {
+    const project = await createProject(harness);
+    await put(project, '/board', {
+      columns: [{ title: 'Open', match: { status: ['open'] } }],
+    });
+    await post(project, '/items', {
+      slug: 'shipped',
+      title: 'shipped last year',
+      owner: 'sam',
+      labels: ['archive'],
+      status: 'done',
+      actor: 'old-loop',
+    });
+    await post(project, '/items', {
+      slug: 'live',
+      title: 'still open',
+      owner: 'alex',
+      labels: ['build'],
+      actor: 'errors-loop',
+    });
+
+    const facets = (
+      await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/board/facets`,
+        headers: authed(project),
+      })
+    ).json();
+    // Offering `sam` or `archive` here is offering a filter whose board comes
+    // back empty: this layout has no column that could show what is behind it.
+    assert.deepEqual(facets.owners, ['alex']);
+    assert.ok(!facets.agents.includes('old-loop'), 'only ever wrote to closed work');
+    assert.ok(facets.agents.includes('errors-loop'));
+
+    // And the same board with a column for finished work offers both again.
+    await put(project, '/board', {
+      columns: [
+        { title: 'Open', match: { status: ['open'] } },
+        { title: 'Done', match: { status: ['done'] } },
+      ],
+    });
+    const wider = (
+      await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/board/facets`,
+        headers: authed(project),
+      })
+    ).json();
+    assert.deepEqual(wider.owners, ['alex', 'sam']);
+    assert.ok(wider.agents.includes('old-loop'));
+  });
+
   it('offers every agent by its own name, described, in the browser too', async () => {
     const project = await createProject(harness, 'many hands');
     await post(project, '/agents', {

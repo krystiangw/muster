@@ -708,5 +708,63 @@ nothing reads the whole collection, 188 ms at fifty thousand items, because a
 case insensitive substring in either field is not indexable; making it fast
 means a text index, and that changes what the search means, which is a product
 decision rather than a performance one. And `dropContentless` walks the open
-items at 21 ms a sweep, which is not worth an eleventh index on the collection
-every write already pays for.
+items at 21 ms a sweep, which did not look worth an eleventh index on the
+collection every write already pays for. The second of those was wrong at four
+times the size, and the section below is what changed it.
+
+## Four times the cap, and what an index costs, 2026-08-18
+
+The audit above stopped at fifty thousand items in one project, which is above
+what the largest plan sells. That plan caps a project at twenty thousand items
+and the cap counts what is still open, so the closed work behind a board is
+bounded by nothing: a fleet that finishes a hundred items a day carries a
+hundred thousand of them into its second year, and every read that scales with
+the collection rather than with the board scales with that. So the second pass
+ran at two hundred thousand, and priced each new index on the writes as well as
+on the reads. An audit that measures only the half it improved is an argument,
+not a measurement.
+
+| | before | after |
+|---|---|---|
+| `distinct` for the owner filter | 175 ms | 0 ms |
+| `distinct` for the agent filter | 175 ms | 0 ms |
+| `distinct` for the label filter | 175 ms | 175 ms |
+| the pass that drops undescribed items | 680 ms cold, 70 ms warm | 6 ms |
+| a search that matches nothing | 1016 ms | 1016 ms |
+
+**An array field cannot be walked for its distinct values.** Three of the four
+filter dropdowns are a `distinct` over the project, and an index turns each into
+a walk of the distinct values: two hundred thousand documents read becomes a few
+dozen keys, and the number goes to zero. The fourth is `labels`, which is an
+array, so its index is multikey, and a multikey index cannot answer a `distinct`
+without fetching the documents behind the keys. It measured 175 ms with the
+index and 175 ms without it, while making every write to an item pay for a
+second index: creating a hundred items went from 48 ms to 67 ms and moving a
+hundred cards from 56 ms to 70 ms. The index was removed. An index that costs
+writes and buys no read is worse than no index, and the only way to know which
+one you have is to measure both halves.
+
+**A filter should offer what its own board can show.** The same reads got a
+correctness fix on the way past. The filters read every owner, label and handle
+in the project, but a board only shows the statuses its columns ask for, so on a
+layout with no column for finished work the dropdown offered the labels of a
+year of closed items and picking one produced an empty board. They now read the
+work the board itself scans, which is the narrower set on exactly the layouts
+where the difference was visible.
+
+**The first read of a collection pays for reading it.** The pass that drops
+items nobody ever described measured 680 ms as the first thing to touch the
+items after a restart, and 70 ms once the pages were in cache: the same code,
+the same query, an order of magnitude apart. Both numbers are real, and which
+one a deployment sees depends on how long ago it restarted. A partial index over
+the empty bodies takes it to 6 ms either way, and stays small by construction
+because it holds only the documents the rule is about.
+
+**Two things were measured and left alone again.** A search that matches nothing
+still reads every item, now a full second of it. Indexing the two fields it
+searches made it worse rather than better: the planner spent 1.1 s choosing
+between the new indexes and the sort index, then picked the sort index and
+fetched all two hundred thousand documents anyway. Making that fast is a change
+to what the search means, not a change to how it is stored. And the insights
+report costs half a second over two hundred thousand events, which is a page one
+person opens, against the one collection every request writes to.

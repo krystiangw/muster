@@ -345,6 +345,27 @@ export async function ensureIndexes(store: Store): Promise<void> {
       // expensive thing hygiene does, it runs every five minutes per project,
       // and without this it reads every open item the project holds.
       { key: { projectId: 1, status: 1, stale: 1, touchedAt: 1 }, name: 'staleScan' },
+      // Two of the lists behind the filter dropdowns on the board page, each of
+      // which is a `distinct` over the project. With an index that is a walk of
+      // the distinct values and nothing else; without one it is a scan of every
+      // item, on every load of the busiest page a person opens.
+      //
+      // The third list, the labels, deliberately has no index. Labels are an
+      // array, so any index over them is multikey, and a multikey index cannot
+      // answer a `distinct` without fetching the documents behind the keys: it
+      // was measured at 175ms either way on two hundred thousand items, while
+      // making every write to an item pay for a second index. An index that
+      // costs writes and buys no read is worse than no index.
+      { key: { projectId: 1, owner: 1 }, name: 'owners' },
+      { key: { projectId: 1, lastActor: 1 }, name: 'actors' },
+      // Items created and never described, for the pass that drops them.
+      // Partial because that is a handful of documents on any board, and an
+      // index over the ones that do have a body is the collection again.
+      {
+        key: { projectId: 1, createdAt: 1 },
+        name: 'undescribed',
+        partialFilterExpression: { body: '' },
+      },
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
     ]),
     ensure(store.escalations, [
@@ -361,6 +382,11 @@ export async function ensureIndexes(store: Store): Promise<void> {
       // than when the question was asked, which is the order those two read
       // and the one `inbox` cannot serve.
       { key: { projectId: 1, answeredAt: -1 }, name: 'answered' },
+      // The inbox, which is the endpoint an agent polls on every iteration:
+      // answers it has not acted on yet, newest first. Without the
+      // acknowledgement in the key, a board whose answers have all been acted
+      // on walks every one of them to return nothing, on every poll, for ever.
+      { key: { projectId: 1, acknowledgedAt: 1, answeredAt: -1 }, name: 'unread' },
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
     ]),
     ensure(store.keys, [
