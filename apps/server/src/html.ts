@@ -157,7 +157,7 @@ td .face { vertical-align:-3px; margin-right:4px; }
 /* Filing a card. In a sheet, like everything else that is a form rather than
    something to read: on the page it was a pair of large empty boxes above a
    board, which is the page apologising for itself. */
-.addcard { margin:0 0 14px; font-family:var(--mono); font-size:12.5px; }
+.addcard { margin:0 0 14px; }
 .newitem { display:flex; flex-direction:column; gap:8px; max-width:none; margin:0; }
 .newitem label { font-size:12px; font-family:var(--mono); color:var(--muted); }
 .newitem input, .newitem textarea { width:100%; }
@@ -189,9 +189,19 @@ label { display:flex; flex-direction:column; gap:5px; font-size:14px; color:var(
 input, select, textarea { font:inherit; font-size:15px; padding:9px 11px; background:var(--surface);
   color:var(--ink); border:1px solid var(--rule); border-radius:3px; }
 textarea { min-height:80px; font-family:var(--mono); font-size:13.5px; }
-button { font:inherit; font-size:14.5px; font-weight:560; padding:9px 16px; cursor:pointer;
+/* One appearance for one meaning. A link that performs the page's action is a
+   button to everybody who is not reading the markup, and "Add an item" spent a
+   week as a line of underlined text among other lines of underlined text: it
+   read as another place to navigate to rather than as the thing to press. The
+   element still differs where it has to, because a GET belongs in an anchor
+   and a write belongs in a form, but the two share this rule so neither can
+   drift away from the other. */
+button, .btn { font:inherit; font-size:14.5px; font-weight:560; padding:9px 16px; cursor:pointer;
   background:var(--accent); color:var(--bg); border:1px solid var(--accent); border-radius:3px; }
-button.ghost { background:transparent; color:var(--accent); }
+.btn { display:inline-block; text-decoration:none; }
+.btn:hover { color:var(--bg); text-decoration:none; }
+button.ghost, .btn.ghost { background:transparent; color:var(--accent); }
+.btn.ghost:hover { color:var(--accent); }
 /* board */
 /* Prose wants 66 characters, a board wants room, so a board page widens the
    whole column (see .wrap.wide) rather than escaping it with viewport-width

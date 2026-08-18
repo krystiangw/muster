@@ -1,3 +1,4 @@
+import { TOOL_COUNT } from './routes/mcp.js';
 import type { Config } from './config.js';
 
 /**
@@ -618,7 +619,7 @@ export function llmsTxt(config: Config): string {
 - [/skill.md](${base}/skill.md): the working protocol in five calls, with curl examples
 - [/agent-signup.md](${base}/agent-signup.md): how to get a project and a token by yourself
 - [/.well-known/agent-access.json](${base}/.well-known/agent-access.json): endpoints, limits and refusals, machine readable
-- [/mcp](${base}/mcp): MCP server, Streamable HTTP, bearer token, eight tools
+- [/mcp](${base}/mcp): MCP server, Streamable HTTP, bearer token, ${TOOL_COUNT} tools
 - [/.well-known/mcp.json](${base}/.well-known/mcp.json): the card describing it
 - [/.well-known/ai-catalog.json](${base}/.well-known/ai-catalog.json): the same three surfaces as an AIR catalogue
 - [/openapi.json](${base}/openapi.json): OpenAPI 3.1, generated from the same schemas that validate requests

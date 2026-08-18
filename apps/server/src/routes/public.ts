@@ -1,3 +1,4 @@
+import { TOOL_COUNT } from './mcp.js';
 import { clientIp } from './api.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
@@ -256,13 +257,16 @@ function keptParams(form: KeptFilter): Record<string, string> {
 export function registerPublic(app: FastifyInstance, deps: PublicDeps): void {
   const { store, config, limiter, mailer } = deps;
   const base = config.baseUrl;
+  // Ours, so a person moving between our own pages is not counted as arriving
+  // from somewhere.
+  const ourHost = new URL(base).host;
 
   app.get('/health', { schema: { hide: true } }, async () => ({ ok: true }));
 
   // ------------------------------------------------------------- landing
 
   app.get('/', { schema: { hide: true } }, async (request, reply) => {
-    recordView(store, 'landing', request);
+    recordView(store, 'landing', request, ourHost);
     // The biggest page here by some way, and nothing on it belongs to anyone.
     // See the allowlist in app.ts. One word of it does depend on the reader,
     // the nav label, which is read off the cookie and never from the database:
@@ -388,7 +392,7 @@ GitHub</a>, and it runs on Node and MongoDB if you would rather host it yourself
   // ---------------------------------------------------------------- docs
 
   app.get('/docs', { schema: { hide: true } }, async (request, reply) => {
-    recordView(store, 'docs', request);
+    recordView(store, 'docs', request, ourHost);
     reply.compressible = true;
     const body = `
 <h1>Docs</h1>
@@ -543,11 +547,31 @@ also how an existing inbox gets imported:</p>
   -H "authorization: Bearer $ADMIN_TOKEN" -H 'content-type: application/json' \\
   -d '{"status":"answered","answer":"Bridge it via the third venue."}'</code></pre>
 
+<h2>The typed client</h2>
+<p>There is one, it is called <code>musterboard</code>, and it is on npm. Our own scan of this
+site could not work out what a developer installs, which is a fair complaint: the name was in
+the protocol files an agent reads and nowhere a person would look.</p>
+<pre class="scroll"><code>npm install musterboard</code></pre>
+<pre class="scroll"><code>import { Muster } from 'musterboard';
+
+const muster = new Muster({
+  project: process.env.MUSTER_PROJECT!,
+  token: process.env.MUSTER_TOKEN!,
+  actor: 'errors-loop',
+});
+await muster.upsert({ slug: 'errors:withdraw-stuck', title: 'Withdrawals hang' });</code></pre>
+<p>Types are shipped with the package, it has no dependencies, and it speaks to a self-hosted
+deployment by changing one URL. The source is in
+<a href="https://github.com/krystiangw/muster/tree/main/packages/sdk">packages/sdk</a>. Nothing
+here needs it: the same calls are four lines of <code>curl</code>, which is what
+<a href="/skill.md">skill.md</a> gives an agent.</p>
+
 <h2>Interfaces</h2>
 <ul>
   <li><a href="/skill.md">skill.md</a>: the five calls with copy-paste curl. Give this to your agent.</li>
+  <li><a href="https://www.npmjs.com/package/musterboard"><code>musterboard</code> on npm</a>: the typed client, for the code a person writes.</li>
   <li><a href="/openapi.json">openapi.json</a>: OpenAPI 3.1, generated from the same schemas that validate requests.</li>
-  <li><code>${escapeHtml(base)}/mcp</code>: MCP over Streamable HTTP, ten tools with the same names as the REST calls.</li>
+  <li><code>${escapeHtml(base)}/mcp</code>: MCP over Streamable HTTP, ${TOOL_COUNT} tools with the same names as the REST calls.</li>
   <li><a href="/docs/keys">Keys and access</a>: tokens, roles and creating keys programmatically.</li>
 </ul>
 `;
@@ -564,7 +588,7 @@ also how an existing inbox gets imported:</p>
   });
 
   app.get('/docs/keys', { schema: { hide: true } }, async (request, reply) => {
-    recordView(store, 'docs/keys', request);
+    recordView(store, 'docs/keys', request, ourHost);
     reply.compressible = true;
     const body = `
 <h1>Keys and access</h1>
@@ -621,7 +645,7 @@ There is no authorization code flow, because there is no end user to ask for con
   });
 
   app.get('/pricing', { schema: { hide: true } }, async (request, reply) => {
-    recordView(store, 'pricing', request);
+    recordView(store, 'pricing', request, ourHost);
     reply.compressible = true;
     const { demo, free } = config.tiers;
     const body = `
@@ -686,7 +710,7 @@ want us to run it under an agreement, and the free tier stays.</p>
   // -------------------------------------------------------------- signup
 
   app.get('/signup', { schema: { hide: true } }, async (request, reply) => {
-    recordView(store, 'signup', request);
+    recordView(store, 'signup', request, ourHost);
     reply.compressible = true;
     const body = `
 <h1>Create a project</h1>
@@ -825,7 +849,7 @@ address. Claiming is free and raises the limits:</p>
     if (!limitReads(request, reply)) return reply;
     // Counted once the page is actually going to be drawn. A stale bookmark and
     // a token probe both end above this line, and neither is somebody reading.
-    recordView(store, 'project', request);
+    recordView(store, 'project', request, ourHost);
     void maybeExpireClaims(store, project).catch(() => undefined);
 
     // Twenty five, not two hundred. This is the page the mail sends somebody to,
@@ -1202,7 +1226,7 @@ ${
     if (!limitReads(request, reply)) return reply;
     // Counted once the page is actually going to be drawn. A stale bookmark and
     // a token probe both end above this line, and neither is somebody reading.
-    recordView(store, 'board', request);
+    recordView(store, 'board', request, ourHost);
     void maybeExpireClaims(store, project).catch(() => undefined);
     const query = request.query as {
       moved?: string;

@@ -332,6 +332,10 @@ describe('what a read is allowed to tidy', () => {
     // whether to run a tool without asking a person first.
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'placeholder', title: 'look into this', actor: 'a' });
+    // The write's own sweep is fired and not awaited, so without this pause it
+    // can land after the backdating line below and drop the item itself, which
+    // would fail this test for the one reason it is not about.
+    await new Promise((resolve) => setTimeout(resolve, 150));
     await backdate(project, 'placeholder', { createdAt: hoursAgo(48) });
     // Both throttles opened, so nothing here is explained by one being held.
     await harness.store.projects.updateOne(

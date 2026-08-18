@@ -516,6 +516,15 @@ const TOOLS: ToolDefinition[] = [
   },
 ];
 
+/**
+ * How many tools the MCP server offers, for the documents that say so.
+ *
+ * Written down in three places once, and drifted in all three: the protocol
+ * map said eight, the docs page said ten, and the server had thirteen. A
+ * number a reader can check is a number that has to come from the list.
+ */
+export const TOOL_COUNT = TOOLS.length;
+
 export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
   const { store, config, limiter, notifier } = deps;
 

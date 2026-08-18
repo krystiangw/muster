@@ -43,7 +43,7 @@ const store = await connectStore(uri, dbName);
 const { events, projects, items } = store;
 const since = (days: number) => new Date(Date.now() - days * 86_400_000);
 
-const [report, fileRows, privateCount, weekSignups, weekWrites, moves, boardViews, unswept, oldestSweep] =
+const [report, fileRows, arrivals, privateCount, weekSignups, weekWrites, moves, boardViews, unswept, oldestSweep] =
   await Promise.all([
     insights(store),
     events
@@ -51,6 +51,18 @@ const [report, fileRows, privateCount, weekSignups, weekWrites, moves, boardView
         { $match: { kind: 'discover' } },
         { $group: { _id: '$detail', n: { $sum: 1 } } },
         { $sort: { n: -1 } },
+      ])
+      .toArray(),
+    // Where visits came from, which is the one question our own counting could
+    // not answer until the host was recorded beside the view. Hosts only: no
+    // path and no query string ever reaches this log, so a search somebody
+    // typed cannot be read out of it here or anywhere else.
+    events
+      .aggregate<{ _id: string; n: number }>([
+        { $match: { kind: 'view', from: { $ne: null }, at: { $gte: since(30) } } },
+        { $group: { _id: '$from', n: { $sum: 1 } } },
+        { $sort: { n: -1 } },
+        { $limit: 15 },
       ])
       .toArray(),
     projects.countDocuments({ visibility: 'owner' }),
@@ -156,6 +168,16 @@ if (pageRows.length > 0) {
   // how a feature gets refused twice for the same wrong reason.
   row('cards moved by hand', moves);
   row('  per board view', boardViews === 0 ? 0 : (moves / boardViews).toFixed(2));
+}
+
+if (arrivals.length > 0) {
+  console.log('\nWhere they came from, last 30 days');
+  for (const { _id, n } of arrivals) row(_id, n);
+} else {
+  // Said out loud rather than left as an empty section: nothing here means
+  // either nobody arrived from anywhere or every browser withheld the header,
+  // and those are different situations.
+  console.log('\nWhere they came from: nothing recorded in the last 30 days');
 }
 
 console.log('\nOn the boards right now');

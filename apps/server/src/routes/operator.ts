@@ -62,6 +62,7 @@ const MAX_CODE_ATTEMPTS = 5;
 export function registerOperator(app: FastifyInstance, deps: OperatorDeps): void {
   const { store, config, limiter, mailer } = deps;
   const ourOrigin = originOf(config.baseUrl);
+  const ourHost = new URL(config.baseUrl).host;
 
   /**
    * Two guards on every write here, never one.
@@ -122,7 +123,7 @@ export function registerOperator(app: FastifyInstance, deps: OperatorDeps): void
       'Sign in',
       `<h1>Sign in first</h1>
        <p>That session has ended or was never started here.</p>
-       <p><a href="/operator">Sign in with your email</a></p>`,
+       <p><a class="btn" href="/operator">Sign in with your email</a></p>`,
       401,
     );
     return null;
@@ -163,7 +164,7 @@ and you can end that from the view itself.</p>
   // ------------------------------------------------------------- signing in
 
   app.get('/operator', { schema: { hide: true } }, async (request, reply) => {
-    recordView(store, 'operator', request);
+    recordView(store, 'operator', request, ourHost);
     const session = await readSession(store, request);
     if (!session) {
       // A cookie that opens nothing is dropped here, so the navigation stops
@@ -318,7 +319,7 @@ and you can end that from the view itself.</p>
         'That code did not work',
         `<h1>That code did not work</h1>
          <p>It may have expired, been used already, or belong to a different address.</p>
-         <p><a href="/operator">Start again</a></p>`,
+         <p><a class="btn" href="/operator">Start again</a></p>`,
         400,
       );
 
@@ -358,7 +359,7 @@ and you can end that from the view itself.</p>
       `<h1>No such link</h1>
        <p>That link is wrong, or it has already been exchanged for a session. Links are good for
        one sign in now.</p>
-       <p><a href="/operator">Sign in with your email</a></p>`,
+       <p><a class="btn" href="/operator">Sign in with your email</a></p>`,
       404,
     );
 
@@ -368,7 +369,7 @@ and you can end that from the view itself.</p>
     if (!record) return noSuchLink(request, reply);
 
     // The same page under an older door, so it counts under the same name.
-    recordView(store, 'operator', request);
+    recordView(store, 'operator', request, ourHost);
 
     // Deliberately not spent by this GET. Mail security scanners and link
     // preview crawlers fetch every URL in a message before the person does, and
@@ -409,7 +410,7 @@ and you can end that from the view itself.</p>
       'Signed out',
       `<h1>Signed out</h1>
        <p>${form.scope === 'everywhere' ? 'Every browser signed in with that address has been signed out, and every old style link has been turned off.' : 'This browser is signed out. Others are not.'}</p>
-       <p><a href="/operator">Sign in again</a></p>`,
+       <p><a class="btn" href="/operator">Sign in again</a></p>`,
     );
   });
 

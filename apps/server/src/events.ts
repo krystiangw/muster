@@ -128,6 +128,17 @@ export interface EventDoc {
    * `discover`, so absent reads as "not known to be one" rather than as false.
    */
   crawler?: boolean;
+  /**
+   * The host that sent a visitor here, on `view` events, and only ever a host:
+   * no path, no query string, no full URL. It is the one thing our own
+   * counting could not answer and a third-party script could, and the reason
+   * we are not running one is that the script would be answering for the
+   * smallest slice of this audience. Agents do not execute JavaScript.
+   *
+   * Absent when nobody sent one, when the browser withheld it, and when the
+   * link came from our own pages, which is navigation rather than arrival.
+   */
+  from?: string | null;
   expiresAt: Date;
 }
 
@@ -171,7 +182,13 @@ export async function flushEvents(timeoutMs = 2_000): Promise<void> {
 export function record(
   store: Store,
   kind: EventKind,
-  options: { door: EventDoor; detail?: string; projectId?: string; crawler?: boolean } = {
+  options: {
+    door: EventDoor;
+    detail?: string;
+    projectId?: string;
+    crawler?: boolean;
+    from?: string | null;
+  } = {
     door: 'http',
   },
 ): void {
@@ -185,6 +202,7 @@ export function record(
       detail: options.detail ?? null,
       projectId: options.projectId ?? null,
       ...(options.crawler === undefined ? {} : { crawler: options.crawler }),
+      ...(options.from ? { from: options.from } : {}),
       expiresAt: new Date(now.getTime() + KEEP_DAYS * 86_400_000),
     })
     .catch(() => undefined)
@@ -206,15 +224,41 @@ export function record(
  */
 export interface ViewedRequest {
   method: string;
-  headers: { 'user-agent'?: string | undefined };
+  headers: { 'user-agent'?: string | undefined; referer?: string | undefined };
 }
 
-export function recordView(store: Store, page: Viewable, request: ViewedRequest): void {
+/**
+ * The host a visit came from, or null.
+ *
+ * A host and nothing else, deliberately. A full referrer carries the path and
+ * often the query somebody searched, which is personal data we have no use
+ * for: the question being answered is "which places send anybody here", and a
+ * host answers it. Our own host is dropped, because a person moving between
+ * our pages arrived once.
+ */
+export function arrivedFrom(referer: string | undefined, self: string): string | null {
+  if (!referer) return null;
+  try {
+    const host = new URL(referer).host.toLowerCase();
+    if (!host || host === self.toLowerCase()) return null;
+    return host.slice(0, 120);
+  } catch {
+    return null;
+  }
+}
+
+export function recordView(
+  store: Store,
+  page: Viewable,
+  request: ViewedRequest,
+  self = '',
+): void {
   // Fastify answers HEAD from the same handler as GET, so a probe that never
   // received a body would otherwise read as somebody looking at the page.
   if (request.method !== 'GET') return;
   if (isCrawler(request.headers['user-agent'])) return;
-  record(store, 'view', { door: 'browser', detail: page });
+  const from = arrivedFrom(request.headers.referer, self);
+  record(store, 'view', { door: 'browser', detail: page, ...(from ? { from } : {}) });
 }
 
 /**

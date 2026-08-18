@@ -643,7 +643,7 @@ export function renderNewItem(
   // half written description is a board that eats it.
   const openUrl = narrowedUrl(action, keep, { new: '1' });
   const closeUrl = narrowedUrl(action, keep, { new: undefined });
-  return `<p class="addcard"><a href="${escapeHtml(openUrl)}#new-item">Add an item</a></p>
+  return `<p class="addcard"><a class="btn" href="${escapeHtml(openUrl)}#new-item">Add an item</a></p>
 ${
     open
       ? `<div class="peeked open" id="new-item">

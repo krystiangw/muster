@@ -640,4 +640,37 @@ describe('counting the people, not the agents', () => {
       'three doors, the first answer of the raced one, and one edit rather than two',
     );
   });
+
+  it('records the host a visit came from, and never the path they were on', async () => {
+    // The question a third-party script would have answered for us, answered
+    // on our own side instead, because a script only counts the visitors that
+    // run JavaScript and the ones this product is built for do not. A host and
+    // nothing else: a full referrer carries the path, and often the words
+    // somebody typed into a search box.
+    await harness.server.inject({
+      method: 'GET',
+      url: '/',
+      headers: { referer: 'https://news.ycombinator.com/item?id=123&q=secret' },
+    });
+    // Our own pages are navigation, not arrival.
+    await harness.server.inject({
+      method: 'GET',
+      url: '/docs',
+      headers: { referer: `${harness.config.baseUrl}/pricing` },
+    });
+    await flushEvents();
+
+    const froms = await harness.store.events
+      .find({ kind: 'view', from: { $exists: true } })
+      .toArray();
+    assert.ok(
+      froms.some((event) => event.from === 'news.ycombinator.com'),
+      'the host that sent somebody here is worth knowing',
+    );
+    for (const event of froms) {
+      assert.doesNotMatch(String(event.from), /\//, 'a host has no path in it');
+      assert.doesNotMatch(String(event.from), /secret/, 'and no query string either');
+      assert.notEqual(event.from, new URL(harness.config.baseUrl).host);
+    }
+  });
 });
