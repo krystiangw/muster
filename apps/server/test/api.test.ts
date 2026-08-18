@@ -1250,6 +1250,27 @@ describe('who is writing, and by what name', () => {
     });
     assert.match(noted.json().warnings.join(' '), /"errors-loop" is/);
 
+    // An actor sent as an empty string is the same event as no actor at all:
+    // nobody said who was writing, and the board will show "unknown-agent".
+    const blank = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items/card/timeline`,
+      headers: authed(project),
+      payload: { message: 'empty on purpose', actor: '' },
+    });
+    assert.match(blank.json().warnings.join(' '), /Nothing named itself/);
+
+    // Punctuation is not a near miss of anybody: every string starts with
+    // nothing, so without a guard this suggested whoever registered first.
+    const punctuation = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items/card/timeline`,
+      headers: authed(project),
+      payload: { message: 'nonsense name', actor: '---' },
+    });
+    assert.match(punctuation.json().warnings.join(' '), /No agent is registered here as "---"/);
+    assert.ok(!punctuation.json().warnings.join(' ').includes('If that is you'));
+
     // And a write that named nobody says the loudest thing of all, because
     // "unknown-agent" is what the board will show for ever otherwise.
     const anonymous = await harness.server.inject({

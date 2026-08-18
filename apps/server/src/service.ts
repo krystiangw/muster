@@ -827,8 +827,10 @@ export async function nameWarning(
   projectId: string,
   actor: string,
 ): Promise<string | null> {
-  if (!actor) return null;
-  if (actor === 'unknown-agent') {
+  // An empty actor and the sentinel it becomes are the same event: nobody
+  // said who was writing. Reading them differently is how one of the two ends
+  // up silent, which is the case this whole function exists for.
+  if (actor === '' || actor === 'unknown-agent') {
     return 'Nothing named itself on that write, so the board shows it as "unknown-agent". Send `actor` with every write, and register the handle with POST /agents so a person can tell it from the others.';
   }
   const agent = await store.agents.findOne({ projectId, handle: actor });
@@ -840,12 +842,18 @@ export async function nameWarning(
     .toArray();
   const flat = (handle: string) => handle.toLowerCase().replace(/[^a-z0-9]/g, '');
   const mine = flat(actor);
-  const near = known
-    .map((entry) => entry.handle)
-    .find((handle) => {
-      const other = flat(handle);
-      return other === mine || other.startsWith(mine) || mine.startsWith(other);
-    });
+  // Nothing but punctuation flattens to nothing, and every string starts with
+  // nothing: without this, an actor of "---" is told it probably meant whoever
+  // registered first.
+  const near =
+    mine === ''
+      ? undefined
+      : known
+          .map((entry) => entry.handle)
+          .find((handle) => {
+            const other = flat(handle);
+            return other !== '' && (other === mine || other.startsWith(mine) || mine.startsWith(other));
+          });
   return near
     ? `No agent is registered here as "${actor}", but "${near}" is. If that is you, use it: two spellings are two agents on this board, and /next offers work by the registered one.`
     : `No agent is registered here as "${actor}", so the board shows a handle nobody has described and /next has no scope to offer it work by. Register with POST /agents, or check the spelling.`;
