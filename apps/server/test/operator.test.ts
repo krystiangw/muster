@@ -655,4 +655,30 @@ describe('the operator view', () => {
       known.body.replace(/owner@example\.com/g, 'X'),
     );
   });
+
+  it('counts every question waiting, not the ones that fit on the page', async () => {
+    // The page's whole promise is "everything waiting on you". A headline that
+    // is really the size of its own first page breaks that quietly, and the
+    // number a person reads decides whether they open it at all.
+    const { createEscalation } = await import('../src/service.js');
+    const busy = await createProject(harness, 'a hundred and five questions');
+    await claimFor(busy, 'crowded@example.com');
+    const doc = (await harness.store.projects.findOne({ _id: busy.id }))!;
+    for (let index = 0; index < 105; index += 1) {
+      await createEscalation(harness.store, doc, { agent: 'a', question: `q${index}` }, 'http');
+    }
+
+    const session = await signIn(harness, 'crowded@example.com');
+    const page = await harness.server.inject({
+      method: 'GET',
+      url: '/operator',
+      headers: { cookie: session.cookie },
+    });
+    assert.equal(page.statusCode, 200);
+    assert.match(page.body, /105 questions for you/, 'the headline counts them all');
+    assert.match(page.body, /Showing the 100 most urgent/, 'and says the list is a slice');
+    // The per project column counts the project rather than the slice, which is
+    // the same mistake one table along.
+    assert.match(page.body, />105</);
+  });
 });

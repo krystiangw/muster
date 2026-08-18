@@ -386,13 +386,15 @@ and you can end that from the view itself.</p>
     const askedById = new Map(askedFor.map((project) => [project._id, project]));
 
     const aliases = await aliasesFor(session.email);
-    const [waiting, recent, staleItems, mine] = await Promise.all([
+    const WAITING_SHOWN = 100;
+    const MINE_SHOWN = 40;
+    const [waiting, recent, staleItems, mine, waitingTotal, mineTotal] = await Promise.all([
       store.escalations
         .find({ projectId: { $in: ids }, status: 'open' })
         // By urgency, then by age. Sorting on the word itself would put "high"
         // below "low", which is alphabetical and useless.
         .sort({ priorityRank: -1, createdAt: 1 })
-        .limit(100)
+        .limit(WAITING_SHOWN)
         .toArray(),
       store.escalations
         .find({ projectId: { $in: ids }, status: { $ne: 'open' } })
@@ -422,8 +424,21 @@ and you can end that from the view itself.</p>
           ],
         })
         .sort({ priority: -1, updatedAt: -1 })
-        .limit(40)
+        .limit(MINE_SHOWN)
         .toArray(),
+      // The totals behind the two lists this page is for. Both are capped, and
+      // a page whose whole promise is "everything waiting on you" cannot say a
+      // number that is really the size of its own first page.
+      store.escalations.countDocuments({ projectId: { $in: ids }, status: 'open' }),
+      store.items.countDocuments({
+        projectId: { $in: ids },
+        status: { $nin: ['done', 'dropped'] },
+        $or: [
+          { owner: { $in: aliases } },
+          { status: 'blocked' },
+          { 'claim.expiresAt': { $lte: new Date() } },
+        ],
+      }),
     ]);
 
     const question = (
@@ -453,7 +468,13 @@ and you can end that from the view itself.</p>
 </div>`;
 
     return `
-<h1>${waiting.length === 0 ? 'Nothing is waiting on you' : `${waiting.length} question${waiting.length === 1 ? '' : 's'} for you`}</h1>
+<h1>${waitingTotal === 0 ? 'Nothing is waiting on you' : `${waitingTotal} question${waitingTotal === 1 ? '' : 's'} for you`}</h1>
+${
+      waitingTotal > waiting.length
+        ? `<p class="why">Showing the ${waiting.length} most urgent. Answering these frees the
+agents behind them first.</p>`
+        : ''
+    }
 <p class="lead">Across ${projects.length} project${projects.length === 1 ? '' : 's'} claimed by
 ${escapeHtml(session.email)}.</p>
 
@@ -522,7 +543,11 @@ is you.</p>`
         : `
 <p style="color:var(--ink-2)">Assigned to ${escapeHtml(aliases.join(', '))}, or blocked and waiting
 for somebody to unblock it. Across every project, because the work does not care which board it
-lives on.</p>
+lives on.${
+          mineTotal > mine.length
+            ? ` Showing ${mine.length} of ${mineTotal}, most urgent first.`
+            : ''
+        }</p>
 <div class="scroll cards"><table class="cards">
 <thead><tr><th>Project</th><th>Item</th><th>State</th><th>Last touched</th></tr></thead>
 <tbody>
@@ -565,7 +590,7 @@ ${projects
       }<br><span class="mono" style="color:var(--muted)">${escapeHtml(project._id)}</span></td>
        <td class="mono" data-label="Open items">${project.counts.items}</td>
        <td class="mono" data-label="Agents">${project.counts.agents}</td>
-       <td class="mono" data-label="Waiting">${waiting.filter((doc) => doc.projectId === project._id).length}</td>
+       <td class="mono" data-label="Waiting">${project.counts.escalations}</td>
        <td data-label="Go to"><a href="/r/${escapeHtml(project.readToken)}/board">board</a><br>
            <a href="/r/${escapeHtml(project.readToken)}">questions</a>
            <form method="post" action="/operator/projects/${escapeHtml(project._id)}/keys"
