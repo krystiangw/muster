@@ -337,6 +337,17 @@ describe('what the link says about itself', () => {
    * phone read "answer these questions, no sign in" as a hole rather than as
    * the feature it is. On that screen a share sheet is one tap away.
    */
+  it('says in the docs what a read link is, and how to kill one', async () => {
+    // The page says it to whoever is holding one. The docs have to say it to
+    // whoever is about to hand one over, which is a different person and an
+    // earlier moment.
+    const docs = await harness.server.inject({ method: 'GET', url: '/docs' });
+    assert.equal(docs.statusCode, 200);
+    assert.match(docs.body, /the token is in the\s+address/);
+    assert.match(docs.body, /password rather than a bookmark/);
+    assert.match(docs.body, /read-link\/rotate/);
+  });
+
   it('tells the reader what the address in their hand can do', async () => {
     const project = await createProject(harness, 'open by link');
     const readToken = project.readUrl.split('/r/')[1]!;
