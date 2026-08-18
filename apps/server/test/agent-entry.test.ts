@@ -238,7 +238,9 @@ describe('A. discovery', () => {
     for (const field of ['project', 'token', 'api', 'read_url', 'board_url', 'limits', 'next']) {
       assert.ok(field in answer, `create_project answers with ${field}`);
     }
-    assert.match(String(answer.how_to_use_this_token), /before the session starts/);
+    // And it says what is true of this endpoint rather than a rule about MCP:
+    // the header is read per request, so a caller that can set one is done.
+    assert.match(String(answer.how_to_use_this_token), /per request/);
   });
 
   it('lists every admin-only call the routes actually have', async () => {

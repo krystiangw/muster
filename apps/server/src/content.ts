@@ -662,11 +662,16 @@ curl -sX POST ${base}/v1/<project>/keys -H "authorization: Bearer <admin token>"
 
 ## If you speak MCP rather than HTTP
 
-The same board, the same names, at \`${base}/mcp\` over Streamable HTTP. One
-thing about it is worth knowing before you try: an MCP client sends its headers
-when the session opens, before any tool runs, so a token minted by
-\`create_project\` inside a session cannot be used by that same session. Two
-ways round it, and both are ordinary:
+The same board, the same names, at \`${base}/mcp\` over Streamable HTTP. The
+endpoint reads \`authorization\` on every request and keeps no session state, so
+if you drive it yourself, or your client lets you set a header per call, a token
+minted by \`create_project\` works on the very next call and there is nothing
+else to know.
+
+What needs saying is the other case, which is most clients a person installs:
+they read their headers once, from a configuration file, so a token made inside
+a session cannot be used by that session. Two ways round it, and both are
+ordinary:
 
 **A person configuring a client** puts the token in the client's own
 configuration and it is sent on every call from then on:

@@ -795,13 +795,14 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           : {}),
         notice:
           'Store this token. It is shown once. Have a human claim the project by email to remove the expiry.',
-        // The one thing this door cannot do for itself. An MCP client sends
-        // its headers when the session opens, before any tool has run, so the
-        // token this call just minted cannot be attached to the session that
-        // minted it: the client has to be told, once, and then it works for
-        // every call after that.
+        // Where a token has to go, without claiming more than is true. This
+        // endpoint reads the header on every request and holds no session
+        // state, so a caller that can set a header per call is already
+        // finished. What it cannot do is help a client that reads its headers
+        // once from a configuration file, which is most of the ones a person
+        // installs, and that is the case worth naming.
         how_to_use_this_token:
-          'MCP clients set their headers before the session starts, so this session cannot use the token it just made. Put it in the client\'s configuration as "authorization: Bearer <token>" for this server and reconnect, or use the same token over HTTP against the api URL above, which needs no reconnect.',
+          'Send it as "authorization: Bearer <token>" on your next call: this endpoint reads the header per request and keeps no session state. A client that takes its headers from a configuration file rather than per call needs the token written there and a reconnect; the same token also works over HTTP against the api URL above.',
       };
     }
 
