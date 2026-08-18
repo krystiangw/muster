@@ -348,6 +348,18 @@ export interface ProjectDoc {
    * of agents from sweeping twenty times. It advances whether or not the pass
    * that took it finished.
    */
+  /**
+   * The last thing the overcount repair saw, so it can tell a leak from a
+   * write in flight. A repair applies only when two sweeps a minute apart read
+   * the same counter and count the same work.
+   */
+  countsCheck?: {
+    items: number;
+    escalations: number;
+    counterItems: number;
+    counterEscalations: number;
+    at: Date;
+  } | null;
   lastSweptAt: Date | null;
   /**
    * When a sweep last finished. Written after the rules have run, so it is the

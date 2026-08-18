@@ -333,19 +333,61 @@ export async function resolveAbsent(
  * If a process died between closing an item and giving back its slot, the
  * overcount is repaired within a minute instead of lasting forever.
  */
+/** How long a discrepancy has to sit still before it counts as a leak. */
+const SETTLE_MS = 30_000;
+
 export async function correctOvercount(store: Store, projectId: string): Promise<boolean> {
   // The counter is read before the count and used as the guard afterwards. A
   // create landing while we count changes it, the guard stops matching and the
   // repair skips itself. Without that, the repair would overwrite the new
   // increment with a number taken before it existed, and since it never raises
   // a counter, that undercount would be permanent.
-  const before = await store.projects.findOne({ _id: projectId }, { projection: { counts: 1 } });
+  const before = await store.projects.findOne(
+    { _id: projectId },
+    { projection: { counts: 1, countsCheck: 1 } },
+  );
   if (!before) return false;
 
   const [openItems, openEscalations] = await Promise.all([
     store.items.countDocuments({ projectId, status: { $nin: [...TERMINAL_STATUSES] } }),
     store.escalations.countDocuments({ projectId, status: 'open' }),
   ]);
+
+  // Two sweeps, a minute apart, reading the same counter and counting the same
+  // work. Nothing here can tell a leak from a write in flight by looking once:
+  // every write that gives a slot back is two writes, the item and then the
+  // counter, and a recount taken between them is honestly stale. Guards on
+  // timestamps were tried and are full of holes, because a request stamps the
+  // clock it read on the way in and a deleted item leaves nothing behind at
+  // all. So the repair stops guessing and waits instead: a discrepancy that
+  // survives a minute of quiet is a leak, and one that does not was somebody
+  // mid-write.
+  const seen = before.countsCheck;
+  const settled =
+    seen != null &&
+    seen.items === openItems &&
+    seen.escalations === openEscalations &&
+    seen.counterItems === before.counts.items &&
+    seen.counterEscalations === before.counts.escalations &&
+    Date.now() - new Date(seen.at).getTime() >= SETTLE_MS;
+
+  if (!settled) {
+    await store.projects.updateOne(
+      { _id: projectId },
+      {
+        $set: {
+          countsCheck: {
+            items: openItems,
+            escalations: openEscalations,
+            counterItems: before.counts.items,
+            counterEscalations: before.counts.escalations,
+            at: new Date(),
+          },
+        },
+      },
+    );
+    return false;
+  }
 
   const repairs = await Promise.all([
     before.counts.items > openItems

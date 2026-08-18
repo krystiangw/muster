@@ -831,16 +831,29 @@ describe('the open item cap', () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'one', title: 'one', actor: 'a' });
 
+    // Two sweeps, because a repair applies only to a discrepancy that sat
+    // still: the first one records what it saw, the second one acts on it.
+    // Production spaces them a minute apart on its own; here the observation is
+    // moved back instead of waiting for one.
+    const settle = async () => {
+      await post(project, '/sweep', {});
+      await harness.store.projects.updateOne(
+        { _id: project.id },
+        { $set: { 'countsCheck.at': new Date(Date.now() - 60_000) } },
+      );
+      await post(project, '/sweep', {});
+    };
+
     // A process that died between closing an item and giving back its slot
     // leaves the counter too high, which would reject valid work forever.
     await harness.store.projects.updateOne({ _id: project.id }, { $set: { 'counts.items': 40 } });
-    await post(project, '/sweep', {});
+    await settle();
     assert.equal((await harness.store.projects.findOne({ _id: project.id }))!.counts.items, 1);
 
     // The other direction is left alone: correcting upwards is how a recount
     // double-counts a write that lands while it is counting.
     await harness.store.projects.updateOne({ _id: project.id }, { $set: { 'counts.items': 0 } });
-    await post(project, '/sweep', {});
+    await settle();
     assert.equal((await harness.store.projects.findOne({ _id: project.id }))!.counts.items, 0);
   });
 
@@ -903,6 +916,42 @@ describe('the open item cap', () => {
     );
   });
 
+  it('leaves a discrepancy alone while the board is still moving', async () => {
+    const { correctOvercount } = await import('../src/hygiene.js');
+    const { createProject: createDirect, upsertItem } = await import('../src/service.js');
+    // One item closes while another reopens: the counter can come back to the
+    // number the repair read while the count it took is already stale, which is
+    // how a repair lowers a counter that was right. Seeing the same thing twice
+    // is what tells the two apart.
+    const { project } = await createDirect(harness.store, harness.config, { name: 'churn' });
+    await upsertItem(harness.store, project, { slug: 'one', title: 'one', actor: 'a' });
+    await upsertItem(harness.store, project, { slug: 'two', title: 'two', actor: 'a' });
+    await harness.store.projects.updateOne({ _id: project._id }, { $set: { 'counts.items': 2 } });
+
+    // First look: two open, counter two, nothing to do but remember it.
+    assert.equal(await correctOvercount(harness.store, project._id), false);
+
+    // The board moves between the looks, exactly as it does under real work.
+    await harness.store.items.updateOne(
+      { projectId: project._id, slug: 'one' },
+      { $set: { status: 'done', updatedAt: new Date() } },
+    );
+    await harness.store.projects.updateOne(
+      { _id: project._id },
+      { $set: { 'countsCheck.at': new Date(Date.now() - 60_000) } },
+    );
+    assert.equal(
+      await correctOvercount(harness.store, project._id),
+      false,
+      'what it sees now is not what it saw, so it waits again',
+    );
+    assert.equal(
+      (await harness.store.projects.findOne({ _id: project._id }))!.counts.items,
+      2,
+      'and the counter is left for the close to correct',
+    );
+  });
+
   it('never takes a counter below zero, whatever raced what', async () => {
     const { correctOvercount } = await import('../src/hygiene.js');
     const { createProject: createDirect, upsertItem, deleteItem } = await import('../src/service.js');
@@ -920,10 +969,15 @@ describe('the open item cap', () => {
       { $set: { status: 'done', closedAt: new Date(), updatedAt: new Date() } },
     );
     await correctOvercount(harness.store, project._id);
+    await harness.store.projects.updateOne(
+      { _id: project._id },
+      { $set: { 'countsCheck.at': new Date(Date.now() - 60_000) } },
+    );
+    await correctOvercount(harness.store, project._id);
     assert.equal(
       (await harness.store.projects.findOne({ _id: project._id }))!.counts.items,
       0,
-      'the repair lowered it to what it counted',
+      'the repair lowered it to what it counted, once it had sat still',
     );
 
     // And now the close's own decrement, arriving late.
