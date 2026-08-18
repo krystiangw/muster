@@ -998,14 +998,28 @@ describe('every link these pages render', () => {
       for (const href of linksOn(rendered.body)) {
         if (checked.has(href)) continue;
         checked.add(href);
-        const followed = await harness.server.inject({
+        // Chased, because a browser chases: a link answering 303 to a page
+        // that answers 404 is a broken link, and stopping at the redirect is
+        // the check agreeing with itself instead of with the reader.
+        let at = href;
+        let followed = await harness.server.inject({
           method: 'GET',
-          url: href,
+          url: at,
           headers: { accept: 'text/html', cookie: session.cookie },
         });
+        for (let hop = 0; hop < 5 && followed.statusCode >= 300 && followed.statusCode < 400; hop += 1) {
+          const next = String(followed.headers.location ?? '');
+          assert.ok(next.startsWith('/'), `${at} redirects off this service, to ${next}`);
+          at = next;
+          followed = await harness.server.inject({
+            method: 'GET',
+            url: at,
+            headers: { accept: 'text/html', cookie: session.cookie },
+          });
+        }
         assert.ok(
           followed.statusCode < 400,
-          `${page} links to ${href}, which answers ${followed.statusCode}`,
+          `${page} links to ${href}, which ends at ${at} answering ${followed.statusCode}`,
         );
       }
     }
