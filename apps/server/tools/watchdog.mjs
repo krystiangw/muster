@@ -32,9 +32,22 @@ const TIMEOUT_MS = 15_000;
 const ALERT_TO = process.env.MUSTER_ALERT_TO || 'gwizdala.kr@gmail.com';
 
 const read = (path) => (existsSync(path) ? readFileSync(path, 'utf8').trim() : null);
-const state = existsSync(STATE)
-  ? JSON.parse(readFileSync(STATE, 'utf8'))
-  : { failures: 0, alerted: false, lastOk: null };
+// Defaults over the file, not instead of it: a state written by an older
+// version of this script is missing whatever was added since, and undefined + 1
+// is NaN, which counts as a miss forever and alerts never.
+const saved = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8')) : {};
+const state = {
+  failures: 0,
+  alerted: false,
+  lastOk: null,
+  ...saved,
+  // Read back through their own types rather than spread as they are: a state
+  // written by an older version of this script has no counter at all, and
+  // undefined + 1 is NaN, which JSON writes as null, counts as a miss forever
+  // and alerts never.
+  hygieneMisses: Number(saved.hygieneMisses) || 0,
+  hygieneAlerted: saved.hygieneAlerted === true,
+};
 
 if (process.argv.includes('--status')) {
   console.log(JSON.stringify(state, null, 1));
@@ -54,7 +67,8 @@ async function probe(url, options = {}) {
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
-    return { ok: response.ok, status: response.status };
+    const body = options.json ? await response.json().catch(() => null) : null;
+    return { ok: response.ok, status: response.status, body };
   } catch (error) {
     return { ok: false, status: 0, error: String(error).slice(0, 120) };
   } finally {
@@ -70,6 +84,7 @@ const checks = [
     name: 'api read',
     ...(await probe(`${base}/v1/${projectId}`, {
       headers: { authorization: `Bearer ${entry.token}` },
+      json: true,
     })),
   },
 ];
@@ -144,6 +159,51 @@ if (broken.length === 0) {
     console.log(`down: ${detail} | email ${delivery} | board ${filed}`);
   } else {
     console.log(`miss ${state.failures}: ${detail}`);
+  }
+}
+
+/**
+ * The other way this service fails: it keeps answering, and stops tidying.
+ *
+ * Hygiene runs on a five minute timer inside the dyno, plus a throttled pass on
+ * request. If the timer dies, nothing goes red: claims stay held forever, items
+ * stop going stale, and the board looks exactly like a board with nothing to
+ * tidy. `swept_at` is the difference between those two, so the check is its
+ * age, and the alert goes on the board rather than to the pager, because the
+ * service is up and the escalation mail is already throttled per project.
+ *
+ * An hour is six passes. It is generous on purpose: a deployment sweeping more
+ * projects than one batch holds takes several passes to come round again, and
+ * the number to raise then is the batch size, not this.
+ */
+const HYGIENE_MAX_AGE_MS = 60 * 60_000;
+const apiRead = checks.find((check) => check.name === 'api read');
+// Absent is not the same as null. A deployment older than the field says
+// nothing about its hygiene, and a watchdog that reads silence as a symptom
+// would file an escalation about a version difference.
+if (broken.length === 0 && apiRead?.body && 'swept_at' in apiRead.body) {
+  const sweptAt = apiRead.body.swept_at ? new Date(apiRead.body.swept_at) : null;
+  const ageMs = sweptAt ? Date.parse(now) - sweptAt.getTime() : null;
+  const behind = ageMs === null || ageMs > HYGIENE_MAX_AGE_MS;
+  if (!behind) {
+    if (state.hygieneAlerted) console.log('hygiene is running again');
+    state.hygieneMisses = 0;
+    state.hygieneAlerted = false;
+  } else {
+    state.hygieneMisses += 1;
+    const since = sweptAt ? `${Math.round(ageMs / 60_000)} min ago` : 'never';
+    if (state.hygieneMisses >= 2 && !state.hygieneAlerted) {
+      const filed = await fileOnTheBoard(
+        'Hygiene has stopped running. Is the sweeper dead, or is the deployment sweeping more projects than it can reach?',
+        `${projectId} was last swept ${since}, and the service is answering normally. `
+          + 'Claims will not expire and nothing will be marked stale until it runs again. '
+          + 'heroku restart -a muster-web is the blunt fix; the sweeper is the interval in apps/server/src/index.ts.',
+      );
+      state.hygieneAlerted = true;
+      console.log(`hygiene behind: last swept ${since} | board ${filed}`);
+    } else {
+      console.log(`hygiene miss ${state.hygieneMisses}: last swept ${since}`);
+    }
   }
 }
 

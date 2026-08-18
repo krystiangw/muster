@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { maybeSweep, sweepProject } from '../src/hygiene.js';
+import { projectJson } from '../src/serialize.js';
 import { authed, createProject, startHarness, type Harness, type Project } from './helper.js';
 
 let harness: Harness;
@@ -295,6 +296,41 @@ describe('absence resolve', () => {
 });
 
 describe('sweep throttle', () => {
+  it('says when hygiene last looked, so a dead sweeper is not silence', async () => {
+    // A board with nothing to tidy and a board nobody is tidying produce the
+    // same output: no stale flags, no expired claims, no log line. The date is
+    // the only thing that tells them apart, and the watchdog reads it over the
+    // API rather than holding a database password.
+    const project = await createProject(harness);
+    const read = async () =>
+      (
+        await harness.server.inject({ method: 'GET', url: project.api, headers: authed(project) })
+      ).json() as Record<string, unknown>;
+
+    const before = await read();
+    assert.ok('swept_at' in before, 'the field is there to be read');
+    assert.equal(before.swept_at, null, 'and a board hygiene has never reached says so');
+
+    await maybeSweep(harness.store, await projectDoc(project));
+    const after = await read();
+    assert.ok(
+      Date.now() - new Date(after.swept_at as string).getTime() < 60_000,
+      'a sweep is what puts a date there',
+    );
+
+    // In memory rather than through the database and back: several routes fire
+    // a throttled sweep of their own, and one of those landing after a
+    // backdating write would make this measure the race instead of the field.
+    const stalled = projectJson(
+      { ...(await projectDoc(project)), lastSweptAt: new Date(Date.now() - 3_600_000) },
+      harness.config,
+    );
+    assert.ok(
+      Date.now() - new Date(stalled.swept_at as Date).getTime() > 3_000_000,
+      'an hour without a sweep reads as an hour, which is what an alert needs',
+    );
+  });
+
   it('runs once per minute however many agents ask', async () => {
     const project = await createProject(harness);
     // No API writes here on purpose: each one fires its own throttled sweep in
