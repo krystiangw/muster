@@ -167,9 +167,10 @@ describe('B. agent entry', () => {
       // "npm install muster" is true of a document that installs musterboard,
       // and a card naming one package while the protocol names another is the
       // exact drift this is here to catch.
-      const installs = [...skill.body.matchAll(/npm install ([@a-z0-9._/-]+)/g)].map(
-        (match) => match[1],
-      );
+      const installs = [...skill.body.matchAll(/npm install ([^\n`]+)/g)]
+        .flatMap((match) => match[1]!.trim().split(/\s+/))
+        .filter((token) => !token.startsWith('-'))
+        .map((token) => token.replace(/[.,;]+$/, ''));
       assert.deepEqual(
         [...new Set(installs)],
         [json.sdk.npm],
