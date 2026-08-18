@@ -540,6 +540,16 @@ strips the header on everything that leaves the service, which is the entire
 leak it was there for, while leaving our own pages an origin to send. A browser
 too old for `Sec-Fetch-Site` is served by the second change, not the first.
 
+One number was quietly ruined by this and is worth naming, because it was
+collected to settle an argument. Drag and drop was refused on the grounds that
+the operator barely moves cards by hand, and "cards moved by hand per board
+view" exists to check that claim rather than believe it. Between the audit that
+added the header and the repair, twenty one hours, every hand move was refused
+before it reached the board, so a zero over that window says nothing about
+anybody's preference. The count is printed with that window named beside it. A
+measurement taken while the thing it measures is broken does not read as
+missing; it reads as a confident zero, which is worse.
+
 The general shape: a defence that reads a header is only as good as the other
 headers around it. Two policies can each be correct and cancel out, and neither
 one's test will say so.

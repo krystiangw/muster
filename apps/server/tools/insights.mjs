@@ -147,6 +147,12 @@ if (pageRows.length > 0) {
   row('  in the last seven days', weekViews);
   // The number that decides whether drag and drop was refused on evidence or
   // on taste. Above roughly three moves per board view, the refusal is wrong.
+  //
+  // Blind between 2026-08-17 09:37Z and 2026-08-18 06:55Z: `Referrer-Policy:
+  // no-referrer` blanked the Origin on our own forms and the same-site check
+  // refused every move posted in those twenty one hours. A zero covering that
+  // window is a broken form, not a preference, and reading it as evidence is
+  // how a feature gets refused twice for the same wrong reason.
   row('cards moved by hand', moves);
   row('  per board view', boardViews === 0 ? 0 : (moves / boardViews).toFixed(2));
 }
