@@ -312,6 +312,14 @@ function median(values: number[]): number | null {
  * and adding a URL for it would mean adding a credential to protect it.
  */
 export async function insights(store: Store): Promise<Insights> {
+  // Read once and used by both of the questions below that are about people
+  // rather than about traffic. A board nobody has claimed has no human on it:
+  // whatever answers there is holding the project token, which is an agent, or
+  // one of our own checks driving the published SDK against production.
+  const owned = (
+    await store.projects.find({ claimedBy: { $ne: null } }, { projection: { _id: 1 } }).toArray()
+  ).map((project) => project._id);
+
   const [
     discovered,
     signups,
@@ -395,24 +403,16 @@ export async function insights(store: Store): Promise<Insights> {
     // engine hands back first, which past five hundred answers means a median
     // of an arbitrary old subset that silently stops moving.
     //
-    // Boards with an owner only. This is "how long does a human take", and a
-    // board nobody has claimed has no human on it: whatever answered was
-    // holding the project token, which is to say an agent, or one of our own
-    // checks. Those answer in seconds and would pull the number that matters
-    // toward zero.
-    store.projects
-      .find({ claimedBy: { $ne: null } }, { projection: { _id: 1 } })
-      .toArray()
-      .then((owned) =>
-        store.escalations
-          .find(
-            { answeredAt: { $ne: null }, projectId: { $in: owned.map((project) => project._id) } },
-            { projection: { createdAt: 1, answeredAt: 1 } },
-          )
-          .sort({ answeredAt: -1 })
-          .limit(ANSWER_SAMPLE)
-          .toArray(),
-      ),
+    // Boards with an owner only, for the reason at the top of this function:
+    // this is "how long does a human take", and an agent answers in seconds.
+    store.escalations
+      .find(
+        { answeredAt: { $ne: null }, projectId: { $in: owned } },
+        { projection: { createdAt: 1, answeredAt: 1 } },
+      )
+      .sort({ answeredAt: -1 })
+      .limit(ANSWER_SAMPLE)
+      .toArray(),
     store.items.countDocuments({
       status: { $in: ['done', 'dropped'] },
       'timeline.by': 'hygiene',
@@ -424,9 +424,13 @@ export async function insights(store: Store): Promise<Insights> {
         { $sort: { count: -1 } },
       ])
       .toArray(),
+    // Owned boards only, same reason as the median beside it, and here it is
+    // load bearing rather than tidy: this split exists to say whether people
+    // answer from the link the mail sends them or from the page they sign in
+    // to, and our own checks answer over the API on a board they created.
     store.events
       .aggregate<{ _id: string; count: number }>([
-        { $match: { kind: 'answer' } },
+        { $match: { kind: 'answer', projectId: { $in: owned } } },
         { $group: { _id: '$door', count: { $sum: 1 } } },
         { $sort: { count: -1 } },
       ])

@@ -366,6 +366,9 @@ describe('counting the people, not the agents', () => {
       before.behaviour.answersSampled,
       'an answer on an unowned board is not a human answering',
     );
+    // Nor is it evidence about which door people use, which is the whole point
+    // of that split: our own checks answer over the API on a board they made.
+    assert.equal(after.answerDoors.http ?? 0, before.answerDoors.http ?? 0);
   });
 
   /**
