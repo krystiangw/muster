@@ -720,7 +720,12 @@ describe('moving an item into a column', () => {
       ['fresh', 1],
       ['ancient', 90],
     ] as const) {
-      await post(project, '/items', { slug, title: slug, status: 'done', actor: 'a' });
+      await post(project, '/items', {
+        slug,
+        title: slug,
+        status: 'done',
+        actor: slug === 'ancient' ? 'ancient-only' : 'a',
+      });
       await harness.store.items.updateOne(
         { projectId: project.id, slug },
         { $set: { updatedAt: new Date(Date.now() - days * 86_400_000) } },
@@ -755,6 +760,24 @@ describe('moving an item into a column', () => {
       items.items.map((item: { slug: string }) => item.slug).sort(),
       ['ancient', 'fresh'],
     );
+
+    // The window bounds the query, not the page. The scan takes the most urgent
+    // thousand, so old finished work ahead of a recent card in that order would
+    // fill it and leave the column empty while the item it wanted sat unread.
+    const explained = await harness.store.items
+      .find({ projectId: project.id, status: 'done', updatedAt: { $lt: new Date(Date.now() - 14 * 86_400_000) } })
+      .toArray();
+    assert.equal(explained.length, 1, 'the old one is still in the collection');
+
+    // The filters offered are the ones the board can still answer.
+    const facets = (
+      await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/board/facets`,
+        headers: authed(project),
+      })
+    ).json();
+    assert.ok(!facets.agents.includes('ancient-only'), 'nothing that only expired work carries');
 
     // And the layout carries it back out, in the same words it went in.
     const again = await put(project, '/board', {

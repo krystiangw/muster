@@ -220,19 +220,82 @@ export function buildBoard(
 }
 
 /**
- * Whether this layout puts finished work on the board.
+ * What this layout could possibly show, as a query.
  *
- * Closed work is off the board unless a column asks for it, which keeps the
- * scan bounded on a project with a long history. A column with no status filter
- * asks for every status, including the closed ones: a catch-all column that
- * silently dropped finished work would be the board hiding work again.
+ * Two narrowings, and both exist for the same reason: a scan that reads work no
+ * column can display is a scan a project pays for and nobody sees.
+ *
+ * Closed work is off the board unless a column asks for it, which is what keeps
+ * the scan bounded on a project with a long history. A column with no status
+ * filter asks for every status, including the closed ones: a catch-all column
+ * that silently dropped finished work would be the board hiding work again.
+ *
+ * And a status every one of its columns bounds by time is bounded here too,
+ * rather than after the scan. That order matters: the scan takes the most
+ * urgent thousand, so a thousand old finished items would fill it ahead of the
+ * one closed this morning, and a column asking for the last two weeks would
+ * come back empty while the item it wanted sat unread. Bounding the query is
+ * also what makes the window worth having on a board with years behind it.
+ *
+ * A status no column mentions at all stays in the scan on purpose: it is
+ * counted as unplaced, and "N items match no column" is the warning that keeps
+ * a layout honest.
  */
-function boardShowsClosed(config: BoardConfig): boolean {
-  return config.columns.some((column) => {
-    const statuses = column.match.status;
-    if (!statuses || statuses.length === 0) return true;
-    return statuses.some((status) => status === 'done' || status === 'dropped');
-  });
+function boardScope(
+  config: BoardConfig,
+  now: Date,
+  includeClosed?: boolean,
+): Record<string, unknown> {
+  // undefined: no column takes this status, so nothing bounds it. null: a
+  // column takes it with no window. A number: every column taking it wants the
+  // last N days, and the widest of those windows is what the scan needs.
+  const windows = new Map<ItemStatus, number | null>();
+  for (const column of config.columns) {
+    const statuses =
+      column.match.status && column.match.status.length > 0 ? column.match.status : ITEM_STATUSES;
+    for (const status of statuses) {
+      const asked = column.match.withinDays ?? null;
+      if (!windows.has(status)) {
+        windows.set(status, asked);
+        continue;
+      }
+      const held = windows.get(status)!;
+      windows.set(status, held === null || asked === null ? null : Math.max(held, asked));
+    }
+  }
+
+  const shownClosed = ['done', 'dropped'].some((status) =>
+    windows.has(status as ItemStatus),
+  );
+  const wantsClosed = includeClosed ?? shownClosed;
+
+  const unbounded: ItemStatus[] = [];
+  const bounded: Array<{ status: ItemStatus; days: number }> = [];
+  for (const status of ITEM_STATUSES) {
+    const closed = status === 'done' || status === 'dropped';
+    if (closed && !wantsClosed) continue;
+    const window = windows.get(status);
+    // Not taken by any column, or taken by one that named no window: unbounded,
+    // and either way it has to be read to be counted.
+    if (window === undefined || window === null) unbounded.push(status);
+    else bounded.push({ status, days: window });
+  }
+
+  if (bounded.length === 0) {
+    // Every status this board can show is unbounded. Say it the way this query
+    // was always said, so nothing about the ordinary board changes shape.
+    return wantsClosed ? {} : { status: { $nin: ['done', 'dropped'] } };
+  }
+  const since = (days: number) => new Date(now.getTime() - days * 86_400_000);
+  return {
+    $or: [
+      ...(unbounded.length > 0 ? [{ status: { $in: unbounded } }] : []),
+      ...bounded.map((entry) => ({
+        status: entry.status,
+        updatedAt: { $gte: since(entry.days) },
+      })),
+    ],
+  };
 }
 
 export async function loadBoard(
@@ -242,10 +305,10 @@ export async function loadBoard(
 ): Promise<BoardView> {
   const config = boardConfigOf(project);
 
-  const wantsClosed = options.includeClosed ?? boardShowsClosed(config);
-
-  const query: Record<string, unknown> = { projectId: project._id };
-  if (!wantsClosed) query.status = { $nin: ['done', 'dropped'] };
+  const query: Record<string, unknown> = {
+    projectId: project._id,
+    ...boardScope(config, new Date(), options.includeClosed),
+  };
 
   const narrowed: BoardFilter = {};
   if (options.owner) {
@@ -347,10 +410,15 @@ export async function boardFacets(store: Store, project: ProjectDoc): Promise<Bo
   // a project counts what is still open, so the closed items behind a board are
   // bounded by nothing, and a `distinct` over an array field has to read every
   // document behind the keys whatever it is indexed by.
-  const scope: Record<string, unknown> = { projectId: project._id };
-  if (!boardShowsClosed(boardConfigOf(project))) {
-    scope.status = { $nin: ['done', 'dropped'] };
-  }
+  //
+  // The same query, not a second copy of the reasoning behind it: a column that
+  // asks for the last two weeks bounds these reads too, so a name that only
+  // ever appeared on work the board can no longer show is not offered as a
+  // filter that comes back empty.
+  const scope: Record<string, unknown> = {
+    projectId: project._id,
+    ...boardScope(boardConfigOf(project), new Date()),
+  };
 
   const [owners, labels, actors, holders, registered] = await Promise.all([
     store.items.distinct('owner', scope),
@@ -442,6 +510,9 @@ export function applyForColumn(column: BoardColumn): BoardApply {
   // makes that visible: the alternative is an empty apply, which the board
   // reads as "not a destination".
   if (column.match.stale === false) derived.touch = true;
+  // Same reasoning for a window: a move is a write, a write is recent, and a
+  // column asking for recent work is a column a move satisfies by happening.
+  if (column.match.withinDays !== undefined) derived.touch = true;
   return derived;
 }
 
