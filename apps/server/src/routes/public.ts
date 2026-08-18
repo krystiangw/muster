@@ -997,6 +997,13 @@ ${renderBoard(view, {
   ...(notice ? { notice } : {}),
 })}
 
+${
+      project.sweptAt
+        ? `<p class="mono" style="color:var(--muted);margin-top:18px">Hygiene last looked
+  ${when(project.sweptAt)}: expired claims released, stale work flagged, absent items closed.</p>`
+        : ''
+    }
+
 ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardWarnings(view.config))}
 `;
     return reply

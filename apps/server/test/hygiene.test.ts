@@ -320,6 +320,12 @@ describe('sweep throttle', () => {
       'a sweep that finished is what puts a date there',
     );
 
+    // And the person who owns the board can see it without an API call: the
+    // stale flags on that page are exactly as old as this line says they are.
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(page.body, /Hygiene last looked/);
+
     // In memory rather than through the database and back: several routes fire
     // a throttled sweep of their own, and one of those landing after a
     // backdating write would make this measure the race instead of the field.
