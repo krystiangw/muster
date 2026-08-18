@@ -468,6 +468,13 @@ ${body}
 <footer class="bot">
   <span>Muster</span>
   <a href="https://github.com/krystiangw/muster">source on GitHub</a>
+  <!-- The two pages under /docs, which were reachable only from inside /docs.
+       Our own scanner could read one documentation page and said so, and it was
+       right about the cause even where nobody had looked for it: anything that
+       follows links from the front page, which is most things, saw exactly one.
+       A person hunting for the API reference had the same problem. -->
+  <a href="/docs/api">api reference</a>
+  <a href="/docs/keys">keys</a>
   <a href="/llms.txt">llms.txt</a>
   <a href="/openapi.json">openapi.json</a>
   <a href="/.well-known/agent-access.json">agent-access.json</a>
