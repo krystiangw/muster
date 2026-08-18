@@ -85,16 +85,19 @@ function str(value: unknown, fallback = ''): string {
  * the validation.
  */
 function text(value: unknown, name: string): string | undefined {
-  if (value === undefined || value === null) return undefined;
+  // Absent is absent; `null` is a value somebody sent. Reading them the same
+  // way is how `{"agent": null}` became "no agent filter" and answered with
+  // every agent's inbox, which is the refusal this function exists to give.
+  if (value === undefined) return undefined;
   if (typeof value !== 'string') {
     throw new ServiceError(400, 'bad_argument', `"${name}" is a string here, and this one is not.`);
   }
   return value;
 }
 
-/** Every element a string, or a refusal. Same reason. */
+/** Every element a string, or a refusal. Same reason, including the null. */
 function texts(value: unknown, name: string): string[] | undefined {
-  if (value === undefined || value === null) return undefined;
+  if (value === undefined) return undefined;
   if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
     throw new ServiceError(400, 'bad_argument', `"${name}" is an array of strings here.`);
   }

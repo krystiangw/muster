@@ -502,6 +502,10 @@ describe('items', () => {
     await crafted('claim_item', { slug: 'work', agent: { $ne: null } });
     await crafted('observe', { source: 'venue', present: [{ $ne: null }] });
     await crafted('board', { agent: { $ne: null } });
+    // `null` is a value somebody sent, not an argument they left out: reading
+    // the two the same way is how a filter quietly widens to everything.
+    await crafted('inbox', { agent: null });
+    await crafted('list_items', { status: null });
 
     // And the ordinary calls still go through, which is the half of this that
     // a refusal is easy to break.
