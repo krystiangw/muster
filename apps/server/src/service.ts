@@ -146,7 +146,15 @@ export function normalizeUpsertInput(input: UpsertItemInput): UpsertItemInput {
     const seen = new Set<string>();
     for (const raw of input.blockedBy) {
       const slug = normalizeSlug(raw);
-      if (!slug) continue;
+      if (!slug) {
+        // Refused rather than skipped. Dropping it stored a card that waits on
+        // nothing, which then claims cleanly: the one outcome this field
+        // exists to prevent, arrived at by a typo nobody was told about.
+        throw badRequest(
+          'bad_blocked_by',
+          `"${String(raw).slice(0, 40)}" is not a slug, so nothing can be waiting on it.`,
+        );
+      }
       if (slug === own) {
         throw badRequest('bad_blocked_by', 'A card cannot wait on itself.');
       }
@@ -1725,10 +1733,16 @@ function blockedMessage(
  * that matches nothing.
  */
 async function waitingSlugs(store: Store, projectId: string): Promise<string[]> {
+  // Every one of them, with no cap. A cap here is not a cheaper answer, it is
+  // a wrong one: the card it leaves out is offered and leased, and a claim on
+  // that same card is refused, which is the loop this is here to prevent. The
+  // set is bounded by how many cards use the field rather than by the size of
+  // the board, and `blockedBy.0` is a plain equality the index can serve,
+  // where `$ne: []` cannot.
   const waiting = (await store.items
     .find(
-      { projectId, status: 'open', blockedBy: { $exists: true, $ne: [] } },
-      { projection: { slug: 1, blockedBy: 1 }, limit: 200 },
+      { projectId, status: 'open', 'blockedBy.0': { $exists: true } },
+      { projection: { slug: 1, blockedBy: 1 } },
     )
     .toArray()) as Array<Pick<ItemDoc, 'slug' | 'blockedBy'>>;
   if (waiting.length === 0) return [];
@@ -1778,14 +1792,26 @@ export async function claimItem(
     }
   }
 
+  // The list this decision was taken on goes into the filter, so a write that
+  // adds a blocker between the read above and the lease below takes the lease
+  // away rather than losing to it. Written as $and because the claim state is
+  // already an $or and a second one at the top level would replace it.
+  const snapshot = before?.blockedBy;
   const claimed = await store.items.findOneAndUpdate(
     {
       projectId: project._id,
       slug: normalized,
-      $or: [
-        { claim: null },
-        { 'claim.expiresAt': { $lte: now } },
-        { 'claim.agent': agent },
+      $and: [
+        {
+          $or: [
+            { claim: null },
+            { 'claim.expiresAt': { $lte: now } },
+            { 'claim.agent': agent },
+          ],
+        },
+        snapshot === undefined
+          ? { blockedBy: { $exists: false } }
+          : { blockedBy: snapshot },
       ],
     },
     takingIt(agent, now, ttl, expiresAt),
@@ -1793,12 +1819,42 @@ export async function claimItem(
   );
 
   if (claimed) {
+    // The other half of the race, and the one a filter cannot express: a
+    // blocker reopened while this was being taken. The lease is handed back
+    // rather than kept, because a card whose prerequisite is open again is
+    // exactly the work this refuses to hand out.
+    const stillUnmet =
+      (claimed.blockedBy ?? []).length === 0
+        ? []
+        : await unmetBlockers(store, project._id, claimed as Pick<ItemDoc, 'blockedBy'>);
+    if (stillUnmet.length > 0) {
+      await store.items.updateOne(
+        { projectId: project._id, slug: normalized, 'claim.agent': agent },
+        { $set: { claim: null } },
+      );
+      throw new ServiceError(409, 'blocked_by', blockedMessage(normalized, stillUnmet), {
+        blocked_by: stillUnmet.map((row) => ({
+          slug: row.slug,
+          title: row.title,
+          status: row.status,
+        })),
+      });
+    }
     void touchAgent(store, project._id, agent);
     return { ok: true, item: claimed as ItemDoc, expiresAt };
   }
 
   const current = await store.items.findOne({ projectId: project._id, slug: normalized });
   if (!current) throw notFound(slug);
+  // The lease may have been refused by the guard above rather than by another
+  // holder: whoever changed the list won, and the refusal has to say which
+  // thing happened. Asked again against the row as it is now.
+  const changed = await unmetBlockers(store, project._id, current as Pick<ItemDoc, 'blockedBy'>);
+  if (changed.length > 0) {
+    throw new ServiceError(409, 'blocked_by', blockedMessage(normalized, changed), {
+      blocked_by: changed.map((row) => ({ slug: row.slug, title: row.title, status: row.status })),
+    });
+  }
   return { ok: false, item: current as ItemDoc, heldBy: current.claim?.agent ?? 'unknown' };
 }
 
@@ -2377,11 +2433,29 @@ export async function nextItemHeld(
   // middle, and ten loops asking at the same moment all read the same item out
   // of that gap: one took it and nine lost, which is the round trip this call
   // exists to save.
-  const take = (filter: Record<string, unknown>) =>
-    store.items.findOneAndUpdate(filter, takingIt(handle, now, ttl, expiresAt), {
-      sort: { priority: -1, touchedAt: 1 },
-      returnDocument: 'after',
-    });
+  const take = async (filter: Record<string, unknown>) => {
+    const taken = await store.items.findOneAndUpdate(
+      filter,
+      takingIt(handle, now, ttl, expiresAt),
+      { sort: { priority: -1, touchedAt: 1 }, returnDocument: 'after' },
+    );
+    if (!taken) return null;
+    // The card was chosen from a list of what was free a moment ago, and a
+    // blocker can be reopened, or added, inside that moment. Handed back
+    // rather than kept: work whose prerequisite is open again is the one thing
+    // this call is not allowed to hand out, and the caller asking again gets a
+    // card it can actually do.
+    const unmet =
+      (taken.blockedBy ?? []).length === 0
+        ? []
+        : await unmetBlockers(store, project._id, taken as Pick<ItemDoc, 'blockedBy'>);
+    if (unmet.length === 0) return taken;
+    await store.items.updateOne(
+      { projectId: project._id, slug: taken.slug, 'claim.agent': handle },
+      { $set: { claim: null } },
+    );
+    return null;
+  };
 
   // A card whose blockers are unfinished is not offered, because offering it
   // and then refusing the claim is a loop an agent cannot get out of. Computed

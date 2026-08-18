@@ -2684,6 +2684,41 @@ describe('a card that waits on another', () => {
     assert.equal(after.statusCode, 200);
   });
 
+  it('refuses a blocker that is not a slug, rather than dropping it', async () => {
+    // Dropping it stored a card that waits on nothing and then claims
+    // cleanly, which is the one outcome the field exists to prevent, reached
+    // by a typo nobody was told about.
+    const project = await createProject(harness);
+    const written = await post(project, '/items', {
+      slug: 'typo-blocker',
+      title: 't',
+      blocked_by: ['!!!'],
+      actor: 'a',
+    });
+    assert.equal(written.statusCode, 400);
+    assert.equal(written.json().error, 'bad_blocked_by');
+  });
+
+  it('does not lease a card whose blocker was reopened while it was being taken', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'gate', title: 'gate', body: 'b', status: 'done', actor: 'a' });
+    await post(project, '/items', { slug: 'behind', title: 'behind', body: 'b', blocked_by: ['gate'], actor: 'a' });
+
+    // Finished, so it claims.
+    const first = await post(project, '/items/behind/claim', { agent: 'a' });
+    assert.equal(first.statusCode, 200);
+    await post(project, '/items/behind/release', { agent: 'a' });
+
+    await post(project, '/items', { slug: 'gate', status: 'open', actor: 'a' });
+    const second = await post(project, '/items/behind/claim', { agent: 'b' });
+    assert.equal(second.statusCode, 409);
+    assert.equal(second.json().error, 'blocked_by');
+
+    // And the lease was not left behind by the refusal.
+    const item = await read(project, '/items/behind');
+    assert.equal(item.json().item.claim, null);
+  });
+
   it('refuses to wait on itself', async () => {
     const project = await createProject(harness);
     const written = await post(project, '/items', {
