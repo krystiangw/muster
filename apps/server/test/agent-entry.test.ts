@@ -211,6 +211,44 @@ describe('A. discovery', () => {
     }
   });
 
+  it('lists every admin-only call the routes actually have', async () => {
+    // Written out by hand twice and wrong twice: first claiming a worker key
+    // makes every other call, then leaving one out. The routes decide, and a
+    // worker key finding out by 403 is the failure this replaces.
+    const project = await createProject(harness);
+    const worker = (
+      await harness.server.inject({
+        method: 'POST',
+        url: `${project.api}/keys`,
+        headers: authed(project),
+        payload: { name: 'worker', role: 'write' },
+      })
+    ).json() as { token: string };
+    const asWorker = { authorization: `Bearer ${worker.token}`, 'content-type': 'application/json' };
+
+    const protocol = (await harness.server.inject({ method: 'GET', url: '/skill.md' })).body;
+    const admin: Array<[string, string, unknown]> = [
+      ['PATCH', `${project.api}/rules`, { claimTtlMinutes: 30 }],
+      ['PUT', `${project.api}/board`, { columns: [{ key: 'a', title: 'A', match: {} }] }],
+      ['POST', `${project.api}/read-link/rotate`, {}],
+      ['POST', `${project.api}/share`, { email: 'nobody@example.com' }],
+    ];
+    for (const [method, url, payload] of admin) {
+      const refused = await harness.server.inject({
+        method: method as 'PATCH',
+        url,
+        headers: asWorker,
+        payload: payload as Record<string, unknown>,
+      });
+      assert.equal(refused.statusCode, 403, `${method} ${url} is admin only`);
+      const named = url.replace(project.api, '');
+      assert.ok(
+        protocol.includes(named) || protocol.includes(named.replace('/', '')),
+        `${named} is refused to a worker key, so the protocol has to name it`,
+      );
+    }
+  });
+
   it('keeps a body that is too large from reading as a syntax error', async () => {
     // The parser's failures are one thing and every other client error is
     // another. Rounding them together told a caller whose body was a megabyte

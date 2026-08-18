@@ -527,8 +527,8 @@ hands, and ownership has no way back.
 The whole admin-only list, so a worker key never meets a 403 it was not
 warned about: \`POST /share\`, \`POST /claim\` and \`POST /claim/verify\`,
 \`DELETE /items/<slug>\`, \`PUT /board\`, \`PATCH /escalations/<id>\`,
-\`POST /read-link/rotate\`, \`PATCH\` on the project itself, everything under
-\`/keys\`, and an upsert that carries \`history\`. The five calls this document
+\`POST /read-link/rotate\`, \`PATCH /rules\`, \`PATCH\` on the project itself,
+everything under \`/keys\`, and an upsert that carries \`history\`. The five calls this document
 opens with are not on that list, which is the point: the work an agent does all
 day needs the smaller key. Taking it
 over lifts the limits and stops it expiring, so do this early:
