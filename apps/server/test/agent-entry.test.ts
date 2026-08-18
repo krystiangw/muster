@@ -293,6 +293,24 @@ describe('B. agent entry', () => {
     assert.equal(used.statusCode, 201);
   });
 
+  it('publishes every call an agent needs, including the ones added last', async () => {
+    // The card is how an agent discovers this service without reading prose.
+    // A call that exists and is not on it is a call nobody finds: the atomic
+    // take shipped and the card still described only the look.
+    const card = await harness.server.inject({
+      method: 'GET',
+      url: '/.well-known/agent-access.json',
+    });
+    const names = new Set(
+      (card.json().endpoints as Array<{ name: string; method: string }>).map(
+        (one) => `${one.method} ${one.name}`,
+      ),
+    );
+    for (const call of ['GET next_item', 'POST take_next_item', 'POST upsert_item', 'POST claim_item']) {
+      assert.ok(names.has(call), `${call} is not on the card: ${[...names].join(', ')}`);
+    }
+  });
+
   it('compresses the public documents, and nothing that holds a credential', async () => {
     const zipped = await harness.server.inject({
       method: 'GET',

@@ -750,7 +750,16 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
         name: 'next_item',
         method: 'GET',
         url: `${base}/v1/{project}/next?agent={handle}`,
-        notes: 'Oldest unclaimed open item inside the agent’s declared scope.',
+        notes:
+          'Oldest unclaimed open item inside the agent’s declared scope. A look: it takes nothing, so it is safe to poll and safe to retry.',
+      },
+      {
+        name: 'take_next_item',
+        method: 'POST',
+        url: `${base}/v1/{project}/next`,
+        request: { agent: '{handle}', ttl_minutes: 60 },
+        notes:
+          'The same choice, taken: the selection and the lease are one write, so a fleet asking at once gets different items instead of all but one losing the claim that follows an offer. Answers with the item already held and "claimed": true.',
       },
       {
         name: 'observe',
