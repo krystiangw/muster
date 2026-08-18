@@ -743,7 +743,7 @@ ${
    at <a href="/skill.md">skill.md</a> and it signs up on its own, then hand you the read link it
    gets back. Opening that link and claiming it with this address is what puts a board on this
    page. Nothing is lost in the meantime: an unclaimed project keeps working, on smaller limits
-   and a seven day timer.</p>`
+   and a ${count(config.demoTtlDays, 'day')} timer.</p>`
     }
 <div class="scroll cards"${projects.length === 0 ? ' hidden' : ''}><table class="cards">
 <thead><tr><th>Project</th><th class="mono">open</th><th class="mono">agents</th><th>Waiting</th><th></th></tr></thead>
