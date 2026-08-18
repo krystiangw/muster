@@ -192,7 +192,18 @@ function wholeNumber(value: string | undefined): number | null {
 /** As much of a note as goes into a timeline entry, at both doors. */
 const NOTE_MAX_CHARS = 2_000;
 
-/** How often a board that was asked to keep up reloads itself. */
+/**
+ * How often the board reloads itself.
+ *
+ * Not a switch. This board is written to by agents while somebody is looking at
+ * it, so a page that only changes when a person presses something is a page
+ * that is wrong most of the time, and asking them to opt into being told the
+ * truth is asking the wrong question.
+ *
+ * A minute is the slowest a person notices and the fastest that is not a
+ * nuisance. It costs one indexed read a minute per open tab, which is inside
+ * the ceiling this link already has.
+ */
 const BOARD_REFRESH_SECONDS = 60;
 
 interface KeptFilter {
@@ -1163,14 +1174,8 @@ ${
       label?: string;
       q?: string;
       answered?: string;
-      live?: string;
       merged?: string;
     };
-    // A board somebody is watching while agents write to it. A minute is the
-    // slowest a person notices and the fastest that is not a nuisance: a card
-    // filed by a loop is worth seeing on this pass, and a page that reloads
-    // every ten seconds is a page nobody can read.
-    const live = one(query.live) === '1';
     const narrowing = {
       ...(query.owner ? { owner: query.owner.slice(0, 48) } : {}),
       ...(query.agent ? { agent: query.agent.slice(0, 48) } : {}),
@@ -1337,7 +1342,7 @@ ${renderBoard(view, {
   moveAction: `${boardUrl}/move`,
   questions,
   answerAction: `/r/${escapeHtml(readToken)}`,
-  filters: renderBoardFilters(view, facets, boardUrl, live),
+  filters: renderBoardFilters(view, facets, boardUrl),
   timelines: await recentTimelines(store, project._id, view),
   agents,
   facets,
@@ -1363,7 +1368,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
             description: project.description,
             wide: true,
             signedIn: hasSessionCookie(request),
-            ...(live ? { refreshSeconds: BOARD_REFRESH_SECONDS } : {}),
+            refreshSeconds: BOARD_REFRESH_SECONDS,
           },
           body,
         ),

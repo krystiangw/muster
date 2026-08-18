@@ -267,12 +267,26 @@ button.ghost { background:transparent; color:var(--accent); }
 .peeked .sheet .why { font-family:var(--mono); font-size:11px; color:var(--muted); margin:0; }
 .peeked .sheet .none { color:var(--muted); font-style:italic; margin:0; font-size:14px; }
 .peeked .sheet .timeline { border-top:1px solid var(--rule); padding-top:4px; }
-.filters { align-items:flex-end; margin-bottom:16px; }
-/* The one control in this row that is not a filter, so it does not get the
-   uppercase label the others do: it reads as what it is, a switch. */
-.filters label.live { flex-direction:row; align-items:center; gap:6px; text-transform:none;
-  letter-spacing:0; font-size:12.5px; font-family:var(--mono); color:var(--ink-2); }
-.filters label.live input { width:auto; padding:0; }
+/* Filters that apply themselves. Every value is a link, so choosing is the
+   whole interaction: no button to press afterwards, and choosing what is
+   already chosen turns it off. */
+.filters { display:flex; flex-direction:column; gap:6px; margin:0 0 16px;
+  border:1px solid var(--rule); border-radius:6px; padding:10px 12px; background:var(--surface); }
+.filter-row { display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; }
+.filter-key { font-family:var(--mono); font-size:10.5px; letter-spacing:.09em;
+  text-transform:uppercase; color:var(--muted); min-width:52px; }
+.chip-link { font-family:var(--mono); font-size:12px; padding:2px 8px; border-radius:999px;
+  border:1px solid var(--rule); color:var(--ink-2); text-decoration:none; }
+.chip-link:hover { border-color:var(--accent); color:var(--accent); }
+.chip-link.on { background:var(--accent); border-color:var(--accent); color:var(--surface); }
+.filter-more { display:inline; }
+.filter-more summary { display:inline; font-family:var(--mono); font-size:12px;
+  color:var(--muted); cursor:pointer; }
+.filter-row form { display:inline-flex; margin:0; max-width:none; }
+.filter-row input[type="search"] { font-size:13px; padding:4px 9px; }
+.reset { font-family:var(--mono); font-size:12px; padding:3px 10px; border-radius:4px;
+  border:1px solid var(--rule); color:var(--ink-2); text-decoration:none; margin-left:auto; }
+.reset:hover { border-color:var(--accent); color:var(--accent); }
 .filters label { font-family:var(--mono); font-size:11px; letter-spacing:.09em;
   text-transform:uppercase; color:var(--muted); }
 .filters select { font-size:14px; padding:6px 9px; min-width:170px; max-width:230px; }

@@ -805,10 +805,11 @@ describe('moving an item into a column', () => {
     assert.equal(again.json().board.columns[1].match.within_days, 14);
   });
 
-  it('keeps up with the agents only when asked to', async () => {
-    // A board is watched while loops write to it, and a page that never
-    // changes is a page somebody reloads by hand. A page that reloads itself
-    // under their hands is worse, so it is a switch and it lives in the URL.
+  it('keeps up with the agents without being asked to', async () => {
+    // A board is written to by loops while somebody is looking at it, so a page
+    // that only changes when a person presses something is a page that is wrong
+    // most of the time. Asking them to opt into being told the truth was asking
+    // the wrong question, and the switch that asked it is gone.
     const project = await createProject(harness, 'watched');
     await harness.server.inject({
       method: 'POST',
@@ -818,16 +819,9 @@ describe('moving an item into a column', () => {
     });
     const readToken = project.readUrl.split('/r/')[1]!;
 
-    const still = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
-    assert.ok(!still.body.includes('http-equiv="refresh"'), 'off unless asked');
-
-    const watching = await harness.server.inject({
-      method: 'GET',
-      url: `/r/${readToken}/board?live=1`,
-    });
-    assert.match(watching.body, /<meta http-equiv="refresh" content="60">/);
-    assert.match(watching.body, /name="live" value="1" checked/, 'and the switch says so');
-    assert.match(still.body, /Reload every minute/, 'named by what it does');
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(page.body, /<meta http-equiv="refresh" content="60">/);
+    assert.ok(!page.body.includes('name="live"'), 'and nothing to switch');
   });
 
   it('files a card from the board, and never on top of one already there', async () => {
@@ -1711,19 +1705,23 @@ describe('a board many agents write to', () => {
     const readToken = project.readUrl.split('/r/')[1]!;
     const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
 
-    assert.match(page.body, /<optgroup label="Registered here">/);
+    // A handle is a line number; what it is for is the name, and on a control
+    // made of links that description is what the browser shows on hover.
     assert.match(
       page.body,
-      /<option value="errors-loop">errors-loop - watches the exchange error feed<\/option>/,
-      'a handle is a line number; what it is for is the name',
+      /title="watches the exchange error feed"[^>]*>errors-loop<\/a>/,
+      'the description travels with the handle',
     );
     assert.match(
       page.body,
-      /<option value="idle-loop">idle-loop<\/option>/,
+      /<a class="chip-link"[^>]*>idle-loop<\/a>/,
       'registered and silent still gets offered',
     );
-    assert.match(page.body, /<optgroup label="Seen on items">/);
-    assert.match(page.body, /<option value="passer-by">passer-by<\/option>/);
+    assert.match(
+      page.body,
+      /<a class="chip-link"[^>]*>passer-by<\/a>/,
+      'and so does a name that only ever wrote',
+    );
 
     const described = (
       await harness.server.inject({
@@ -1771,7 +1769,11 @@ describe('a board many agents write to', () => {
       method: 'GET',
       url: `/r/${readToken}/board?agent=gone-loop`,
     });
-    assert.match(page.body, /<option value="gone-loop" selected>gone-loop<\/option>/);
+    assert.match(
+      page.body,
+      /<a class="chip-link on"[^>]*>gone-loop<\/a>/,
+      'so the control that turned it on can turn it off',
+    );
   });
 
   it('stops offering an agent whose only trace is a lapsed claim', async () => {

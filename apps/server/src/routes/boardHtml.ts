@@ -665,90 +665,150 @@ function agentOptions(agents: AgentFacet[], selected: string | undefined): strin
 }
 
 /**
- * The narrowing controls, and the one control that is not a narrowing.
+ * The narrowing controls, as links rather than a form with a button.
  *
- * The switch reloads the page every minute, for the case this board is for:
- * agents writing while somebody watches. It says what it does rather than what
- * it is for, because the first person to meet it asked what it meant, and a
- * control nobody can read is a control nobody turns on.
+ * There is no JavaScript on this page and there is not going to be, so a
+ * `<select>` cannot apply itself: it needs a submit button beside it, and a
+ * button somebody has to press after choosing is a choice that has not happened
+ * yet. Links do apply themselves, which is the whole of it. Choosing keeps
+ * whatever else is narrowed, and choosing what is already chosen clears it, so
+ * the same control turns a filter on and off and there is no small x to hunt
+ * for.
  *
- * Off unless asked for, and in the URL like every filter here, so it survives
- * the reload it causes and can be kept as a bookmark. Off by default because a
- * page that reloads under somebody's hands throws away the note they were half
- * way through typing.
+ * The search is the one thing that cannot be a link, because it is typed. It is
+ * a form of one field, which every browser submits on Enter without being told,
+ * and it carries the other narrowings so searching does not drop them.
+ *
+ * Long lists fold: the first few are in the row, the rest are one click away in
+ * a `<details>`, which is a disclosure a browser does for free.
  */
-export function renderBoardFilters(
-  view: BoardView,
-  facets: BoardFacets,
+const FILTER_INLINE = 8;
+
+function narrowedUrl(
   action: string,
-  live = false,
+  filter: BoardFilter,
+  change: Partial<Record<'owner' | 'agent' | 'label' | 'q', string | undefined>>,
 ): string {
+  const next: Record<string, string | undefined> = { ...filter, ...change };
+  const params = new URLSearchParams();
+  for (const key of ['owner', 'agent', 'label', 'q'] as const) {
+    const value = next[key];
+    if (value) params.set(key, value);
+  }
+  const query = params.toString();
+  return query === '' ? action : `${action}?${query}`;
+}
+
+function filterRow(
+  action: string,
+  filter: BoardFilter,
+  key: 'owner' | 'agent' | 'label',
+  title: string,
+  anyLabel: string,
+  values: Array<{ value: string; note?: string }>,
+  omitted: number,
+): string {
+  if (values.length === 0) return '';
+  const current = filter[key];
+  const chip = (entry: { value: string; note?: string }) => {
+    const on = entry.value === current;
+    return `<a class="chip-link${on ? ' on' : ''}"${
+      entry.note ? ` title="${escapeHtml(entry.note)}"` : ''
+    } href="${escapeHtml(
+      narrowedUrl(action, filter, { [key]: on ? undefined : entry.value }),
+    )}"${on ? ' aria-current="true"' : ''}>${escapeHtml(entry.value)}</a>`;
+  };
+  const shown = values.slice(0, FILTER_INLINE);
+  const rest = values.slice(FILTER_INLINE);
+  return `<div class="filter-row">
+  <span class="filter-key">${escapeHtml(title)}</span>
+  <a class="chip-link${current ? '' : ' on'}" href="${escapeHtml(
+    narrowedUrl(action, filter, { [key]: undefined }),
+  )}">${escapeHtml(anyLabel)}</a>
+  ${shown.map(chip).join('\n  ')}
+  ${
+    rest.length === 0
+      ? ''
+      : `<details class="filter-more"><summary>${rest.length} more</summary>
+    ${rest.map(chip).join('\n    ')}
+  </details>`
+  }
+  ${
+    omitted === 0
+      ? ''
+      : `<span class="hint">${omitted} more exist; add <code>?${key}=</code> to the URL to use one.</span>`
+  }
+</div>`;
+}
+
+export function renderBoardFilters(view: BoardView, facets: BoardFacets, action: string): string {
   if (facets.owners.length === 0 && facets.agents.length === 0 && facets.labels.length === 0) {
     return '';
   }
-  const owners = [`<option value="">anyone</option>`]
-    .concat(
-      facets.owners.includes(view.filter.owner ?? '')
-        ? []
-        : view.filter.owner
-          ? [option(view.filter.owner, view.filter.owner, view.filter.owner)]
-          : [],
-    )
-    .concat(facets.owners.map((value) => option(value, value, view.filter.owner)))
-    .join('\n      ');
+  const filter = view.filter;
+  const narrowed = Boolean(filter.owner || filter.agent || filter.label || filter.q);
+  // A name somebody reached this board by is offered even when it is not on the
+  // list any more, so the control that turned it on can turn it off.
+  const withCurrent = (values: string[], current: string | undefined) =>
+    current && !values.includes(current) ? [current, ...values] : values;
 
-  // Each kind names its own parameter. One combined sentence pointing at
-  // `?agent=` sends somebody looking for a missing owner to a query that
-  // cannot select one.
-  const more = (count: number, kind: string, parameter: string): string =>
-    count === 0
-      ? ''
-      : `<span class="hint">${count} more ${kind}${count === 1 ? '' : 's'} exist; add <code>?${parameter}=</code> to the URL to use one.</span>`;
-
-  return `<form class="row filters" method="get" action="${escapeHtml(action)}">
-  <label>Owner
-    <select name="owner">
-      ${owners}
-    </select>
-  </label>
-  <label>Agent
-    <select name="agent">
-      ${agentOptions(facets.agents, view.filter.agent)}
-    </select>
-  </label>
+  return `<div class="filters">
+${filterRow(
+    action,
+    filter,
+    'owner',
+    'Owner',
+    'anyone',
+    withCurrent(facets.owners, filter.owner).map((value) => ({ value })),
+    facets.omitted.owners,
+  )}
+${filterRow(
+    action,
+    filter,
+    'agent',
+    'Agent',
+    'any agent',
+    withCurrent(
+      facets.agents.map((agent) => agent.handle),
+      filter.agent,
+    ).map((handle) => {
+      const agent = facets.agents.find((entry) => entry.handle === handle);
+      return {
+        value: handle,
+        ...(agent && agent.description !== '' ? { note: agent.description } : {}),
+      };
+    }),
+    facets.omitted.agents,
+  )}
+${filterRow(
+    action,
+    filter,
+    'label',
+    'Label',
+    'any label',
+    withCurrent(facets.labels, filter.label).map((value) => ({ value })),
+    facets.omitted.labels,
+  )}
+<div class="filter-row">
+  <span class="filter-key">Find</span>
+  <form method="get" action="${escapeHtml(action)}">
+    ${(['owner', 'agent', 'label'] as const)
+      .filter((key) => filter[key])
+      .map(
+        (key) =>
+          `<input type="hidden" name="${key}" value="${escapeHtml(filter[key] as string)}">`,
+      )
+      .join('')}
+    <input type="search" name="q" value="${escapeHtml(filter.q ?? '')}"
+      placeholder="slug or title, then Enter" size="24">
+  </form>
   ${
-    facets.labels.length === 0
-      ? ''
-      : `<label>Label
-    <select name="label">
-      ${[`<option value="">any label</option>`]
-        .concat(
-          facets.labels.includes(view.filter.label ?? '') || !view.filter.label
-            ? []
-            : [option(view.filter.label, view.filter.label, view.filter.label)],
-        )
-        .concat(facets.labels.map((value) => option(value, value, view.filter.label)))
-        .join('\n      ')}
-    </select>
-  </label>`
-  }
-  <label>Find
-    <input type="search" name="q" value="${escapeHtml(view.filter.q ?? '')}"
-      placeholder="slug or title" size="16">
-  </label>
-  <label class="live" title="The agents write to this board while you are looking at it. On, the page fetches itself again once a minute.">
-    <input type="checkbox" name="live" value="1"${live ? ' checked' : ''}>
-    Reload every minute</label>
-  <button type="submit">Show</button>
-  ${
-    view.filter.owner || view.filter.agent || view.filter.label || view.filter.q
-      ? `<a class="ghost-link" href="${escapeHtml(action)}${live ? '?live=1' : ''}">whole board</a>`
+    narrowed
+      ? `<a class="reset" href="${escapeHtml(action)}">Clear filters</a>`
       : ''
   }
-  ${more(facets.omitted.owners, 'owner', 'owner')}
-  ${more(facets.omitted.agents, 'agent', 'agent')}
-  ${more(facets.omitted.labels, 'label', 'label')}
-</form>`;
+</div>
+</div>`;
 }
 
 /**
