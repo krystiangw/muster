@@ -306,7 +306,7 @@ describe('the mail an escalation sends', () => {
       assert.equal(sent.length, 1);
       const told = await summary();
       assert.equal(told.oldest_unannounced_at, null, 'the one that was mailed is not waiting');
-      assert.ok(told.notice_sent_at, 'and the hour it claimed is on the project');
+      assert.ok(told.notice_sent_at, 'and the send is stamped on the project');
 
       // The second question inside the same hour is throttled, which is the
       // healthy silence: it waits to be named, and the stamp above stays put.
@@ -330,5 +330,33 @@ describe('the mail an escalation sends', () => {
       });
       assert.equal((await summary()).oldest_unannounced_at, null);
     });
+  });
+
+  it('does not call the throttle claim a delivery', async () => {
+    // The claim is taken before the provider is asked, atomically, so that two
+    // agents filing at once cannot both mail. A send that throws rolls it back,
+    // but a process that dies in between does not, and anything watching this
+    // service would read the leftover claim as a message that went out.
+    await withMailer(async (harness, _sent) => {
+      const project = await claimedProject(harness, 'owner@example.com');
+      assert.equal((await ask(harness, project, 'did anything leave?')).statusCode, 201);
+
+      // The claim, left behind as a process that died between taking it and
+      // rolling it back would leave it. Written by hand because that is the
+      // only way to have it: every path through the code either sends or rolls
+      // it back, which is exactly why the leftover is invisible when it happens.
+      await harness.store.projects.updateOne(
+        { _id: project.id },
+        { $set: { escalationNotifiedAt: new Date() } },
+      );
+
+      const read = await harness.server.inject({
+        method: 'GET',
+        url: project.api,
+        headers: authed(project),
+      });
+      assert.equal(read.json().notice_sent_at, null, 'the provider refused, so nothing left');
+      assert.ok(read.json().oldest_unannounced_at, 'and the question is still waiting');
+    }, 'throws');
   });
 });

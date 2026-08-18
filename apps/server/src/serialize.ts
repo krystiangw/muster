@@ -199,7 +199,7 @@ export function projectJson(project: ProjectDoc, config: Config): Record<string,
     // sent at all", which look identical from a board and identical in a log
     // nobody reads. Null on a project nobody has claimed: there is no address
     // to write to, and none is expected.
-    notice_sent_at: project.escalationNotifiedAt ?? null,
+    notice_sent_at: project.escalationNoticeSentAt ?? null,
     rules: {
       stale_after_hours: project.rules.staleAfterHours,
       absence_resolve: project.rules.absenceResolve

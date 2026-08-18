@@ -132,6 +132,15 @@ export function createNotifier(deps: {
         await store.escalations
           .updateOne({ _id: escalation._id }, { $set: { notifiedAt: now } })
           .catch(() => undefined);
+        // After the provider said yes, and separate from the stamp above it.
+        // That one is the throttle claim, taken before the send so that two
+        // agents filing at once cannot both mail; it is not evidence that
+        // anything left. A process that dies between the claim and the rollback
+        // leaves the claim looking recent, and anything watching the mail path
+        // from outside would read that as healthy.
+        await store.projects
+          .updateOne({ _id: project._id }, { $set: { escalationNoticeSentAt: now } })
+          .catch(() => undefined);
       } catch (error) {
         // An hour of silence is a worse failure than a duplicate message, so a
         // send that threw gives the hour back. Guarded on our own stamp: if a

@@ -358,6 +358,15 @@ export interface ProjectDoc {
    * process that a restart would forget.
    */
   escalationNotifiedAt?: Date | null;
+  /**
+   * When a notice about this project last actually left.
+   *
+   * Deliberately not `escalationNotifiedAt`, which is the throttle claim: that
+   * one is written before the send, atomically, so that two agents filing in
+   * the same second cannot both mail. It moves whether or not the message ever
+   * reached anybody, which makes it the wrong thing to publish as health.
+   */
+  escalationNoticeSentAt?: Date | null;
   /** Unclaimed demo projects are swept by a TTL index. Null once claimed. */
   expiresAt: Date | null;
   createdAt: Date;
