@@ -223,6 +223,19 @@ never hold one claim. It earned its place on 2026-08-18 by finding the counter
 drifting below the collection, permanently, because nothing raises a counter
 that is too low.
 
+And the door that hands out credentials, which is the one where a regression
+costs more than a broken page:
+
+```bash
+node tools/smoke-oauth.mjs
+```
+
+Both metadata documents, a registration refused for asking a grant this server
+does not run, a token from `client_credentials`, a write with it, and a wrong
+secret refused. It also asserts the repair the audit made: `expires_in` is an
+hour or less, because this endpoint used to hand out a key that lived as long
+as the project, one per refresh, sixty two of them on one board.
+
 And the door most agents actually arrive through, which no other check here
 touches:
 
