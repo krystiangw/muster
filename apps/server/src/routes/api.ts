@@ -149,8 +149,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds);
 
       const body = (request.body ?? {}) as { name?: string; description?: string };
-      const { project, adminToken } = await createProject(store, config, body);
-      record(store, 'signup', { door: 'http', projectId: project._id });
+      const { project, adminToken } = await createProject(store, config, body, 'http');
       return reply.code(201).send({
         project: project._id,
         name: project.name,
@@ -957,16 +956,18 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           priority?: EscalationPriority;
           item_slug?: string | null;
         };
-        const doc = await createEscalation(store, project, {
-          agent: body.agent ?? 'unknown-agent',
-          question: body.question,
-          context: body.context,
-          priority: body.priority,
-          itemSlug: body.item_slug ?? null,
-        });
-        // After the write, not before: a question the cap refused was never
-        // filed, and a log that says otherwise is worse than no log.
-        record(store, 'escalate', { door: 'http', projectId: project._id });
+        const doc = await createEscalation(
+          store,
+          project,
+          {
+            agent: body.agent ?? 'unknown-agent',
+            question: body.question,
+            context: body.context,
+            priority: body.priority,
+            itemSlug: body.item_slug ?? null,
+          },
+          'http',
+        );
         // Awaited rather than fired off, so that a provider having a bad day
         // shows up here as a slow escalation instead of an unhandled rejection
         // in a log nobody reads. The notifier swallows its own failures: an

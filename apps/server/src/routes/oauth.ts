@@ -4,7 +4,6 @@ import type { Store } from '../db.js';
 import { hashToken, newId, newToken } from '../ids.js';
 import type { RateLimiter } from '../rateLimit.js';
 import { createApiKey, createProject } from '../service.js';
-import { record } from '../events.js';
 import { clientIp } from './api.js';
 
 /**
@@ -103,8 +102,7 @@ export function registerOAuth(app: FastifyInstance, deps: OAuthDeps): void {
             'This server issues tokens with client_credentials only: a project belongs to whoever created it, and the one human moment is claiming it by email afterwards. See /agent-signup.md.',
         });
       }
-      const { project } = await createProject(store, config, { name: body.client_name });
-      record(store, 'signup', { door: 'oauth', projectId: project._id });
+      const { project } = await createProject(store, config, { name: body.client_name }, 'oauth');
       const clientId = newId('client');
       const clientSecret = newToken();
       await store.oauthClients.insertOne({

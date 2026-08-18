@@ -125,6 +125,7 @@ export async function createProject(
   store: Store,
   config: Config,
   input: { name?: string; description?: string },
+  door: EventDoor,
 ): Promise<CreatedProject> {
   const now = new Date();
   const id = newId('p');
@@ -159,6 +160,12 @@ export async function createProject(
   };
   await store.keys.insertOne({ ...key, expiresAt: project.expiresAt });
 
+  // Counted here rather than at the four routes that create projects, because
+  // three of them counted and the browser form did not. It is the denominator
+  // of the activation and claim rates, so a door missing from it does not read
+  // as a gap: it reads as a rate above a hundred percent, or as a landing page
+  // that converts nobody.
+  record(store, 'signup', { door, projectId: project._id });
   return { project, adminToken };
 }
 
@@ -1812,6 +1819,7 @@ export async function createEscalation(
     priority?: EscalationPriority;
     itemSlug?: string | null;
   },
+  door: EventDoor,
 ): Promise<EscalationDoc> {
   if (typeof input.question !== 'string' || input.question.trim().length === 0) {
     throw badRequest('bad_question', 'An escalation needs a question the operator can answer.');
@@ -1872,6 +1880,11 @@ export async function createEscalation(
       },
     );
   }
+  // After the write, not before: a question the cap refused was never filed,
+  // and a log that says otherwise is worse than no log. Here rather than at the
+  // routes because the MCP door, which is how most agents arrive, was the one
+  // not counting.
+  record(store, 'escalate', { door, projectId: project._id });
   return doc;
 }
 
@@ -1959,8 +1972,13 @@ export async function answerEscalation(
   // decision sent twice is not a new one, though, and a client retrying after
   // a timeout must not put finished work back in somebody's queue.
   const changed = before.status !== status || before.answer !== answer;
+  // Guarded on the answer as well as the status, which the sentence above
+  // already claimed: two identical retries of an answer that only edits the
+  // text both match a guard that reads the status alone, so both succeed and
+  // both count. The second one now finds the row already moved and takes the
+  // read-back path below, where nothing is recorded.
   const doc = await store.escalations.findOneAndUpdate(
-    { projectId, _id: id, status: before.status },
+    { projectId, _id: id, status: before.status, answer: before.answer },
     {
       $set: {
         status,
@@ -1993,10 +2011,13 @@ export async function answerEscalation(
   // operator's page. That page is not where the mail sends them. A split like
   // that is how a door that works gets removed for being unused.
   //
-  // Only when the decision changed something. A client retrying an identical
-  // answer after a timeout is one decision, and the guarded update above
-  // already treats it as one.
-  if (changed) record(store, 'answer', { door, projectId });
+  // Only when the decision changed something, and only when it is a decision.
+  // Putting a question back in the queue is the opposite of answering it, and
+  // `open` is one of the four states this route accepts, so counting every
+  // change would let a withdrawn answer raise the number of answers. A client
+  // retrying an identical answer after a timeout is one decision too, and the
+  // guarded update above treats it as one.
+  if (changed && !isOpen) record(store, 'answer', { door, projectId });
   return doc as EscalationDoc;
 }
 

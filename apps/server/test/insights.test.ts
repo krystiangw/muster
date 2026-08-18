@@ -478,5 +478,42 @@ describe('counting the people, not the agents', () => {
       1,
       'the same answer sent twice is one decision',
     );
+
+    // Putting a question back in the queue is the opposite of answering it, and
+    // `open` is one of the four states the route takes.
+    await harness.server.inject({
+      method: 'PATCH',
+      url: `${project.api}/escalations/${overHttp}`,
+      headers: authed(project),
+      payload: { status: 'open', answer: '' },
+    });
+    await flushEvents();
+    assert.equal(
+      ((await insights(harness.store)).answerDoors.http ?? 0) - (before.http ?? 0),
+      1,
+      'a withdrawn answer is not an answer',
+    );
+
+    // Two identical retries arriving together are still one decision. The
+    // status alone does not settle this: on a question already answered, an
+    // edit that keeps the status passes a guard that reads only the status, so
+    // both retries would win and both would count. The answer is in the guard
+    // for that reason, and this races the case that needs it.
+    const raced = await ask('answered twice at once?');
+    const edit = (answer: string) =>
+      harness.server.inject({
+        method: 'PATCH',
+        url: `${project.api}/escalations/${raced}`,
+        headers: authed(project),
+        payload: { status: 'answered', answer },
+      });
+    await edit('first words');
+    await Promise.all([edit('second words'), edit('second words')]);
+    await flushEvents();
+    assert.equal(
+      await harness.store.events.countDocuments({ kind: 'answer', projectId: project.id }),
+      5,
+      'three doors, the first answer of the raced one, and one edit rather than two',
+    );
   });
 });

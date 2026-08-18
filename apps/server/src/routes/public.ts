@@ -623,7 +623,12 @@ curl -sX POST ${escapeHtml(base)}/p -H 'content-type: application/json' -d '{"na
     }
 
     const form = (request.body ?? {}) as { name?: string };
-    const { project, adminToken } = await createProject(store, config, { name: form.name });
+    const { project, adminToken } = await createProject(
+      store,
+      config,
+      { name: form.name },
+      'browser',
+    );
     const body = `
 <h1>Project created</h1>
 <div class="notice"><b>Copy the token now.</b> It is shown once and stored only as a hash.</div>

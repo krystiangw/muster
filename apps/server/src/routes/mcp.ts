@@ -488,11 +488,15 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           `Too many new projects from this address. Retry in ${verdict.retryAfterSeconds}s. If you already have a project, use its token instead of making another.`,
         );
       }
-      const { project, adminToken } = await createProject(store, config, {
-        name: str(args.name, 'Untitled project'),
-        description: str(args.description),
-      });
-      record(store, 'signup', { door: 'mcp', projectId: project._id });
+      const { project, adminToken } = await createProject(
+        store,
+        config,
+        {
+          name: str(args.name, 'Untitled project'),
+          description: str(args.description),
+        },
+        'mcp',
+      );
       return {
         project: project._id,
         name: project.name,
@@ -658,13 +662,18 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         return { ...(await observe(store, project, str(args.source), present)) };
       }
       case 'escalate': {
-        const doc = await createEscalation(store, project, {
-          agent: actor,
-          question: str(args.question),
-          context: str(args.context),
-          priority: args.priority as EscalationPriority | undefined,
-          itemSlug: args.item_slug === undefined ? null : str(args.item_slug),
-        });
+        const doc = await createEscalation(
+          store,
+          project,
+          {
+            agent: actor,
+            question: str(args.question),
+            context: str(args.context),
+            priority: args.priority as EscalationPriority | undefined,
+            itemSlug: args.item_slug === undefined ? null : str(args.item_slug),
+          },
+          'mcp',
+        );
         await notifier.escalationRaised(project, doc);
         return {
           escalation: escalationJson(doc),
