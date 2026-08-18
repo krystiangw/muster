@@ -41,7 +41,6 @@ async function withMailer(
       mailer: {
         sendClaimCode: async () => 'sent',
         sendOperatorCode: async () => 'sent',
-        sendOperatorLink: async () => 'sent',
         sendEscalation: async (to, notice) => {
           if (outcome === 'throws') throw new Error('the provider said no');
           sent.push({ to, notice });

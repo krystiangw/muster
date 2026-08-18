@@ -29,7 +29,6 @@ export interface EscalationNotice {
 export interface Mailer {
   sendClaimCode(to: string, code: string, projectName: string): Promise<Delivery>;
   sendOperatorCode(to: string, code: string): Promise<Delivery>;
-  sendOperatorLink(to: string, url: string, projectCount: number): Promise<Delivery>;
   sendEscalation(to: string, notice: EscalationNotice): Promise<Delivery>;
 }
 
@@ -102,18 +101,6 @@ export function createMailer(config: Config, log: (msg: string) => void): Mailer
   }
 
   return {
-    async sendOperatorLink(to, url, projectCount) {
-      return send(to, 'Your Muster projects', [
-        `You asked for the link to everything you own on Muster: ${projectCount} project(s).`,
-        '',
-        url,
-        '',
-        'It stays valid, so keep it or bookmark it. Anyone holding it can answer',
-        'your agents on your behalf, so treat it like a password.',
-        '',
-        'If you did not ask for this, ignore the message. Nothing changed.',
-      ]);
-    },
     async sendOperatorCode(to, code) {
       // A code rather than a link, on purpose. A link in a mail ends up in the
       // browser history, in the Referer of whatever the person clicks next, and
