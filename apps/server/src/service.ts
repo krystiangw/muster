@@ -1323,7 +1323,7 @@ export interface ListItemsQuery {
  *    urgency order can miss an item that moved behind the cursor, and an
  *    import nobody can verify is exactly what a migration must not have.
  */
-export function itemCursor(doc: ItemDoc, order: ItemOrder): string {
+function itemCursor(doc: ItemDoc, order: ItemOrder): string {
   if (order === 'id') return doc._id;
   if (order === 'recent') return `${doc.updatedAt.toISOString()}|${doc._id}`;
   return `${doc.priority}|${doc.updatedAt.toISOString()}|${doc._id}`;
@@ -1365,7 +1365,14 @@ function afterCursor(cursor: string, order: ItemOrder): Record<string, unknown> 
   };
 }
 
-export async function listItems(
+/**
+ * Not exported, and that is the point: `readItems` is the only way in.
+ *
+ * A cursor handed out by `readItems` carries the walk's checkpoint after a
+ * tilde, and a caller reaching past it would pass that whole string here as a
+ * keyset and get `bad_cursor` for a cursor this service itself issued.
+ */
+async function listItems(
   store: Store,
   projectId: string,
   query: ListItemsQuery,
