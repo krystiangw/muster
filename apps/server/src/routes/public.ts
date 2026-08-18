@@ -1010,15 +1010,18 @@ yours.</p>`
           `<p class="why">Owned by ${escapeHtml(redactAddress(project.claimedBy ?? ''))}${
             project.claimedAt ? ` since ${when(project.claimedAt)}` : ''
           }. ${
-            // One line, and this is a judgement rather than brevity for its own
-            // sake: on a phone the longer version pushed the question somebody
-            // came here to answer below the fold. The reasoning belongs in the
-            // mail, which has room for it; the page needs the fact.
+            // One sentence, and this is a judgement rather than brevity for
+            // its own sake: on a phone the longer version pushed the question
+            // somebody came here to answer below the fold. The reasoning
+            // belongs in the mail, which has room for it; the page needs the
+            // fact. Each power named here was added to the link later than the
+            // sentence was written, which is exactly how a warning ends up a
+            // version behind what it warns about.
             (project.visibility ?? 'link') === 'owner'
               ? 'Private: this page opens only for its owner, signed in.'
-              : `Open by link: anybody who has this address can answer these questions, file work
-and change this board without signing in. <a href="/operator">Your projects</a> has the switch that
-closes it.`
+              : `Open by link: anybody who has this address can answer these questions, file work,
+write on the timeline and change the board, urgency included, without signing in.
+<a href="/operator">Your projects</a> has the switch that closes it.`
           }</p>`
     }
 

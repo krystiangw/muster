@@ -366,7 +366,7 @@ describe('what the link says about itself', () => {
     assert.match(open.body, /Open by link/);
     assert.match(
       open.body,
-      /anybody who has this address can answer these questions, file work\s+and change this board/,
+      /anybody who has this address can answer these questions, file work,\s+write on the timeline and change the board, urgency included/,
       'and what it can do is what it can do today, not what it could do the day it was written',
     );
 
