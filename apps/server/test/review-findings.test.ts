@@ -227,6 +227,39 @@ describe('one read, two doors', () => {
     );
   });
 
+  it('reads a lapsed lease as free work, the way the board does', async () => {
+    // The board has always taken an expired claim as no claim: hygiene clearing
+    // the field is a tidy-up, not the moment the work became free. The list
+    // filter compared the field to null, so between the lease running out and
+    // the next sweep, `claimed=true` handed back an item whose holder had gone
+    // and `claimed=false` hid the one thing an idle agent could pick up.
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'lapsed', title: 'lapsed', actor: 'a' });
+    await post(project, '/items/lapsed/claim', { agent: 'gone' });
+    await harness.store.items.updateOne(
+      { projectId: project.id, slug: 'lapsed' },
+      { $set: { 'claim.expiresAt': new Date(Date.now() - 60_000) } },
+    );
+
+    const held = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/items?claimed=true`,
+      headers: authed(project),
+    });
+    assert.deepEqual(held.json().items, [], 'nobody is on it');
+
+    const free = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/items?claimed=false`,
+      headers: authed(project),
+    });
+    assert.deepEqual(
+      free.json().items.map((item: { slug: string }) => item.slug),
+      ['lapsed'],
+      'and it is there to be picked up',
+    );
+  });
+
   it('carries migrated fields through the MCP door, so its columns are reachable', async () => {
     // A column can filter on `fields`, and this door could not write one, so a
     // board laid out around another tracker's states had columns an MCP agent

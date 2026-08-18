@@ -154,6 +154,19 @@ describe('B. agent entry', () => {
     const mcp = await harness.server.inject({ method: 'GET', url: '/.well-known/mcp.json' });
     assert.equal(mcp.statusCode, 200);
     assert.equal(mcp.json().transport, 'streamable-http');
+
+    // Three surfaces told a newcomer to run `npm install @muster/sdk`, and the
+    // registry answered 404: the package is written and not published, and the
+    // name is still the operator's to choose. Publishing is the moment to put
+    // the line back, on both surfaces, which is why this ties them together.
+    if (json.sdk?.published !== true) {
+      assert.equal(json.sdk?.npm, undefined, 'no package name until there is a package');
+      const skill = await harness.server.inject({ method: 'GET', url: '/skill.md' });
+      assert.ok(
+        !/npm install/.test(skill.body),
+        'and nothing tells an agent to install one',
+      );
+    }
   });
 
   it('supports RFC 7591 dynamic client registration end to end', async () => {

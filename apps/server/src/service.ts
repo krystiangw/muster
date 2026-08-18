@@ -1376,12 +1376,23 @@ export async function listItems(
   if (query.label) filter.labels = query.label;
   if (query.source) filter.source = query.source;
   if (query.stale !== undefined) filter.stale = query.stale;
-  if (query.claimed === true) filter.claim = { $ne: null };
-  if (query.claimed === false) filter.claim = null;
+  // An expired claim is not a claim, the same reading the board takes: an item
+  // whose lease lapsed is free work, and hygiene clearing the field is a tidy-up
+  // rather than the moment it became free. Listing it as held would send an
+  // agent looking for a holder who left.
+  const claimConditions: Record<string, unknown>[] = [];
+  if (query.claimed === true) {
+    claimConditions.push({ claim: { $ne: null }, 'claim.expiresAt': { $gt: new Date() } });
+  }
+  if (query.claimed === false) {
+    claimConditions.push({
+      $or: [{ claim: null }, { 'claim.expiresAt': { $lte: new Date() } }],
+    });
+  }
 
   const order: ItemOrder =
     query.order === 'id' ? 'id' : query.order === 'recent' ? 'recent' : 'urgency';
-  const conditions: Record<string, unknown>[] = [];
+  const conditions: Record<string, unknown>[] = [...claimConditions];
   if (query.since) conditions.push({ updatedAt: { $gte: query.since } });
   if (query.cursor) {
     const after = afterCursor(query.cursor, order);
