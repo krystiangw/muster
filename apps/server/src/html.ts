@@ -126,6 +126,20 @@ td .face { vertical-align:-3px; margin-right:4px; }
 .edit form.row { max-width:none; gap:8px; margin:0; }
 .edit label { font-size:12px; }
 .edit .tags { gap:6px; }
+/* The note takes the whole width under the two short fields: it is the one
+   control here that somebody writes a sentence into, and a sentence typed into
+   a 14 character box is a sentence nobody types. */
+.edit form.note { flex:1 0 100%; display:flex; flex-direction:column; gap:6px; margin:0; max-width:none; }
+.edit form.note textarea { min-height:56px; width:100%; }
+.edit form.note button { align-self:flex-start; }
+/* A question waiting on a person, on the card it is about. Marked out from the
+   card's own text: it is the one part of a sheet that is addressed to whoever
+   is reading rather than describing the work. */
+.asked { border:1px solid var(--accent); border-radius:8px; padding:12px 14px; margin-top:14px;
+  background:color-mix(in srgb, var(--accent) 5%, transparent); }
+.asked .label { color:var(--accent); margin:0 0 6px; }
+.asked textarea { width:100%; min-height:52px; }
+.asked form { max-width:none; display:flex; flex-direction:column; gap:8px; margin:8px 0 0; }
 .edit button.tag { font-family:var(--mono); font-size:11px; padding:3px 8px; border-radius:999px; }
 /* A control revealed by hover is a control that does not exist on a phone. */
 @media (hover: none) { .col .card .move { opacity:1; } }

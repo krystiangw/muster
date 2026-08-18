@@ -705,6 +705,104 @@ describe('moving an item into a column', () => {
     );
   });
 
+  it('carries a question on the card it was asked about, answerable there', async () => {
+    // Reported from a browser: a card that something is waiting on showed the
+    // work and no way to reply. The question lived on the other page, and
+    // finding it meant knowing it existed.
+    const project = await createProject(harness, 'asked about');
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'bridge', title: 'the bridge', actor: 'errors-loop' },
+    });
+    const asked = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/escalations`,
+      headers: authed(project),
+      payload: {
+        agent: 'errors-loop',
+        question: 'Do we pay the bridge fee?',
+        item_slug: 'bridge',
+      },
+    });
+    const id = asked.json().escalation.id;
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(page.body, /Do we pay the bridge fee\?/, 'the question is on the card');
+    assert.match(page.body, new RegExp(`action="/r/${readToken}/escalations/${id}"`));
+
+    const answered = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/escalations/${id}`,
+      payload: 'status=answered&answer=yes%2C+pay+it&back=board',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    assert.equal(answered.statusCode, 303);
+    assert.equal(
+      answered.headers.location,
+      `/r/${readToken}/board?answered=${id}`,
+      'and it comes back to the board it was answered from',
+    );
+
+    const doc = await harness.store.escalations.findOne({ _id: id });
+    assert.equal(doc?.status, 'answered');
+    assert.equal(doc?.answer, 'yes, pay it');
+
+    // Answered, so the card stops asking. The question stays in the timeline,
+    // where it belongs: what was asked and what was decided is the history of
+    // the work, and only the form goes away.
+    const after = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.ok(
+      !after.body.includes(`action="/r/${readToken}/escalations/${id}"`),
+      'the form is gone',
+    );
+    assert.match(after.body, /asked the operator: Do we pay the bridge fee\?/, 'the record stays');
+  });
+
+  it('lets a person write a note into the timeline the agents read', async () => {
+    // Reported from a browser: opening a card offered assign, tag and move, and
+    // nowhere to say why. A board a person may only rearrange is not shared.
+    const project = await createProject(harness, 'two way');
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'card', title: 'card', actor: 'errors-loop' },
+    });
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    const posted = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/note`,
+      payload: 'slug=card&message=the+venue+replied%2C+it+is+their+bridge',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    assert.equal(posted.statusCode, 303);
+
+    const item = await harness.store.items.findOne({ projectId: project.id, slug: 'card' });
+    const last = item!.timeline.at(-1)!;
+    assert.equal(last.by, 'operator', 'a human sentence is signed as one');
+    assert.match(last.message, /the venue replied/);
+
+    // And it is on the page the agents and the person both read.
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(page.body, /the venue replied, it is their bridge/);
+
+    // An empty note is a slip of the hand, not an instruction to file a blank
+    // line into a timeline everybody reads.
+    const empty = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/note`,
+      payload: 'slug=card&message=+++',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    assert.equal(empty.statusCode, 303);
+    const after = await harness.store.items.findOne({ projectId: project.id, slug: 'card' });
+    assert.equal(after!.timeline.length, item!.timeline.length, 'nothing was written');
+  });
+
   it('rate limits reads through a read link too, since one of them is a search', async () => {
     // The API door counts what one token may read in a minute; these two pages
     // counted nothing, and one of them carries a search box whose worst case is

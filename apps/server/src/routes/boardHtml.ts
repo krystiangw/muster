@@ -149,6 +149,7 @@ function preview(
   timeline: TimelineEntry[],
   agents: Map<string, string> | undefined,
   edit: string,
+  asked: string,
 ): string {
   const claimed = item.claim !== null && new Date(item.claim.expiresAt) > now;
   return `<div class="peeked" id="${escapeHtml(item._id)}">
@@ -197,6 +198,7 @@ ${timeline
     </ul>`
         : ''
     }
+    ${asked}
     ${edit}
     <p class="why">updated ${when(item.updatedAt, now)} &middot; created ${when(item.createdAt, now)} &middot; ${item.timelineCount} timeline entr${item.timelineCount === 1 ? 'y' : 'ies'}</p>
   </div>
@@ -215,6 +217,12 @@ ${timeline
  * The owner field is an input with a datalist rather than a select: the people
  * a board already knows are one keystroke away, and somebody new can still be
  * named without an administrator adding them first.
+ *
+ * And a note, because until this existed a person could move a card, assign it
+ * and tag it, and could not say why. The whole product is a board agents and
+ * people share; a share where one side may only rearrange what the other side
+ * wrote is not one. What is typed here lands in the same timeline an agent
+ * writes to, under `operator`, and every agent that reads the item sees it.
  */
 function editForms(item: ItemDoc, facets: BoardFacets, action: string, keep: BoardFilter): string {
   const id = escapeHtml(item._id);
@@ -241,6 +249,13 @@ function editForms(item: ItemDoc, facets: BoardFacets, action: string, keep: Boa
     </datalist>
     <button type="submit">tag</button>
   </form>
+  <form class="note" method="post" action="${escapeHtml(action)}/note">
+    <input type="hidden" name="slug" value="${escapeHtml(item.slug)}">${keptFilter(keep)}
+    <label for="note-${id}">Add a note</label>
+    <textarea id="note-${id}" name="message" rows="2" maxlength="2000"
+      placeholder="What you know that the agents do not."></textarea>
+    <button type="submit">add note</button>
+  </form>
   ${
     labels.length === 0
       ? ''
@@ -262,6 +277,40 @@ interface MoveTarget {
   title: string;
 }
 
+export interface BoardQuestion {
+  id: string;
+  agent: string;
+  question: string;
+  context: string;
+}
+
+/**
+ * The question on the card it was asked about, with the same four answers the
+ * other page offers.
+ *
+ * The same form, deliberately: two forms for one decision drift, and the one
+ * that drifts is always the one somebody found second.
+ */
+function questionForm(question: BoardQuestion, action: string): string {
+  return `<div class="asked">
+  <p class="label">${escapeHtml(question.agent)} is waiting on you</p>
+  <p style="font-size:16px;margin:0 0 6px"><b>${escapeHtml(question.question)}</b></p>
+  ${question.context ? `<p class="why" style="white-space:pre-wrap">${escapeHtml(question.context)}</p>` : ''}
+  <form method="post" action="${escapeHtml(action)}/escalations/${escapeHtml(question.id)}">
+    <input type="hidden" name="back" value="board">
+    <label>Your answer
+      <textarea name="answer" rows="2" placeholder="The decision, in your words."></textarea>
+    </label>
+    <div class="row" style="gap:8px;flex-wrap:wrap">
+      <button type="submit" name="status" value="answered">Answer</button>
+      <button class="ghost" type="submit" name="status" value="resolved">Already handled</button>
+      <button class="ghost" type="submit" name="status" value="wont_do">Won't do</button>
+      <button class="ghost" type="submit" name="status" value="in_progress">I'm on it</button>
+    </div>
+  </form>
+</div>`;
+}
+
 export interface BoardRenderOptions {
   now?: Date;
   /** Where the per-card move form posts. Omitted renders a read-only board. */
@@ -276,6 +325,17 @@ export interface BoardRenderOptions {
   agents?: Map<string, string>;
   /** Names already in use, offered in the assign and tag fields. */
   facets?: BoardFacets;
+  /**
+   * Open questions by the slug they were asked about, so the card carries the
+   * question and the answer form.
+   *
+   * A question about an item used to live only on the other page, and a person
+   * who opened the card it named saw a card with nothing to say and no way to
+   * reply. What waits on somebody has to be answerable where they meet it.
+   */
+  questions?: Map<string, BoardQuestion>;
+  /** Where an answer posts, when questions are offered. */
+  answerAction?: string;
   /**
    * Said above the board when a search was dropped for reading too long.
    *
@@ -411,6 +471,9 @@ ${shown
       options.agents,
       options.moveAction && options.facets
         ? editForms(item, options.facets, options.moveAction.replace(/\/move$/, ''), view.filter)
+        : '',
+      options.questions?.get(item.slug) && options.answerAction
+        ? questionForm(options.questions.get(item.slug)!, options.answerAction)
         : '',
     ),
   )

@@ -1140,7 +1140,7 @@ ${
     // search, and a line saying that is what happened. Everything else they
     // narrowed by is still in force, which is also the cheapest way out of it.
     let searchStopped: string | undefined;
-    const [view, facets, waiting] = await Promise.all([
+    const [view, facets, waiting, waitingOn] = await Promise.all([
       loadBoard(store, project, {
         ...narrowing,
         // Raw, because the cut belongs to the search itself: slicing here as
@@ -1157,7 +1157,30 @@ ${
       // reachable from here only through a link labelled "questions and
       // timeline", in muted monospace, whatever the queue held.
       store.escalations.countDocuments({ projectId: project._id, status: 'open' }),
+      // The open questions that name a card, so the card can carry them. Capped
+      // at the plan's own ceiling for open questions on the free tier, which is
+      // far more than a board shows at once; a project past it has a queue
+      // problem the board is not going to fix.
+      store.escalations
+        .find(
+          { projectId: project._id, status: 'open', itemSlug: { $ne: null } },
+          { projection: { itemSlug: 1, agent: 1, question: 1, context: 1 }, limit: 200 },
+        )
+        .toArray(),
     ]);
+    const questions = new Map(
+      waitingOn
+        .filter((doc) => typeof doc.itemSlug === 'string' && doc.itemSlug !== '')
+        .map((doc) => [
+          doc.itemSlug as string,
+          {
+            id: doc._id,
+            agent: doc.agent,
+            question: doc.question,
+            context: doc.context ?? '',
+          },
+        ]),
+    );
     const agents = await agentDescriptions(store, project._id, view);
 
     // A move redirects back here saying what it did. The message is built from
@@ -1206,7 +1229,11 @@ ${
           ? `"${touched.slug}" is now tagged ${
               touched.labels.length > 0 ? touched.labels.join(', ') : 'nothing'
             }.`
-          : `"${touched.slug}" is ${touched.owner ? `owned by ${touched.owner}` : 'unassigned'}.`
+          : query.what === 'note'
+            ? `Your note is on "${touched.slug}", where every agent that reads it will see it.`
+            : query.what === 'nothing'
+              ? `Nothing was written to "${touched.slug}": the note was empty.`
+              : `"${touched.slug}" is ${touched.owner ? `owned by ${touched.owner}` : 'unassigned'}.`
         : undefined;
     const notice = movedNotice ?? doneNotice;
 
@@ -1223,6 +1250,8 @@ ${project.description ? `<p class="lead">${escapeHtml(project.description)}</p>`
 
 ${renderBoard(view, {
   moveAction: `${boardUrl}/move`,
+  questions,
+  answerAction: `/r/${escapeHtml(readToken)}`,
   filters: renderBoardFilters(view, facets, boardUrl),
   timelines: await recentTimelines(store, project._id, view),
   agents,
@@ -1470,6 +1499,43 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
   });
 
+  /**
+   * A person writing into the timeline the agents read.
+   *
+   * Until this existed the board let somebody move a card, assign it and tag it,
+   * and gave them nowhere to say why. Everything a person knew that the agents
+   * did not had to reach them through some other channel, which is the failure
+   * this product exists to fix, reproduced inside it.
+   *
+   * Under `operator`, like every other write through this link, so an agent
+   * reading the item can tell a human's sentence from its own.
+   */
+  app.post('/r/:readToken/board/note', { schema: { hide: true } }, async (request, reply) => {
+    if (!limitWrites(request, reply)) return reply;
+    const { readToken } = request.params as { readToken: string };
+    const form = (request.body ?? {}) as { slug?: string; message?: string } & KeptFilter;
+    const project = await store.projects.findOne({ readToken });
+    if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
+    if (!(await readableBy(store, request, project))) {
+      throw new ServiceError(404, 'not_found', 'No such project.');
+    }
+    if (!form.slug) throw new ServiceError(400, 'bad_request', 'Which item?');
+
+    const message = (one(form.message) ?? '').trim();
+    // An empty note is a slip of the hand, not an instruction to write nothing:
+    // it goes back to the board having changed nothing rather than filing a
+    // blank line into a timeline everybody reads.
+    if (message !== '') {
+      await appendNote(store, project, form.slug, 'operator', message);
+    }
+    const params = new URLSearchParams({
+      done: form.slug,
+      what: message === '' ? 'nothing' : 'note',
+      ...keptParams(form),
+    });
+    return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
+  });
+
   app.post('/r/:readToken/board/move', { schema: { hide: true } }, async (request, reply) => {
     if (!limitWrites(request, reply)) return reply;
     const { readToken } = request.params as { readToken: string };
@@ -1504,7 +1570,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
   app.post('/r/:readToken/escalations/:id', { schema: { hide: true } }, async (request, reply) => {
     if (!limitWrites(request, reply)) return reply;
     const { readToken, id } = request.params as { readToken: string; id: string };
-    const form = (request.body ?? {}) as { status?: string; answer?: string };
+    const form = (request.body ?? {}) as { status?: string; answer?: string; back?: string };
     const project = await store.projects.findOne({ readToken });
     if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
     // Writing through the link is exactly what the link is for, so a project
@@ -1520,7 +1586,17 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     await answerEscalation(store, project._id, id, status, (form.answer ?? '').slice(0, 8000), 'browser');
     // Named in the redirect so the page can confirm it. Four buttons that look
     // alike and a silent reload is how somebody ends up answering twice.
-    return reply.redirect(`/r/${readToken}?answered=${encodeURIComponent(id)}`, 303);
+    //
+    // Back where it was answered from. A question can now be answered on the
+    // card it is about, and landing somebody on a different page than the one
+    // they were reading is how a board loses its place. One fixed alternative
+    // rather than a URL from the form: a redirect target somebody can type is
+    // a redirect target somebody else can send.
+    const back =
+      (form.back ?? '') === 'board'
+        ? `/r/${readToken}/board?answered=${encodeURIComponent(id)}`
+        : `/r/${readToken}?answered=${encodeURIComponent(id)}`;
+    return reply.redirect(back, 303);
   });
 
   /**
