@@ -160,6 +160,57 @@ describe('A. discovery', () => {
     }
   });
 
+  it('marks every call that needs an admin token as needing one', async () => {
+    // A worker key is the key an agent is told to mint for itself, and two
+    // calls in the published catalogue said nothing about needing more than
+    // one: an agent following the document got a 403 the document had not
+    // prepared it for. The routes are the source of truth here, not a list.
+    const access = (
+      await harness.server.inject({ method: 'GET', url: '/.well-known/agent-access.json' })
+    ).json() as { endpoints: Array<{ name: string; auth?: string }> };
+    const byName = new Map(access.endpoints.map((entry) => [entry.name, entry]));
+    for (const name of ['share_project', 'delete_item']) {
+      assert.equal(byName.get(name)?.auth, 'admin token', `${name} needs the admin token`);
+    }
+  });
+
+  it('refuses a stream where it has none, so a client does not reconnect for ever', async () => {
+    // Measured against production with the official SDK: a client sitting
+    // completely idle opened a standalone GET about once a second, because a
+    // 200 where the protocol says 405 reads as a stream that closed. Eighty
+    // thousand requests a day, per idle client, doing nothing.
+    const asSdk = await harness.server.inject({
+      method: 'GET',
+      url: '/mcp',
+      headers: { accept: 'text/event-stream' },
+    });
+    assert.equal(asSdk.statusCode, 405);
+    assert.equal(asSdk.headers.allow, 'POST');
+
+    // And a person who pasted the URL into a browser still gets told what this
+    // endpoint is, which is why the card was there in the first place.
+    const asPerson = await harness.server.inject({ method: 'GET', url: '/mcp' });
+    assert.equal(asPerson.statusCode, 200);
+    assert.match(asPerson.json().usage, /POST/);
+  });
+
+  it('answers a body it cannot parse with a 400, not with "we broke"', async () => {
+    // 5xx is the one class this protocol tells an agent to retry, so a
+    // permanently malformed request became a loop, and every typo landed in
+    // our log as an unhandled error.
+    for (const payload of ["{'name':'x'}", '{"name":}', '']) {
+      const answer = await harness.server.inject({
+        method: 'POST',
+        url: '/p',
+        headers: { 'content-type': 'application/json' },
+        payload,
+      });
+      assert.equal(answer.statusCode, 400, JSON.stringify(payload));
+      assert.equal(answer.json().error, 'bad_json');
+      assert.doesNotMatch(answer.json().message, /our side/);
+    }
+  });
+
   it('describes itself the same way wherever a catalogue asks', async () => {
     // Three surfaces ask for one line about this server, and `server.json` is
     // published by hand from a laptop, so it is the one that drifts: the

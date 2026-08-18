@@ -545,10 +545,30 @@ export const TOOL_COUNT = TOOLS.length;
 export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
   const { store, config, limiter, notifier } = deps;
 
-  app.get('/mcp', { schema: { hide: true } }, async (_request, reply) =>
+  app.get('/mcp', { schema: { hide: true } }, async (request, reply) => {
+    /**
+     * The official SDK opens a standalone GET with `accept: text/event-stream`
+     * and expects 405 from a server that does not offer a stream there. We
+     * answered 200 with a friendly info card, the SDK read that as a stream
+     * that closed immediately, and reconnected about once a second for as long
+     * as the client stayed open: measured at 0.9 requests a second per idle
+     * client, which is eighty thousand a day, unmetered, from a client doing
+     * nothing at all.
+     *
+     * So the answer depends on who is asking, which is what the header is for.
+     * A person who pasted the URL into a browser still gets the card.
+     */
+    const wantsStream = String(request.headers.accept ?? '').includes('text/event-stream');
+    if (wantsStream) {
+      return reply.code(405).header('allow', 'POST').send({
+        error: 'method_not_allowed',
+        message:
+          'This MCP endpoint has no server-initiated stream. Send JSON-RPC 2.0 over POST; the response carries everything.',
+      });
+    }
     // A plain GET is not an MCP handshake. Say what this endpoint is instead of
     // returning a protocol error to a human who pasted the URL in a browser.
-    reply.type('application/json').send({
+    return reply.type('application/json').send({
       name: 'muster',
       version: '0.1.0',
       transport: 'streamable-http',
@@ -557,8 +577,8 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
       card: `${config.baseUrl}/.well-known/mcp.json`,
       instructions: `${config.baseUrl}/skill.md`,
       tools: TOOLS.map((tool) => tool.name),
-    }),
-  );
+    });
+  });
 
   app.post('/mcp', { schema: { hide: true } }, async (request, reply) => {
     const body = request.body as JsonRpcRequest | JsonRpcRequest[] | undefined;
@@ -971,6 +991,12 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         return {
           escalation: escalationJson(doc),
           read_url: `${config.baseUrl}/r/${project.readToken}`,
+          // Same sentence as the HTTP door, for the same reason: a question
+          // filed on a board nobody owns reaches nobody, and the agent has no
+          // way of knowing that from the answer.
+          hint: project.claimedBy
+            ? 'Keep working on something else and read the inbox on your next iteration.'
+            : 'Nobody has claimed this board, so no message was sent to anybody. Hand it to a person with share_project, or send them the read link yourself, then read the inbox on your next iteration.',
         };
       }
       case 'board': {

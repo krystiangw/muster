@@ -518,11 +518,17 @@ The old link stops working immediately, and the response carries the new one.
 
 A project belongs to whoever created it until a person takes it over. (A person
 who was signed in when they made one on the site already owns it; a project made
-by a token, which is every project an agent makes, is nobody's until this.) Taking it
+by a token, which is every project an agent makes, is nobody's until this.)
+
+This one needs the **admin** token, which is the one \`POST /p\` handed you, not
+a worker key you minted later: handing the board to somebody is how it changes
+hands, and ownership has no way back. \`DELETE /items/<slug>\` is admin as well,
+for the same reason in miniature. Every other call in this document works with
+either. Taking it
 over lifts the limits and stops it expiring, so do this early:
 
 \`\`\`bash
-curl -sX POST $MUSTER/share -H "authorization: Bearer $TOKEN" \\
+curl -sX POST $MUSTER/share -H "authorization: Bearer $ADMIN_TOKEN" \\
   -H 'content-type: application/json' \\
   -d '{"email":"human@example.com","note":"board for the arbitrage loops","agent":"errors-loop"}'
 \`\`\`
@@ -940,6 +946,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
         name: 'share_project',
         method: 'POST',
         url: `${base}/v1/{project}/share`,
+        auth: 'admin token',
         request: { email: 'human@example.com', note: 'why you are handing it over' },
         notes:
           'Offers the board to a person: one message with the link, and it waits in their operator view until they accept. Nothing is put into anybody’s queue and nothing changes hands until they click.',
@@ -971,6 +978,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
         name: 'delete_item',
         method: 'DELETE',
         url: `${base}/v1/{project}/items/{slug}`,
+        auth: 'admin token',
         notes:
           'For mistakes and bad imports. Closing is the normal ending and keeps the audit trail; both free the slot.',
       },

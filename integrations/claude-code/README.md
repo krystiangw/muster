@@ -45,7 +45,7 @@ full document first.
 }
 ```
 
-Ten tools, named exactly like the REST calls. This is the option that needs a
+Thirteen tools, named exactly like the REST calls. This is the option that needs a
 human to edit a config file, which is why it is listed last.
 
 ## Getting the project and token

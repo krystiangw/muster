@@ -1299,7 +1299,15 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         return reply.code(201).send({
           escalation: escalationJson(doc),
           read_url: `${config.baseUrl}/r/${project.readToken}`,
-          hint: 'Keep working on something else and read /inbox on your next iteration.',
+          // The hint used to say "wait" whatever the board was, and on an
+          // unclaimed board nothing is sent to anybody: the notice needs an
+          // owner's address. So an agent doing exactly what the protocol asks
+          // filed the question it was designed to file and waited for an
+          // answer that had no way of arriving. This says which of the two
+          // situations it is in, and what to do about the second one.
+          hint: project.claimedBy
+            ? 'Keep working on something else and read /inbox on your next iteration.'
+            : 'Nobody has claimed this board, so no message was sent to anybody. Hand it to a person with POST /share, or send them the read link yourself, then read /inbox on your next iteration.',
         });
       },
     );

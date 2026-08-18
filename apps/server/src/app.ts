@@ -437,6 +437,27 @@ ${rows
         message: 'Send application/json, or a form body on the HTML endpoints.',
       });
     }
+    /**
+     * A body the caller wrote wrong is not this server breaking.
+     *
+     * It answered 500 "Something broke on our side" to a quote in the wrong
+     * place, on the first call a stranger makes, and 5xx is the one class this
+     * protocol tells an agent to retry: a permanently malformed request became
+     * a loop, and our own log filled with "unhandled error" for every typo.
+     * Fastify already decided this is a 400 and says which failure it was, so
+     * the only thing missing was reading it.
+     */
+    const status = (error as { statusCode?: number }).statusCode;
+    if (typeof status === 'number' && status >= 400 && status < 500) {
+      const empty = (error as { code?: string }).code === 'FST_ERR_CTP_EMPTY_JSON_BODY';
+      return reply.code(status).send({
+        error: 'bad_json',
+        message: empty
+          ? 'The body was empty. Send the JSON this call takes, or {} if every field is optional.'
+          : `That body is not JSON this can read: ${error.message}. Nothing was applied, and retrying it unchanged will fail the same way.`,
+        docs: `${config.baseUrl}/openapi.json`,
+      });
+    }
     request.log.error({ err: error }, 'unhandled error');
     return reply.code(500).send({
       error: 'internal',

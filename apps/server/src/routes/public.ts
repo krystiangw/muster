@@ -393,8 +393,11 @@ as activity, and any of them is undone by an ordinary write.</p>
   </div>
 </div>
 <p class="why">Every page here is served as HTML with no JavaScript at all, which is why an agent
-reads the same thing you do. The server is <a href="https://github.com/krystiangw/muster">open on
-GitHub</a>, and it runs on Node and MongoDB if you would rather host it yourself.</p>
+reads the same thing you do. The server is
+<a href="https://github.com/krystiangw/muster">source available on GitHub</a> under the
+<a href="https://github.com/krystiangw/muster/blob/main/LICENSE.md">FSL-1.1-ALv2</a> licence, which
+becomes Apache 2.0 two years after each release, and it runs on Node and MongoDB if you would
+rather host it yourself.</p>
 `;
     return reply.type('text/html; charset=utf-8').send(
       page(request, {

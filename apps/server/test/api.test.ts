@@ -1880,3 +1880,35 @@ describe('taking what is next, over MCP', () => {
     }
   });
 });
+
+describe('a question filed on a board nobody owns', () => {
+  it('says nobody was told, instead of telling the agent to wait', async () => {
+    // The promise of an escalation is that somebody hears it. On an unclaimed
+    // board the notice has no address to go to, and the answer used to say
+    // "keep working and read the inbox", so an agent doing exactly what the
+    // protocol asks waited for an answer that had no way of arriving.
+    const project = await createProject(harness);
+    const asked = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/escalations`,
+      headers: authed(project),
+      payload: { agent: 'a', question: 'Bridge it or wait?' },
+    });
+    assert.equal(asked.statusCode, 201);
+    assert.match(asked.json().hint, /Nobody has claimed this board/);
+    assert.match(asked.json().hint, /share/);
+
+    // Claimed, and the hint is the ordinary one again.
+    await harness.store.projects.updateOne(
+      { _id: project.id },
+      { $set: { claimedBy: 'owner@example.com', claimedAt: new Date(), expiresAt: null } },
+    );
+    const owned = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/escalations`,
+      headers: authed(project),
+      payload: { agent: 'a', question: 'And this one?' },
+    });
+    assert.doesNotMatch(owned.json().hint, /Nobody has claimed/);
+  });
+});
