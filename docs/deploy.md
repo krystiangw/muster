@@ -152,6 +152,25 @@ The test suite asserts all fifteen checks locally
 about the deployment differs from the app: a WAF in front, a redirect that drops
 a path, or `BASE_URL` not matching the host agents actually resolve.
 
+## 5b. Before a second dyno
+
+Three things here assume one process, and only one of them breaks quietly.
+
+**The rate limiter counts in memory.** `apps/server/src/rateLimit.ts` keeps a
+fixed window per key in a `Map`, so two dynos publish one limit and enforce
+twice it, and a client that paces itself by the published number will be
+refused by one dyno while another lets it through. Move it behind Mongo or
+Redis before scaling, not after: the interface is one `check` call and the
+published numbers in `agent-access.json` are what make it a promise.
+
+**Hygiene is already safe.** The scheduled sweeper takes its throttle with a
+guarded `findOneAndUpdate` on `lastSweptAt`, so a burst of dynos produces one
+sweep rather than one each, and `swept_at` is written after the pass with
+`$max`, so two of them finishing out of order cannot move it backwards.
+
+**The escalation mail is already safe**, for the same reason: the hour is
+claimed atomically on the project document, not held in the process.
+
 ## 6. After it is up
 
 - Point the first real project at it: migrate `operator-inbox-app` to
