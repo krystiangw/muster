@@ -682,24 +682,42 @@ address. Claiming is free and raises the limits:</p>
    * already locked out. The lookup that decides it is one indexed read, which
    * is the cheap half of what this protects.
    */
-  const limitReads = (request: FastifyRequest, reply: FastifyReply): boolean => {
-    const { readToken } = request.params as { readToken: string };
-    const verdict = limiter.check(`rlread:${readToken}`, config.rateLimits.read);
-    if (verdict.ok) return true;
+  const tooFast = (reply: FastifyReply, retryAfterSeconds: number): false => {
     void reply
       .code(429)
-      .header('retry-after', String(verdict.retryAfterSeconds))
+      .header('retry-after', String(retryAfterSeconds))
       .type('text/html; charset=utf-8')
       .send(
         layout(
           { title: 'Slow down' },
-          `<h1>Too many reads at once</h1><p>This link is being read faster than the board is meant to be read. Try again in ${verdict.retryAfterSeconds} seconds.</p>`,
+          `<h1>Too many reads at once</h1><p>This link is being read faster than the board is meant to be read. Try again in ${retryAfterSeconds} seconds.</p>`,
         ),
       );
     return false;
   };
 
+  /**
+   * What one address may ask of these pages, whatever it is holding.
+   *
+   * Charged before the link is looked at, because deciding whether a link opens
+   * anything is itself work: an indexed read, and for anybody carrying a
+   * session, a session read and a write of when it was last used. A refusal has
+   * to be cheap to hand out, and it is only cheap if there is a ceiling on how
+   * often it can be asked for.
+   */
+  const limitSeeking = (request: FastifyRequest, reply: FastifyReply): boolean => {
+    const verdict = limiter.check(`rlseek:${clientIp(request)}`, config.rateLimits.read);
+    return verdict.ok ? true : tooFast(reply, verdict.retryAfterSeconds);
+  };
+
+  const limitReads = (request: FastifyRequest, reply: FastifyReply): boolean => {
+    const { readToken } = request.params as { readToken: string };
+    const verdict = limiter.check(`rlread:${readToken}`, config.rateLimits.read);
+    return verdict.ok ? true : tooFast(reply, verdict.retryAfterSeconds);
+  };
+
   app.get('/r/:readToken', { schema: { hide: true } }, async (request, reply) => {
+    if (!limitSeeking(request, reply)) return reply;
     const { readToken } = request.params as { readToken: string };
     const project = await store.projects.findOne({ readToken });
     if (!project) {
@@ -1045,6 +1063,7 @@ ${
   });
 
   app.get('/r/:readToken/board', { schema: { hide: true } }, async (request, reply) => {
+    if (!limitSeeking(request, reply)) return reply;
     const { readToken } = request.params as { readToken: string };
     const project = await store.projects.findOne({ readToken });
     if (!project) {

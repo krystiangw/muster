@@ -713,7 +713,12 @@ describe('moving an item into a column', () => {
     try {
       const project = await createProject(isolated, 'read often');
       const readToken = project.readUrl.split('/r/')[1]!;
-      const read = () => isolated.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+      const read = () =>
+        isolated.server.inject({
+          method: 'GET',
+          url: `/r/${readToken}/board`,
+          headers: { 'x-forwarded-for': '203.0.113.7' },
+        });
 
       assert.equal((await read()).statusCode, 200);
       assert.equal((await read()).statusCode, 200);
@@ -723,8 +728,12 @@ describe('moving an item into a column', () => {
 
       // The board and the page beside it share the ceiling, because they share
       // the link: counting them apart would double what the link is allowed.
-      const beside = await isolated.server.inject({ method: 'GET', url: `/r/${readToken}` });
-      assert.equal(beside.statusCode, 429);
+      const beside = await isolated.server.inject({
+        method: 'GET',
+        url: `/r/${readToken}`,
+        headers: { 'x-forwarded-for': '203.0.113.8' },
+      });
+      assert.equal(beside.statusCode, 429, 'from another address too: the ceiling is the link');
     } finally {
       await isolated.stop();
     }
@@ -764,16 +773,23 @@ describe('moving an item into a column', () => {
         payload: { visibility: 'owner' },
       });
 
-      const stale = () => isolated.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+      const stale = () =>
+        isolated.server.inject({
+          method: 'GET',
+          url: `/r/${readToken}/board`,
+          headers: { 'x-forwarded-for': '198.51.100.4' },
+        });
       assert.equal((await stale()).statusCode, 404);
       assert.equal((await stale()).statusCode, 404);
-      assert.equal((await stale()).statusCode, 404, 'still refused, not rate limited');
+      // The third is refused for asking too often from one address, which is
+      // the ceiling on handing out refusals rather than the owner's allowance.
+      assert.equal((await stale()).statusCode, 429);
 
       const session = await signIn(isolated, email);
       const owner = await isolated.server.inject({
         method: 'GET',
         url: `/r/${readToken}/board`,
-        headers: { cookie: session.cookie },
+        headers: { cookie: session.cookie, 'x-forwarded-for': '198.51.100.9' },
       });
       assert.equal(owner.statusCode, 200, 'the owner still has their whole budget');
     } finally {
