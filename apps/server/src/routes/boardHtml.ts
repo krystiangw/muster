@@ -129,6 +129,21 @@ function card(
       asked > 0 ? chip(asked === 1 ? 'asks you' : `${asked} questions`, 'asks') : ''
     }
     ${item.stale ? chip('stale', 'stale') : ''}
+    ${
+      // Why nothing is happening to a card that looks perfectly workable.
+      // Without it, a card waiting on two others sits in the same column as
+      // work anybody could pick up, and the only difference is a field you
+      // have to open the card to see: the board would be showing an agent
+      // ignoring a ticket rather than an agent being refused it.
+      (item.blockedBy ?? []).length > 0
+        ? chip(
+            (item.blockedBy ?? []).length === 1
+              ? `waiting on ${item.blockedBy![0]}`
+              : `waiting on ${item.blockedBy!.length}`,
+            'blocked',
+          )
+        : ''
+    }
     ${(item.labels ?? []).slice(0, 3).map((label) => chip(label, 'open')).join(' ')}
   </div>
   <div class="foot">

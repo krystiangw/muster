@@ -2720,6 +2720,51 @@ describe('a card that waits on another', () => {
     assert.equal(item.json().item.claim, null);
   });
 
+  it('answers a person on the page when the field will not take what they typed', async () => {
+    // The refusals this field can produce are about what somebody typed into
+    // it, and a person who typed it is looking at the board rather than at a
+    // JSON body. Nothing is written and the board says so.
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'from-the-page', title: 't', body: 'b', actor: 'a' });
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const refused = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/waiting`,
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: new URLSearchParams({ slug: 'from-the-page', waiting: '!!! ???' }).toString(),
+    });
+    assert.equal(refused.statusCode, 303);
+    assert.match(refused.headers.location as string, /what=waiting_refused/);
+    const page = await harness.server.inject({
+      method: 'GET',
+      url: refused.headers.location as string,
+    });
+    assert.match(page.body, /Nothing was written/);
+    const item = await read(project, '/items/from-the-page');
+    assert.equal((item.json().item.blocked_by ?? []).length, 0);
+  });
+
+  it('takes a list a person typed with commas, spaces or both', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'one', title: 't', body: 'b', actor: 'a' });
+    await post(project, '/items', { slug: 'two', title: 't', body: 'b', actor: 'a' });
+    await post(project, '/items', { slug: 'waits-for-both', title: 't', body: 'b', actor: 'a' });
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const set = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/waiting`,
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: new URLSearchParams({ slug: 'waits-for-both', waiting: 'one,  two' }).toString(),
+    });
+    assert.equal(set.statusCode, 303);
+    const item = await read(project, '/items/waits-for-both');
+    assert.deepEqual(item.json().item.blocked_by, ['one', 'two']);
+
+    // And an agent is refused it, which is the point of the field.
+    const claim = await post(project, '/items/waits-for-both/claim', { agent: 'a' });
+    assert.equal(claim.statusCode, 409);
+  });
+
   it('refuses to wait on itself', async () => {
     const project = await createProject(harness);
     const written = await post(project, '/items', {

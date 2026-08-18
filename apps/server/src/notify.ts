@@ -389,7 +389,13 @@ export function createNotifier(deps: {
           // failure rather than as a quiet success, because a stamp left
           // behind by a message nobody sent is a board that is never told,
           // including after somebody configures the provider.
-          else throw new Error(`the notice was ${delivery}, not sent`);
+          //
+          // `logged` is not that. Off production the notice goes to a terminal
+          // somebody is watching, on purpose, and it is delivered: rolling the
+          // stamp back there would print the same quiet spell on every sweep.
+          else if (delivery === 'discarded') {
+            throw new Error('no mail provider configured, the notice was discarded');
+          } else log(`quiet notice for ${project._id} was ${delivery}, not sent`);
         } catch (error) {
           // The stamp goes back, guarded on our own claim, so a provider
           // having a bad minute does not cost this board its one message.

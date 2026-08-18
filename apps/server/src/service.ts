@@ -72,7 +72,7 @@ function badRequest(code: string, message: string): ServiceError {
  * card with more prerequisites than this is a plan, and a plan belongs in the
  * body where a person can read it.
  */
-const MAX_BLOCKERS = 20;
+export const MAX_BLOCKERS = 20;
 
 export function normalizeUpsertInput(input: UpsertItemInput): UpsertItemInput {
   if (input.status !== undefined && !ITEM_STATUSES.includes(input.status)) {

@@ -37,6 +37,7 @@ import {
   answerEscalation,
   normalizeSearch,
   appendNote,
+  MAX_BLOCKERS,
   authenticate,
   claimProjectWithEmail,
   createProject,
@@ -1416,6 +1417,8 @@ ${
             ? `"${touched.slug}" is on the board. Every agent reading this project sees it now.`
             : query.what === 'note'
             ? `Your note is on "${touched.slug}", where every agent that reads it will see it.`
+            : query.what === 'waiting_refused'
+            ? `Nothing was written to "${touched.slug}". A card waits on slugs, at most ${MAX_BLOCKERS} of them, and one of the names you typed is not one: it is still waiting on ${(touched.blockedBy ?? []).length > 0 ? (touched.blockedBy ?? []).join(', ') : 'nothing'}.`
             : query.what === 'waiting'
             ? (touched.blockedBy ?? []).length > 0
               ? `"${touched.slug}" is waiting on ${(touched.blockedBy ?? []).join(', ')}. No agent will be offered it, and a claim on it is refused, until those are done or dropped.`
@@ -1666,24 +1669,36 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
 
     // Commas, spaces or newlines: a person typing a list should not have to
     // find out which one this field wanted.
+    // Everything they typed, and nothing quietly dropped: the service refuses a
+    // list that is too long, and cutting it here would store something other
+    // than what the person submitted and then tell them it worked.
     const waiting = (one(form.waiting) ?? '')
       .split(/[\s,]+/)
       .map((entry) => entry.trim())
-      .filter(Boolean)
-      .slice(0, 20);
-    await upsertItem(store, project, {
-      slug: form.slug,
-      blockedBy: waiting,
-      actor: OPERATOR_ACTOR,
-      note:
-        waiting.length === 0
-          ? 'not waiting on anything any more'
-          : `waiting on ${waiting.join(', ')}`,
-      mustExist: true,
-    });
+      .filter(Boolean);
+    // The refusals this write can produce are all about what was typed into
+    // one field, and a person who typed it is looking at this page rather than
+    // at a JSON body. Answered on the board, in the same place every other
+    // confirmation appears.
+    let what = 'waiting';
+    try {
+      await upsertItem(store, project, {
+        slug: form.slug,
+        blockedBy: waiting,
+        actor: OPERATOR_ACTOR,
+        note:
+          waiting.length === 0
+            ? 'not waiting on anything any more'
+            : `waiting on ${waiting.join(', ')}`,
+        mustExist: true,
+      });
+    } catch (error) {
+      if (!(error instanceof ServiceError) || error.code !== 'bad_blocked_by') throw error;
+      what = 'waiting_refused';
+    }
     const params = new URLSearchParams({
       done: form.slug,
-      what: 'waiting',
+      what,
       ...keptParams(form),
     });
     return reply.redirect(`/r/${encodeURIComponent(readToken)}/board?${params.toString()}`, 303);
