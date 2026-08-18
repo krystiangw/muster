@@ -38,9 +38,15 @@ const counters = {
   release: 0,
   move: 0,
   observe: 0,
+  ask: 0,
+  answer: 0,
   error: 0,
 };
 const errors = [];
+// Questions this run filed, so the answers below aim at something real. Kept as
+// a list rather than a count because answering one twice is a case worth
+// hitting: the accounting has to treat a repeat as one decision.
+const asked = [];
 
 const operations = [
   async (agent) => {
@@ -95,6 +101,23 @@ const operations = [
     if (r.status >= 400) errors.push(r.body);
     counters.observe += 1;
   },
+  // The other counter with a cap on it, and the other pair of writes that has
+  // to agree with a collection: a question charges a slot, an answer gives it
+  // back, and reopening takes it again.
+  async (agent) => {
+    const r = await call('/escalations', 'POST', { agent, question: 'is this thing on?' });
+    if (r.status >= 400 && r.body.error !== 'limit_reached') errors.push(r.body);
+    if (r.body.escalation) asked.push(r.body.escalation.id);
+    counters.ask += 1;
+  },
+  async () => {
+    if (asked.length === 0) return;
+    const id = pick(asked);
+    const status = pick(['answered', 'resolved', 'wont_do', 'open']);
+    const r = await call(`/escalations/${id}`, 'PATCH', { status, answer: 'because' });
+    if (r.status >= 400 && r.body.error !== 'limit_reached') errors.push(r.body);
+    counters.answer += 1;
+  },
 ];
 
 const start = performance.now();
@@ -113,6 +136,8 @@ await call('/sweep', 'POST');
 const summary = await (await fetch(`${api}`, { headers })).json();
 const items = (await (await fetch(`${api}/items?limit=200`, { headers })).json()).items;
 
+const escalations = (await (await fetch(`${api}/escalations?limit=200`, { headers })).json()).escalations ?? [];
+const openQuestions = escalations.filter((escalation) => escalation.status === 'open');
 const open = items.filter((item) => item.status !== 'done' && item.status !== 'dropped');
 const slugs = new Set(items.map((item) => item.slug));
 // A claim still attached to an item after its own expiry means the sweep never
@@ -125,12 +150,18 @@ console.log(`${ROUNDS * 8} operations in ${(elapsed / 1000).toFixed(1)}s`, count
 console.log('items stored          :', items.length, '(unique slugs:', slugs.size, ')');
 console.log('open items counted    :', summary.counts.items);
 console.log('open items in reality :', open.length);
+console.log('open questions counted:', summary.counts.escalations);
+console.log('open questions really :', openQuestions.length);
 console.log('unexpected errors     :', errors.length, errors.slice(0, 3));
 
 const problems = [];
 if (items.length !== slugs.size) problems.push('a slug became more than one item');
 if (summary.counts.items !== open.length) problems.push('counter disagrees with the collection');
 if (summary.counts.items < 0) problems.push('counter went negative');
+if (summary.counts.escalations !== openQuestions.length) {
+  problems.push('question counter disagrees with the collection');
+}
+if (summary.counts.escalations < 0) problems.push('question counter went negative');
 if (expiredClaims.length > 0) {
   problems.push(`${expiredClaims.length} claim(s) outlived their expiry and were never released`);
 }
