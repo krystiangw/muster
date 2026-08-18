@@ -426,3 +426,50 @@ somewhere public eventually, and those pages now answer `noindex`. The header
 rather than a `robots.txt` rule, because a `Disallow` stops a crawler fetching
 the page and therefore stops it ever reading the instruction.
 
+
+## A counter that waits, 2026-08-18
+
+CI found a project counter at minus one, on a commit that changed no runtime
+code. The read of it took three attempts and each wrong answer is worth keeping,
+because each one looked right.
+
+Closing an item is two writes: the item's status, and then its slot going back
+to the project. Everything that returns a slot has that shape. The overcount
+repair recounts the work and lowers the counter to what it counted, guarded on
+the counter still reading what it read. Between those two writes the counter
+still says the old number while the work is already one lighter, so the repair
+counts, matches its guard, writes the lower number, and the close's own
+decrement lands on top of that. Minus one.
+
+**First attempt: a timestamp.** Mark the moment before counting, then ask
+whether any item changed since. It has three holes, and a review found all of
+them: the mark was taken after the counter was read, so a close in that gap is
+invisible; a deleted item leaves no timestamp to find; and a request stamps the
+clock it read on the way in, so a write that lands during the count can carry a
+time from before the mark. A guard that reads as a guarantee and is not one is
+worse than no guard.
+
+**Second attempt: clamp at zero.** Necessary, and kept: no path that returns a
+slot can take a counter negative, so the worst case is a project with one extra
+slot, which the next create raises again. But it bounds the damage rather than
+stopping the race.
+
+**What it does now: it waits.** The repair writes down what it saw and acts
+only when a later sweep finds the same counter, at the same version, half a
+minute on. The version is the part that makes this sound: every write that
+moves a counter bumps it, so *two different halfway points cannot be mistaken
+for one thing that never moved*. Numbers alone can: one item closing while
+another opens brings the counter back to where it was, and two closes caught at
+the same point read identically. A discrepancy that survives a version-stable
+minute is the crash the repair exists for; one that does not was somebody
+mid-write.
+
+The two counters settle apart, because a board whose items move all day would
+otherwise never sit still long enough to repair a question count stuck since a
+crash last week, and that is precisely the case worth repairing.
+
+What would close the race outright is making the item write and the slot write
+one atomic write, which means transactions, which means a replica set under the
+tests. That is a deliberate change, not a 5am one. The waiting version costs a
+leak one extra minute of life and needs none of it.
+
