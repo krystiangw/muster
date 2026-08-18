@@ -100,12 +100,14 @@ holds projects, because the realistic accident is restoring over production
 instead of into a copy. Test the restore, not the backup: an archive nobody has
 read back is a guess.
 
-Last read back on 2026-08-18, from `muster-2026-08-18-0317.json.gz` into a
-throwaway mongod: one project with its seven column layout, 43 items, all 43
-with their timelines, four escalations with the three open ones still open,
-four agents, 349 events. Dates come back as dates rather than as the strings
-JSON turned them into, which is the part of this format most likely to rot
-silently. Repeat it after any change to what a document holds.
+Last read back on 2026-08-18 at 11:28, from `muster-2026-08-18-1128.json.gz`
+into a throwaway mongod: four projects, ours with its seven column layout, 75
+items, all 75 with their timelines, 15 escalations, 786 documents in 53 kB.
+Dates come back as dates rather than as the strings JSON turned them into,
+which is the part of this format most likely to rot silently, and that now
+includes the two written today: `escalationNoticeSentAt` on a project and
+`notifiedAt` on a question. Repeat it after any change to what a document
+holds.
 
 `watchdog.sh` runs `apps/server/tools/watchdog.mjs` every quarter of an hour.
 It reads a real project through the API rather than `/health`, which answers
