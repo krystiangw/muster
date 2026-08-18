@@ -43,10 +43,22 @@ const rpc = async (method, params, token) => {
 const call = async (name, args, token) => {
   const result = await rpc('tools/call', { name, arguments: args }, token);
   if (result?.isError) throw new Error(`${name}: ${JSON.stringify(result.content).slice(0, 200)}`);
-  // Both halves, because a client reads one or the other and a tool that filled
-  // only the text would work in one client and break in the next.
+  // Both halves, and the same answer in both, because a client reads one or the
+  // other: a tool that filled the text with something else, or with a summary,
+  // works in one client and misleads the next. Compared as text because both
+  // arrived through the same serializer, in the same order.
   if (!result?.structuredContent) throw new Error(`${name}: no structuredContent`);
-  if (!result?.content?.[0]?.text) throw new Error(`${name}: no text content`);
+  const text = result?.content?.[0]?.text;
+  if (!text) throw new Error(`${name}: no text content`);
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`${name}: the text content is not the result, it is ${text.slice(0, 60)}`);
+  }
+  if (JSON.stringify(parsed) !== JSON.stringify(result.structuredContent)) {
+    throw new Error(`${name}: the two halves of the result disagree`);
+  }
   return result.structuredContent;
 };
 
@@ -69,9 +81,15 @@ let token = saved?.token;
 if (project) {
   // A board this tool kept can have expired, and the token dies with it.
   const alive = await fetch(`${base}/v1/${project}`, { headers: { authorization: `Bearer ${token}` } });
-  if (!alive.ok) {
+  if (alive.status === 404 || alive.status === 401) {
     console.log(`the saved board is gone (${alive.status}), signing up again`);
     project = undefined;
+  } else if (!alive.ok) {
+    // Anything else is the failure this tool exists to report. Signing up
+    // around it would hide the broken route and write a signup event for the
+    // privilege.
+    console.error(`the saved board answered ${alive.status}, which is not expiry`);
+    process.exit(1);
   }
 }
 if (!project) {
@@ -86,7 +104,11 @@ if (!project) {
 console.log(`board ${project} on ${base}`);
 
 const tools = await rpc('tools/list', {});
-await step('tools/list', async () => `${tools.tools.length} tools, each with a schema: ${tools.tools.every((tool) => tool.inputSchema)}`);
+await step('tools/list', async () => {
+  const undescribed = tools.tools.filter((tool) => !tool.inputSchema).map((tool) => tool.name);
+  if (undescribed.length > 0) throw new Error(`no input schema on ${undescribed.join(', ')}`);
+  return `${tools.tools.length} tools, every one with a schema`;
+});
 // Flat, unlike the HTTP route's `{agent: ...}`: over MCP a tool result is read
 // by a model, and one level of nesting is one more thing to get wrong.
 await step('register_agent', async () => (await call('register_agent', { project, handle: 'mcp-smoke', scope: ['smoke:'] }, token)).handle);
