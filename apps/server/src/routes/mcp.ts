@@ -773,7 +773,18 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         token: adminToken,
         api: `${config.baseUrl}/v1/${project._id}`,
         read_url: `${config.baseUrl}/r/${project.readToken}`,
+        board_url: `${config.baseUrl}/r/${project.readToken}/board`,
         expires_at: project.expiresAt,
+        // The same facts POST /p hands back. An agent that came in through
+        // this door was told less about the board it had just made than one
+        // that came in through the other: no caps, and no names for the two
+        // calls it will need next.
+        limits: project.limits,
+        next: {
+          instructions: `${config.baseUrl}/skill.md`,
+          claim_to_keep: `${config.baseUrl}/v1/${project._id}/claim`,
+          hand_to_a_human: `${config.baseUrl}/v1/${project._id}/share`,
+        },
         ...(offered
           ? mayWrite?.ok
             ? { owner_notified: offered }
@@ -784,6 +795,13 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           : {}),
         notice:
           'Store this token. It is shown once. Have a human claim the project by email to remove the expiry.',
+        // The one thing this door cannot do for itself. An MCP client sends
+        // its headers when the session opens, before any tool has run, so the
+        // token this call just minted cannot be attached to the session that
+        // minted it: the client has to be told, once, and then it works for
+        // every call after that.
+        how_to_use_this_token:
+          'MCP clients set their headers before the session starts, so this session cannot use the token it just made. Put it in the client\'s configuration as "authorization: Bearer <token>" for this server and reconnect, or use the same token over HTTP against the api URL above, which needs no reconnect.',
       };
     }
 

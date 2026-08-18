@@ -211,6 +211,36 @@ describe('A. discovery', () => {
     }
   });
 
+  it('says how a token reaches an MCP client, which cannot mint one mid-session', async () => {
+    // create_project needs no auth and hands back a token, but a client sends
+    // its headers when the session opens, so the session that made the token
+    // cannot use it. Nothing said so anywhere, which made the advertised
+    // signup look broken from inside an MCP client.
+    const signup = (await harness.server.inject({ method: 'GET', url: '/agent-signup.md' })).body;
+    assert.match(signup, /mcpServers/);
+    assert.match(signup, /authorization": "Bearer/);
+
+    const made = (
+      await harness.server.inject({
+        method: 'POST',
+        url: '/mcp',
+        payload: {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'create_project', arguments: { name: 'through mcp' } },
+        },
+      })
+    ).json();
+    const answer = JSON.parse(made.result.content[0].text) as Record<string, unknown>;
+    // The same facts the HTTP door hands back, so an agent that came in this
+    // way knows its caps and what to do next.
+    for (const field of ['project', 'token', 'api', 'read_url', 'board_url', 'limits', 'next']) {
+      assert.ok(field in answer, `create_project answers with ${field}`);
+    }
+    assert.match(String(answer.how_to_use_this_token), /before the session starts/);
+  });
+
   it('lists every admin-only call the routes actually have', async () => {
     // Written out by hand twice and wrong twice: first claiming a worker key
     // makes every other call, then leaving one out. The routes decide, and a
