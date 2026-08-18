@@ -687,16 +687,16 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       {
         name: 'list_items',
         method: 'GET',
-        url: `${base}/v1/{project}/items?order=id&limit=200&cursor={next_cursor}`,
+        url: `${base}/v1/{project}/items?order=id&limit=200`,
         notes:
-          'Filter by status, owner, label, source, staleness or claim state. order=id is the stable one for reading everything back; order=recent with since={as_of} is the change feed, and every page of one walk reports the same as_of.',
+          'Filter by status, owner, label, source, staleness or claim state. Add &cursor=<next_cursor> for the page after this one, in the same order. order=id is the stable order for reading everything back; order=recent with &since=<as_of> is the change feed, and every page of one walk reports the same as_of.',
       },
       {
         name: 'list_escalations',
         method: 'GET',
-        url: `${base}/v1/{project}/escalations?limit=200&cursor={next_cursor}`,
+        url: `${base}/v1/{project}/escalations?limit=200`,
         notes:
-          'Paged. The cursor carries a timestamp and an id, because several questions can be filed in the same millisecond.',
+          'Paged: add &cursor=<next_cursor> for the page after this one. The cursor carries a timestamp and an id, because several questions can be filed in the same millisecond.',
       },
       {
         name: 'delete_item',

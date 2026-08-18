@@ -156,10 +156,19 @@ Two more that only the deployment can answer, because both are about what
 happens between the dyno and the wire:
 
 ```bash
-# hygiene is running: this date moves, and the watchdog reads the same one
-curl -s https://musterboard.dev/v1/<project> -H 'authorization: Bearer <token>' | grep swept_at
-# the public text arrives compressed, and a page with a capability does not
+# hygiene is running. Null means it has never run here; an old date means it
+# stopped, and both read the same to a grep, which is why this checks the age.
+curl -s https://musterboard.dev/v1/<project> -H 'authorization: Bearer <token>' \
+  | node -e 'const d=JSON.parse(require("fs").readFileSync(0)).swept_at;
+    const age=d?(Date.now()-Date.parse(d))/1000:null;
+    console.log(d?`swept ${Math.round(age)}s ago`:"never swept");
+    process.exit(d && age < 600 ? 0 : 1)'
+
+# public text arrives compressed
 curl -sI -H 'accept-encoding: gzip' https://musterboard.dev/skill.md | grep -i content-encoding
+# and a page carrying a capability does not, whatever sits in front of the dyno
+curl -sI -H 'accept-encoding: gzip' https://musterboard.dev/r/<read-token>/board \
+  | grep -i content-encoding && echo 'FAIL: a capability page came back compressed'
 ```
 
 ## 5b. Before a second dyno

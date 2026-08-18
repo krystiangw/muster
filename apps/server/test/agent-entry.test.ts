@@ -344,7 +344,7 @@ describe('B. agent entry', () => {
     const doc = await harness.server.inject({ method: 'GET', url: '/skill.md' });
     assert.equal(doc.statusCode, 200);
 
-    const calls: Array<{ method: string; url: string }> = [];
+    const calls: Array<{ method: string; url: string; fromCard?: boolean }> = [];
     for (const line of doc.body.split('\n')) {
       if (!line.trimStart().startsWith('curl')) continue;
       // -sX POST, not just -X POST: the flags are written together.
@@ -391,6 +391,7 @@ describe('B. agent entry', () => {
 
     for (const endpoint of published) {
       calls.push({
+        fromCard: true,
         method: endpoint.method,
         url: endpoint.url
           .replace(harness.config.baseUrl, '')
@@ -411,6 +412,20 @@ describe('B. agent entry', () => {
         !message.startsWith('No route for'),
         `${call.method} ${call.url} is published and this server has no such route`,
       );
+      // A read the card publishes has to work as printed: something parses
+      // that file and calls the URL. The card once advertised the items list
+      // with a cursor placeholder in it, which no first read can fill, so
+      // following it as given answered bad_cursor. skill.md is prose and may
+      // show the second page of a walk, which nobody can call first; and a
+      // write is sent here with an empty body on purpose, where being told
+      // what is missing is the route working.
+      if (call.method === 'GET' && call.fromCard) {
+        assert.notEqual(
+          answer.statusCode,
+          400,
+          `${call.url} is published as a read and refuses itself: ${message}`,
+        );
+      }
     }
   });
 
