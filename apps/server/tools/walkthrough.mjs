@@ -300,7 +300,20 @@ const run = async () => {
   process.exit(failures.length === 0 ? 0 : 1);
 };
 
-run().catch((error) => {
+run().catch(async (error) => {
+  // The loudest failure of all goes through here: a deployment that does not
+  // answer never reaches a single check, so a mail sent only for accumulated
+  // failures is a mail that arrives for everything except an outage.
   console.error(`walkthrough could not finish: ${error.message}`);
+  if (MAIL) {
+    const said = await mail('Muster walkthrough: could not finish', [
+      `${BASE} did not get far enough to be checked.`,
+      '',
+      `  ${error.message}`,
+      '',
+      'Run it yourself: node apps/server/tools/walkthrough.mjs',
+    ]).catch((failure) => `failed ${failure.message}`);
+    console.error(`mail ${said}`);
+  }
   process.exit(2);
 });
