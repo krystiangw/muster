@@ -223,6 +223,20 @@ never hold one claim. It earned its place on 2026-08-18 by finding the counter
 drifting below the collection, permanently, because nothing raises a counter
 that is too low.
 
+And the door most agents actually arrive through, which no other check here
+touches:
+
+```bash
+node tools/smoke-mcp.mjs
+```
+
+Twelve tools over MCP against the deployment: initialize, the tool list, and a
+whole session from registering an agent to filing a question and closing it. The
+suite covers the handlers; this covers the transport, whatever sits in front of
+it, and the shape of a tool result, where a client reads `structuredContent` or
+the text and a tool that filled only one works in one client and breaks in the
+next.
+
 And the other half of the promise, which is released separately from this one:
 
 ```bash
