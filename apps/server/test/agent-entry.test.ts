@@ -334,10 +334,10 @@ describe('B. agent entry', () => {
     assert.equal(board.headers['content-encoding'], undefined);
   });
 
-  it('every call skill.md prints is a call this server answers', async () => {
-    // The protocol document is the product's onboarding, and an example that
-    // 404s costs an agent the one thing it has: the assumption that the file it
-    // is reading is true. The check is deliberately shallow, existence and
+  it('every call this service publishes is a call it answers', async () => {
+    // The protocol document and the access card are the product's onboarding,
+    // and an example that 404s costs an agent the one thing it has: the
+    // assumption that the file it is reading is true. The check is deliberately shallow, existence and
     // method rather than semantics, because that is the part that rots when a
     // route is renamed and the prose is not.
     const project = await createProject(harness, 'documented');
@@ -363,6 +363,23 @@ describe('B. agent entry', () => {
     }
     assert.ok(calls.length >= 15, `found ${calls.length} documented calls, which is too few to be right`);
 
+    // The machine-readable half of the same promise. It names its methods
+    // rather than printing them, so an agent that reads this instead of the
+    // prose is trusting exactly the same thing.
+    const access = await harness.server.inject({
+      method: 'GET',
+      url: '/.well-known/agent-access.json',
+    });
+    for (const endpoint of access.json().endpoints as Array<{ method: string; url: string }>) {
+      calls.push({
+        method: endpoint.method,
+        url: endpoint.url
+          .replace(harness.config.baseUrl, '')
+          .replace('{project}', project.id)
+          .replace(/\{[a-z_]+\}/g, 'x'),
+      });
+    }
+
     for (const call of calls) {
       const answer = await harness.server.inject({
         method: call.method as 'GET',
@@ -373,7 +390,7 @@ describe('B. agent entry', () => {
       const message = String((answer.json() as { message?: string }).message ?? '');
       assert.ok(
         !message.startsWith('No route for'),
-        `${call.method} ${call.url} is in skill.md and this server has no such route`,
+        `${call.method} ${call.url} is published and this server has no such route`,
       );
     }
   });
