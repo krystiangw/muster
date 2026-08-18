@@ -457,6 +457,17 @@ export interface ProjectDoc {
    * more true by being said twice.
    */
   quietNotifiedAt?: Date | null;
+  /**
+   * When the quiet-board pass last looked at this project, whether or not it
+   * had anything to say.
+   *
+   * Kept apart from the stamp above, and it is what stops the pass starving.
+   * Ordered by the notice date alone, twenty busy boards that have never been
+   * told anything sit at the front of every pass for ever and nothing behind
+   * them is ever examined. Ordered by when each was last looked at, the queue
+   * turns over.
+   */
+  quietCheckedAt?: Date | null;
   /** Unclaimed demo projects are swept by a TTL index. Null once claimed. */
   expiresAt: Date | null;
   createdAt: Date;

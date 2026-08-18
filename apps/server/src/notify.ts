@@ -285,24 +285,36 @@ export function createNotifier(deps: {
       const quietSince = new Date(now.getTime() - QUIET_AFTER_MS);
       const hourAgo = new Date(now.getTime() - NOTIFY_EVERY_MS);
 
-      // Candidates first, cheaply: a board with an owner and something on it.
-      // Oldest notice first, so a busy deployment cycles rather than telling
-      // the same twenty projects for ever.
+      // Candidates first, cheaply: a board with an owner and something on it,
+      // which nobody has told about a question in the last hour. That last one
+      // is in the query rather than in the loop because it is the condition
+      // that disqualifies most of them, and a disqualified project in the
+      // batch is a slot an eligible one does not get.
+      //
+      // Ordered by when each was last looked at rather than by when each was
+      // last told. Twenty busy boards that have never been told anything sort
+      // first on every pass under the second ordering, and nothing behind them
+      // is ever examined.
       const candidates = await store.projects
-        .find({ claimedBy: { $ne: null }, 'counts.items': { $gt: 0 } })
-        .sort({ quietNotifiedAt: 1 })
+        .find({
+          claimedBy: { $ne: null },
+          'counts.items': { $gt: 0 },
+          $or: [
+            { escalationNotifiedAt: null },
+            { escalationNotifiedAt: { $exists: false } },
+            { escalationNotifiedAt: { $lt: hourAgo } },
+          ],
+        })
+        .sort({ quietCheckedAt: 1 })
         .limit(REMINDER_BATCH)
         .toArray();
 
+      // Looked at, whatever came of it. Written for the whole batch at the end
+      // so the ordering turns over even on a pass that says nothing.
+      const examined: string[] = [];
       let sent = 0;
       for (const project of candidates) {
-        // A question notice in the last hour means this operator has already
-        // heard from us about this board, and a second message in the same
-        // hour is how a useful notice becomes one people filter. Checked and
-        // deliberately not stamped: a real question filed a minute from now
-        // must not be delayed by this pass having looked.
-        const told = project.escalationNotifiedAt;
-        if (told && told > hourAgo) continue;
+        examined.push(project._id);
 
         // Anybody at all, agent or person: `touchedAt` is the write that says
         // somebody is on this, and hygiene deliberately does not move it, so a
@@ -313,12 +325,13 @@ export function createNotifier(deps: {
         );
         if (moved > 0) continue;
 
+        // Counted exactly, with no ceiling. A message that says five hundred
+        // when the answer is four thousand is a message the reader has to
+        // check somewhere else, which is the opposite of what it is for. Both
+        // are index-backed counts on a pass that runs every five minutes.
         const [open, stale, newest] = await Promise.all([
-          store.items.countDocuments({ projectId: project._id, status: 'open' }, { limit: 500 }),
-          store.items.countDocuments(
-            { projectId: project._id, status: 'open', stale: true },
-            { limit: 500 },
-          ),
+          store.items.countDocuments({ projectId: project._id, status: 'open' }),
+          store.items.countDocuments({ projectId: project._id, status: 'open', stale: true }),
           store.items
             .find({ projectId: project._id }, { projection: { touchedAt: 1 } })
             .sort({ touchedAt: -1 })
@@ -339,7 +352,19 @@ export function createNotifier(deps: {
         // The stamp is taken before the send and guarded on what we read, so
         // two dynos running this pass in the same minute produce one message.
         const claimed = await store.projects.findOneAndUpdate(
-          { _id: project._id, quietNotifiedAt: project.quietNotifiedAt ?? null },
+          {
+            _id: project._id,
+            quietNotifiedAt: project.quietNotifiedAt ?? null,
+            // Asked again as part of the claim, not only when the candidate
+            // was read: a question that won its own notification claim in the
+            // meantime has already written to this person, and the whole point
+            // of the hour is that they hear from us once.
+            $or: [
+              { escalationNotifiedAt: null },
+              { escalationNotifiedAt: { $exists: false } },
+              { escalationNotifiedAt: { $lt: hourAgo } },
+            ],
+          },
           { $set: { quietNotifiedAt: now } },
         );
         if (!claimed) continue;
@@ -359,7 +384,12 @@ export function createNotifier(deps: {
               : `${config.baseUrl}/r/${project.readToken}`,
           });
           if (delivery === 'sent') sent += 1;
-          else log(`quiet notice for ${project._id} was ${delivery}, not sent`);
+          // `discarded` is a deployment with no mail provider: nothing left the
+          // building and nothing was written to a log either. Treated as a
+          // failure rather than as a quiet success, because a stamp left
+          // behind by a message nobody sent is a board that is never told,
+          // including after somebody configures the provider.
+          else throw new Error(`the notice was ${delivery}, not sent`);
         } catch (error) {
           // The stamp goes back, guarded on our own claim, so a provider
           // having a bad minute does not cost this board its one message.
@@ -371,6 +401,11 @@ export function createNotifier(deps: {
             .catch(() => undefined);
           log(`quiet notice for ${project._id} failed: ${(error as Error).message}`);
         }
+      }
+      if (examined.length > 0) {
+        await store.projects
+          .updateMany({ _id: { $in: examined } }, { $set: { quietCheckedAt: now } })
+          .catch(() => undefined);
       }
       return sent;
     },

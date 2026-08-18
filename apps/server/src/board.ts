@@ -398,6 +398,12 @@ export interface BoardFacets {
   agents: AgentFacet[];
   /** Every label on the work this board shows, so no filter comes back empty. */
   labels: string[];
+  /**
+   * The slugs this board shows, for the one field where a person has to name
+   * another card. Typing one from memory is how a board ends up waiting on a
+   * slug that does not exist.
+   */
+  slugs: string[];
   /** Names left out for length. Zero on every project anybody actually has. */
   omitted: { owners: number; agents: number; labels: number };
 }
@@ -447,9 +453,15 @@ export async function boardFacets(store: Store, project: ProjectDoc): Promise<Bo
     ...boardScope(boardConfigOf(project), new Date()),
   };
 
-  const [owners, labels, actors, holders, registered] = await Promise.all([
+  const [owners, labels, slugs, actors, holders, registered] = await Promise.all([
     store.items.distinct('owner', scope),
     store.items.distinct('labels', scope),
+    // Open work only. A list to pick a prerequisite from is a list of things
+    // that can still be finished, and offering a card that closed last March
+    // as something to wait on is offering a card nobody will ever unblock.
+    store.items
+      .find({ ...scope, status: 'open' }, { projection: { slug: 1 }, limit: FACET_LIMIT })
+      .toArray(),
     store.items.distinct('lastActor', scope),
     store.items.distinct('claim.agent', {
       ...scope,
@@ -491,6 +503,7 @@ export async function boardFacets(store: Store, project: ProjectDoc): Promise<Bo
   return {
     owners: ownerNames.slice(0, FACET_LIMIT),
     labels: names(labels).slice(0, FACET_LIMIT),
+    slugs: names(slugs.map((row) => row.slug)),
     agents: agents.slice(0, FACET_LIMIT),
     omitted: {
       owners: Math.max(0, ownerNames.length - FACET_LIMIT),

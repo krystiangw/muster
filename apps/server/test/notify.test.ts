@@ -608,6 +608,57 @@ describe('a board that stopped moving', () => {
     }
   });
 
+  it('keeps its stamp only when the message actually left', async () => {
+    // A deployment with no mail provider answers `discarded`: nothing left the
+    // building, and nothing was written to a log either. Keeping the stamp
+    // there means the board is never told, including after somebody
+    // configures the provider.
+    const sent: QuietBoard[] = [];
+    const harness = await startHarness(
+      {},
+      {
+        mailer: {
+          sendClaimCode: async () => 'sent',
+          sendOperatorCode: async () => 'sent',
+          sendEscalation: async () => 'sent',
+          sendBoardOffer: async () => 'sent',
+          sendQuietBoard: async (_to, notice) => {
+            sent.push(notice);
+            return sent.length === 1 ? 'discarded' : 'sent';
+          },
+        },
+      },
+    );
+    try {
+      const project = await createProject(harness);
+      await harness.server.inject({
+        method: 'POST',
+        url: `${project.api}/items`,
+        headers: authed(project),
+        payload: { slug: 'work', title: 't', body: 'b', actor: 'a' },
+      });
+      await harness.store.projects.updateOne(
+        { _id: project.id },
+        { $set: { claimedBy: 'owner@example.com', claimedAt: new Date(), expiresAt: null } },
+      );
+      const when = new Date(Date.now() - 30 * 3_600_000);
+      await harness.store.items.updateMany(
+        { projectId: project.id },
+        { $set: { touchedAt: when, updatedAt: when, stale: true, staleSince: when } },
+      );
+
+      assert.equal(await harness.notifier.sweepQuiet(), 0, 'nothing left, so nothing counted');
+      const after = (await harness.store.projects.findOne({ _id: project.id }))!;
+      assert.ok(!after.quietNotifiedAt, 'and the board is not marked as told');
+
+      // Configured, and the same board is told on the next pass.
+      assert.equal(await harness.notifier.sweepQuiet(), 1);
+      assert.equal(sent.length, 2);
+    } finally {
+      await harness.stop();
+    }
+  });
+
   it('says nothing about a board nobody owns, or one with nothing rotting', async () => {
     const { harness, sent } = await quietHarness();
     try {

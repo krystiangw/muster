@@ -355,6 +355,20 @@ function editForms(item: ItemDoc, facets: BoardFacets, action: string, keep: Boa
       <button type="submit">save</button>
     </form>
   </details>
+  <form class="row" method="post" action="${escapeHtml(action)}/waiting">
+    <input type="hidden" name="slug" value="${escapeHtml(item.slug)}">${keptFilter(keep)}
+    <label for="wait-${id}">Waiting on
+      <input id="wait-${id}" name="waiting" list="slugs-${id}" size="22"
+        value="${escapeHtml((item.blockedBy ?? []).join(' '))}" placeholder="nothing">
+    </label>
+    <datalist id="slugs-${id}">
+      ${facets.slugs
+        .filter((slug) => slug !== item.slug)
+        .map((slug) => `<option value="${escapeHtml(slug)}"></option>`)
+        .join('')}
+    </datalist>
+    <button type="submit">set</button>
+  </form>
   <form class="note" method="post" action="${escapeHtml(action)}/note">
     <input type="hidden" name="slug" value="${escapeHtml(item.slug)}">${keptFilter(keep)}
     <label for="note-${id}">Add a note</label>

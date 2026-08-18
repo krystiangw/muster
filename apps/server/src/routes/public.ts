@@ -1416,6 +1416,10 @@ ${
             ? `"${touched.slug}" is on the board. Every agent reading this project sees it now.`
             : query.what === 'note'
             ? `Your note is on "${touched.slug}", where every agent that reads it will see it.`
+            : query.what === 'waiting'
+            ? (touched.blockedBy ?? []).length > 0
+              ? `"${touched.slug}" is waiting on ${(touched.blockedBy ?? []).join(', ')}. No agent will be offered it, and a claim on it is refused, until those are done or dropped.`
+              : `"${touched.slug}" is not waiting on anything any more, so it is back in what agents are offered.`
             : query.what === 'nothing'
               ? `Nothing was written to "${touched.slug}": the note was empty.`
               : `"${touched.slug}" is ${touched.owner ? `owned by ${touched.owner}` : 'unassigned'}.`
@@ -1635,6 +1639,51 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     const params = new URLSearchParams({
       done: form.slug,
       what: 'owner',
+      ...keptParams(form),
+    });
+    return reply.redirect(`/r/${encodeURIComponent(readToken)}/board?${params.toString()}`, 303);
+  });
+
+  /**
+   * What a card is waiting on, from the page.
+   *
+   * The field is written by agents, and until this it could only be written by
+   * agents: a fleet stuck behind a slug somebody typed wrong had no way out
+   * that did not involve a person finding a token and a terminal. The whole
+   * premise of this product is that the human half works from the page, and
+   * "unstick my board" is the most human half there is.
+   */
+  app.post('/r/:readToken/board/waiting', { schema: { hide: true } }, async (request, reply) => {
+    if (!limitWrites(request, reply)) return reply;
+    const { readToken } = request.params as { readToken: string };
+    const form = (request.body ?? {}) as { slug?: string; waiting?: string } & KeptFilter;
+    const project = await store.projects.findOne({ readToken });
+    if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
+    if (!(await readableBy(store, request, project))) {
+      throw new ServiceError(404, 'not_found', 'No such project.');
+    }
+    if (!form.slug) throw new ServiceError(400, 'bad_request', 'Which item?');
+
+    // Commas, spaces or newlines: a person typing a list should not have to
+    // find out which one this field wanted.
+    const waiting = (one(form.waiting) ?? '')
+      .split(/[\s,]+/)
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .slice(0, 20);
+    await upsertItem(store, project, {
+      slug: form.slug,
+      blockedBy: waiting,
+      actor: OPERATOR_ACTOR,
+      note:
+        waiting.length === 0
+          ? 'not waiting on anything any more'
+          : `waiting on ${waiting.join(', ')}`,
+      mustExist: true,
+    });
+    const params = new URLSearchParams({
+      done: form.slug,
+      what: 'waiting',
       ...keptParams(form),
     });
     return reply.redirect(`/r/${encodeURIComponent(readToken)}/board?${params.toString()}`, 303);
