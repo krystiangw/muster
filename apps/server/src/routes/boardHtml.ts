@@ -751,11 +751,49 @@ export function renderBoardFilters(
 </form>`;
 }
 
+/**
+ * Consolidating two spellings of one agent, from the page that shows both.
+ *
+ * The API has had this since the warnings did. A person reading the filter is
+ * the one who notices `trades_loop` sitting beside `trades-loop`, and sending
+ * them to curl to fix what they are looking at is how a board keeps both.
+ *
+ * Offered only when there is more than one name to choose between, and folded
+ * into the settings, because it rewrites whose work an item is and that is not
+ * a control anybody should meet by accident.
+ */
+function renderAgentMerge(facets: BoardFacets, action: string): string {
+  if (facets.agents.length < 2) return '';
+  const options = (selected: string) =>
+    facets.agents
+      .map(
+        (agent) =>
+          `<option value="${escapeHtml(agent.handle)}"${
+            agent.handle === selected ? ' selected' : ''
+          }>${escapeHtml(agent.handle)}${agent.registered ? '' : ' (seen, not registered)'}</option>`,
+      )
+      .join('');
+  return `<h3>Two names, one agent</h3>
+<p class="why">Moves every item whose last writer was the first name, and any claim it holds, onto
+the second. The timelines keep what they said, because an agent calling itself that is what
+happened; the old name is kept on the agent so an old entry can still be read.</p>
+<form class="row" method="post" action="${escapeHtml(action)}/agent-rename">
+  <label for="merge-from">This name
+    <select id="merge-from" name="from">${options('')}</select>
+  </label>
+  <label for="merge-to">is really
+    <select id="merge-to" name="to">${options('')}</select>
+  </label>
+  <button type="submit">merge</button>
+</form>`;
+}
+
 export function renderBoardSettings(
   project: ProjectDoc,
   view: BoardView,
   action: string,
   warnings: string[] = [],
+  facets?: BoardFacets,
 ): string {
   const current = JSON.stringify(boardConfigJson(view.config), null, 2);
   // Folded shut. The layout is set once in a project's life and the board is
@@ -768,6 +806,7 @@ export function renderBoardSettings(
     .join('\n')}
 <details class="layout">
 <summary>Layout: columns, swimlanes and presets</summary>
+${facets ? renderAgentMerge(facets, action) : ''}
 ${
     // Said here rather than above the board. It answers one question, asked
     // once by whoever writes the layout: why is my column missing from the

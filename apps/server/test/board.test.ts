@@ -1017,6 +1017,51 @@ describe('moving an item into a column', () => {
     assert.match(location, /q=card/);
   });
 
+  it('merges two spellings of one agent from the page that shows both', async () => {
+    // The API has had this since the warnings did. The person reading the
+    // filter is the one who notices two spellings, and sending them to curl to
+    // fix what they are looking at is how a board keeps both.
+    const project = await createProject(harness, 'two names');
+    for (const [slug, actor] of [
+      ['one', 'trades-loop'],
+      ['two', 'trades_loop'],
+    ] as const) {
+      await harness.server.inject({
+        method: 'POST',
+        url: `${project.api}/items`,
+        headers: authed(project),
+        payload: { slug, title: slug, actor },
+      });
+    }
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(page.body, new RegExp(`action="/r/${readToken}/board/agent-rename"`));
+    assert.match(page.body, /trades_loop \(seen, not registered\)/);
+
+    const merged = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/agent-rename`,
+      payload: 'from=trades_loop&to=trades-loop',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    assert.equal(merged.statusCode, 303);
+
+    const after = await harness.server.inject({
+      method: 'GET',
+      url: merged.headers.location as string,
+    });
+    assert.match(after.body, /&quot;trades_loop&quot; is now &quot;trades-loop&quot; on 1 item\./);
+    assert.equal(
+      (await harness.store.items.findOne({ projectId: project.id, slug: 'two' }))?.lastActor,
+      'trades-loop',
+    );
+
+    // One name in the filter now, and the control is gone with the reason for
+    // it: nothing left to choose between.
+    assert.ok(!after.body.includes('trades_loop (seen, not registered)'));
+  });
+
   it('lets a person correct the words on a card, and never blank the title by accident', async () => {
     const project = await createProject(harness, 'wording');
     await harness.server.inject({

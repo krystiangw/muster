@@ -18,7 +18,7 @@ import { record, recordView } from '../events.js';
 import { ago, chip, escapeHtml, layout, when } from '../html.js';
 import { avatar, who } from '../identity.js';
 import { fromOurPage, originOf } from '../origin.js';
-import { newId, normalizeSlug } from '../ids.js';
+import { isValidHandle, newId, normalizeSlug } from '../ids.js';
 import {
   renderBoard,
   renderBoardFilters,
@@ -40,6 +40,7 @@ import {
   startEmailClaim,
   upsertItem,
   verifyClaimCode,
+  renameAgent,
 } from '../service.js';
 import { checkCsrf, csrfField, readSession,
   hasSessionCookie,} from '../session.js';
@@ -1163,6 +1164,7 @@ ${
       q?: string;
       answered?: string;
       live?: string;
+      merged?: string;
     };
     // A board somebody is watching while agents write to it. A minute is the
     // slowest a person notices and the fastest that is not a nuisance: a card
@@ -1296,9 +1298,22 @@ ${
               ? `Nothing was written to "${touched.slug}": the note was empty.`
               : `"${touched.slug}" is ${touched.owner ? `owned by ${touched.owner}` : 'unassigned'}.`
         : undefined;
-    const notice = answeredHere
+    // Said from the redirect rather than looked up: the two names are in it,
+    // and both were server written a moment ago by the route that did the work.
+    const mergedNotice = (() => {
+      const said = one(query.merged);
+      if (!said) return undefined;
+      const [from, to] = said.split('>');
+      if (!from || !to || !isValidHandle(from) || !isValidHandle(to)) return undefined;
+      const moved = Number.parseInt(one(query.what) ?? '', 10);
+      return `"${from}" is now "${to}"${
+        Number.isInteger(moved) ? ` on ${moved} item${moved === 1 ? '' : 's'}` : ''
+      }. The timelines still say what they said.`;
+    })();
+
+    const notice = mergedNotice ?? (answeredHere
       ? `Answered. ${answeredHere.agent} picks it up on its next iteration, and the card will say when it did.`
-      : (movedNotice ?? doneNotice);
+      : (movedNotice ?? doneNotice));
 
     const boardUrl = `/r/${escapeHtml(readToken)}/board`;
     const body = `
@@ -1331,7 +1346,7 @@ ${
         : ''
     }
 
-${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardWarnings(view.config))}
+${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardWarnings(view.config), facets)}
 `;
     return reply
       .type('text/html; charset=utf-8')
@@ -1563,6 +1578,31 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
    * second on top of the first would rewrite a card somebody else is holding.
    * So it looks first and walks the name along until it is free.
    */
+  /**
+   * Two spellings of one agent, consolidated by the person looking at both.
+   *
+   * The same call the API offers, from the page that shows the problem. It
+   * rewrites whose work an item is, which is why it lives under the fold with
+   * the layout editor rather than beside the filters.
+   */
+  app.post('/r/:readToken/board/agent-rename', { schema: { hide: true } }, async (request, reply) => {
+    if (!limitWrites(request, reply)) return reply;
+    const { readToken } = request.params as { readToken: string };
+    const form = (request.body ?? {}) as { from?: string; to?: string } & KeptFilter;
+    const project = await store.projects.findOne({ readToken });
+    if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
+    if (!(await readableBy(store, request, project))) {
+      throw new ServiceError(404, 'not_found', 'No such project.');
+    }
+    const moved = await renameAgent(store, project, one(form.from) ?? '', one(form.to) ?? '');
+    const params = new URLSearchParams({
+      merged: `${moved.from}>${moved.to}`,
+      what: String(moved.items),
+      ...keptParams(form),
+    });
+    return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
+  });
+
   app.post('/r/:readToken/board/new', { schema: { hide: true } }, async (request, reply) => {
     if (!limitWrites(request, reply)) return reply;
     const { readToken } = request.params as { readToken: string };
