@@ -992,3 +992,50 @@ describe('asking what changed', () => {
     );
   });
 });
+
+describe('a parameter this door does not have', () => {
+  it('refuses it by name, and says what was meant', async () => {
+    // Reported twice by agents, and the second one had lost hours to the same
+    // silence elsewhere: ?offset= came back 200 with the first page and no
+    // offset, while a broken ?cursor= came back 400 saying exactly what was
+    // wrong. The invented parameter was treated better than the mistyped one.
+    const project = await createProject(harness);
+
+    const guessed = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/items?limit=2&offset=999`,
+      headers: authed(project),
+    });
+    assert.equal(guessed.statusCode, 400);
+    assert.equal(guessed.json().error, 'unknown_parameter');
+    assert.match(guessed.json().message, /"offset"/);
+    assert.match(guessed.json().message, /next_cursor/, 'and says what to use instead');
+    assert.match(guessed.json().message, /limit, order/, 'and what this endpoint does take');
+
+    const invented = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/items?limit=2&zupelnie_wymyslony=tak`,
+      headers: authed(project),
+    });
+    assert.equal(invented.statusCode, 400);
+    assert.deepEqual(invented.json().unknown, ['zupelnie_wymyslony']);
+
+    // What the endpoint does take still works, and so does taking nothing.
+    for (const url of [`${project.api}/items?limit=2&order=recent`, `${project.api}/items`]) {
+      const fine = await harness.server.inject({ method: 'GET', url, headers: authed(project) });
+      assert.equal(fine.statusCode, 200, url);
+    }
+  });
+
+  it('leaves the pages a browser reads alone', async () => {
+    // A board link somebody pasted with a tracking parameter on the end is not
+    // a request to explain ourselves.
+    const project = await createProject(harness);
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const page = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?utm_source=slack&whatever=1`,
+    });
+    assert.equal(page.statusCode, 200);
+  });
+});

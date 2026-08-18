@@ -113,6 +113,32 @@ export function clientIp(request: FastifyRequest): string {
   return request.ip || 'unknown';
 }
 
+/**
+ * The name somebody reached for, and the one this service uses.
+ *
+ * Every entry here was guessed by a real caller, or is the obvious neighbour of
+ * one that was. A list of accepted parameters answers "what is allowed"; this
+ * answers "what did you mean", which is the question somebody actually has.
+ */
+const INSTEAD: Record<string, string> = {
+  offset: 'Pages here are cursors: read next_cursor from the answer and pass it back as cursor.',
+  skip: 'Pages here are cursors: read next_cursor from the answer and pass it back as cursor.',
+  page: 'Pages here are cursors: read next_cursor from the answer and pass it back as cursor.',
+  per_page: 'The page size is limit.',
+  page_size: 'The page size is limit.',
+  count: 'The page size is limit.',
+  size: 'The page size is limit.',
+  sort: 'The ordering is order, and it takes urgency, recent or id.',
+  sort_by: 'The ordering is order, and it takes urgency, recent or id.',
+  order_by: 'The ordering is order, and it takes urgency, recent or id.',
+  search: 'The search is q, over the slug and the title.',
+  query: 'The search is q, over the slug and the title.',
+  text: 'The search is q, over the slug and the title.',
+  from: 'The change window is since, and it takes the as_of from your previous read.',
+  after: 'The change window is since, and it takes the as_of from your previous read.',
+  updated_since: 'The change window is since, and it takes the as_of from your previous read.',
+};
+
 export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
   const { store, config, limiter, mailer, notifier } = deps;
 
@@ -293,6 +319,47 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
   // ------------------------------------------------------- authenticated v1
 
   app.register(async (scoped) => {
+    /**
+     * A parameter this door does not have is a question, not a comment.
+     *
+     * The framework drops what a route did not declare, so `?offset=999` came
+     * back 200 with the first page and no offset, while `?cursor=nonsense` came
+     * back 400 saying exactly what was wrong. A broken known parameter was
+     * treated better than an invented one, and the invented one people reach
+     * for first is `offset`: two agents have now guessed it, and one of them
+     * had lost hours to the same silence on another service.
+     *
+     * Only routes that declare their querystring are checked, which is every
+     * route here that takes one and nothing on the pages a browser reads: a
+     * board link somebody pasted with a tracking parameter on the end is not a
+     * request to explain ourselves.
+     */
+    scoped.addHook('preValidation', async (request) => {
+      const declared = (
+        request.routeOptions as {
+          schema?: { querystring?: { properties?: Record<string, unknown> } };
+        }
+      ).schema?.querystring?.properties;
+      if (!declared) return;
+      const known = Object.keys(declared);
+      const unknown = Object.keys((request.query ?? {}) as Record<string, unknown>).filter(
+        (name) => !known.includes(name),
+      );
+      if (unknown.length === 0) return;
+      throw new ServiceError(
+        400,
+        'unknown_parameter',
+        `This endpoint has no ${unknown.map((name) => `"${name}"`).join(', ')}${
+          unknown.length === 1 ? ' parameter' : ' parameters'
+        }, and ignoring what you sent would answer 200 to a question nobody asked.${
+          unknown.map((name) => INSTEAD[name]).filter(Boolean).length > 0
+            ? ` ${unknown.map((name) => INSTEAD[name]).filter(Boolean).join(' ')}`
+            : ''
+        } What this one takes: ${known.join(', ')}.`,
+        { unknown, accepted: known },
+      );
+    });
+
     scoped.addHook('preHandler', async (request, reply) => {
       const header = request.headers.authorization;
       const token =

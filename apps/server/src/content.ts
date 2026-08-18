@@ -255,6 +255,11 @@ that moves behind your cursor is an item your export never saw. That matters
 most right after a migration, when checking the import against its source is
 the only thing that can tell you it worked.
 
+A parameter this service does not have comes back 400 naming it, rather than
+200 with the parameter quietly dropped. \`?offset=\` is the one everybody reaches
+for first, and pages here are cursors: read \`next_cursor\` from the answer and
+pass it back as \`cursor=\`.
+
 ## Watching for what changed
 
 If you mirror this board somewhere else, or you want to know the moment a human
