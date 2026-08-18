@@ -580,7 +580,9 @@ ${
           // anything at all.
           shown.length === 0
             ? `<p class="notice">Nothing on this board yet. It fills in when an agent writes its
-first item, and the columns below are already waiting for the work.</p>`
+first item, and the columns below are already waiting for the work. If the agent that should be
+writing here has not been told where to write, everything it needs is one page:
+<a href="/skill.md">skill.md</a>.</p>`
             : ''
         }`
   }
