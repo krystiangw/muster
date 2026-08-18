@@ -423,9 +423,13 @@ export async function insights(store: Store): Promise<Insights> {
     store.escalations
       .aggregate<{ createdAt: Date; answeredAt: Date }>([
         { $match: { answeredAt: { $ne: null } } },
-        { $sort: { answeredAt: -1 } },
         ...answeredByPerson,
         { $match: { $expr: { $gte: ['$answeredAt', '$project.claimedAt'] } } },
+        // Next to the limit, not before the join. Separated by a `$lookup` the
+        // two cannot coalesce, and what looks like "sort the newest five
+        // hundred" becomes "sort every answer this service has ever had", in
+        // memory, every time somebody runs the report.
+        { $sort: { answeredAt: -1 } },
         { $limit: ANSWER_SAMPLE },
         { $project: { createdAt: 1, answeredAt: 1 } },
       ])

@@ -95,9 +95,11 @@ const [
   count(items, { stale: true, status: { $nin: ['done', 'dropped'] } }),
   escalations.aggregate([
     { $match: { answeredAt: { $ne: null } } },
-    { $sort: { answeredAt: -1 } },
     ...answeredByPerson,
     { $match: { $expr: { $gte: ['$answeredAt', '$project.claimedAt'] } } },
+    // Next to the limit rather than before the join, so the two coalesce into a
+    // top five hundred rather than a sort of every answer ever given.
+    { $sort: { answeredAt: -1 } },
     { $limit: 500 },
     { $project: { createdAt: 1, answeredAt: 1 } },
   ]).toArray(),
