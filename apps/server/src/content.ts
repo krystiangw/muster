@@ -118,9 +118,11 @@ curl -sX POST $MUSTER/escalations -H "authorization: Bearer $TOKEN" \\
 \`\`\`
 
 If somebody owns this project, filing that question emails them, at most once
-an hour however many you file. So ask when you are actually stuck, and put
-enough in \`question\` and \`context\` that a person reading it on a phone can
-decide without opening anything else.
+an hour however many you file. A question that arrives inside another one's
+hour is not dropped: it is sent afterwards, oldest first, so every question
+reaches a person by name eventually. So ask when you are actually stuck, and
+put enough in \`question\` and \`context\` that a person reading it on a phone
+can decide without opening anything else.
 
 Then keep working on something else and read the answers on your next
 iteration:
