@@ -110,7 +110,9 @@ async function project() {
       `  note  leaving ${kept.project} behind; an unclaimed project expires on its own, or`,
     );
     console.log(
-      `        MONGODB_URI=... node tools/purge-projects.mjs --ids ${kept.project} --yes`,
+      // The path from the repository root, which is where the header of this
+      // file says to run it from, and the same path the runbook prints.
+      `        MONGODB_URI=... node apps/server/tools/purge-projects.mjs --ids ${kept.project} --yes`,
     );
   }
   if (kept && !FRESH) {

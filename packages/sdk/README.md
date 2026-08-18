@@ -63,6 +63,21 @@ for (const answer of answers) {
 }
 ```
 
+## Saying what a card is waiting on
+
+```ts
+await client.upsert({
+  slug: 'ops:cutover',
+  title: 'Cut traffic over to the new venue',
+  blocked_by: ['ops:bridge-or-wait', 'errors:venue-withdraw-stuck'],
+});
+```
+
+Data, not a status: nothing on the server moves an item because of it, and
+`blocked` still means waiting on a person. What it does is keep the card out of
+what `next()` offers and refuse a claim on it, naming what is unfinished. Send
+an empty array to clear the list.
+
 ## Mirroring an external signal
 
 ```ts
