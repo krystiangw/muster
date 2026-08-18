@@ -105,6 +105,10 @@ console.log('The funnel, since events were first recorded');
 // as a contradiction is how somebody ends up "fixing" a number that is right.
 console.log('  (events, not documents: anything that happened before this log started is missing)');
 row('reads of the protocol', funnel.discovered);
+// Beside it, never inside it. One of these says whether the files are being
+// indexed, the other says whether agents are reading them and walking away, and
+// added together they answer the first question twice.
+row('  and by crawlers, beside', funnel.discoveredByCrawlers);
 row('created a project', funnel.signups);
 row('  registered an agent', funnel.withAnAgent);
 row('  wrote something', funnel.withWork);

@@ -164,6 +164,40 @@ describe('what the service knows about its own use', () => {
     }
   });
 
+  it('counts a crawler reading the protocol beside the agents, never among them', async () => {
+    const before = await insights(harness.store);
+
+    await harness.server.inject({
+      method: 'GET',
+      url: '/skill.md',
+      headers: { 'user-agent': 'Mozilla/5.0 (compatible; SomeBot/1.0; +http://example.com/bot)' },
+    });
+    await harness.server.inject({
+      method: 'GET',
+      url: '/llms.txt',
+      headers: { 'user-agent': 'curl/8.4.0' },
+    });
+    await harness.server.inject({
+      method: 'GET',
+      url: '/skill.md',
+      headers: { 'user-agent': 'some-agent-runtime/2.1' },
+    });
+    await flushEvents();
+
+    const after = await insights(harness.store);
+    assert.equal(after.funnel.discovered, before.funnel.discovered + 1, 'one reader was not a bot');
+    assert.equal(
+      after.funnel.discoveredByCrawlers,
+      before.funnel.discoveredByCrawlers + 2,
+      'and the other two said they were',
+    );
+
+    // Both are kept. Dropping the crawler reads would throw away the answer to
+    // "are these files being indexed at all", which is half of why they exist.
+    const kept = await harness.store.events.countDocuments({ kind: 'discover', crawler: true });
+    assert.ok(kept >= 2);
+  });
+
   it('drops a board out of every stage at once when its signup falls out of the window', async () => {
     const project = await createProject(harness, 'signed up before the log');
     await post(project, '/agents', { handle: 'errors-loop', scope: [] });
@@ -256,10 +290,19 @@ describe('what the service knows about its own use', () => {
     for (const event of events) {
       // The whole point of keeping this small: it is a log of moments, not a
       // second copy of the service's data and not a record of anybody.
+      //
+      // `crawler` is the one bit read off a user agent, and a bit is all it may
+      // ever be: the string itself is not stored, so this list is what stops the
+      // next reason to look at a header from turning into a second copy of it.
+      const keys = Object.keys(event).sort();
       assert.deepEqual(
-        Object.keys(event).sort(),
+        keys.filter((key) => key !== 'crawler'),
         ['_id', 'at', 'detail', 'door', 'expiresAt', 'kind', 'projectId'],
       );
+      if (keys.includes('crawler')) {
+        assert.equal(typeof event.crawler, 'boolean', 'one bit, not the header it came from');
+        assert.equal(event.kind, 'discover', 'and only where it answers a question');
+      }
       assert.ok(
         event.detail === null || ['skill.md', 'agent-signup.md', 'llms.txt', 'agent-access.json', 'mcp.json'].includes(event.detail),
         'detail is one of our own file names, never anything a caller sent',

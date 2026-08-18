@@ -120,6 +120,14 @@ export interface EventDoc {
   /** Which file, for `discover`. Never anything caller-supplied. */
   detail: string | null;
   projectId: string | null;
+  /**
+   * Whether the reader said it was a crawler, on the events where that is a
+   * different question from the one being asked.
+   *
+   * Absent on everything written before 2026-08-18, and on every kind but
+   * `discover`, so absent reads as "not known to be one" rather than as false.
+   */
+  crawler?: boolean;
   expiresAt: Date;
 }
 
@@ -163,7 +171,9 @@ export async function flushEvents(timeoutMs = 2_000): Promise<void> {
 export function record(
   store: Store,
   kind: EventKind,
-  options: { door: EventDoor; detail?: string; projectId?: string } = { door: 'http' },
+  options: { door: EventDoor; detail?: string; projectId?: string; crawler?: boolean } = {
+    door: 'http',
+  },
 ): void {
   const now = new Date();
   const write = store.events
@@ -174,6 +184,7 @@ export function record(
       door: options.door,
       detail: options.detail ?? null,
       projectId: options.projectId ?? null,
+      ...(options.crawler === undefined ? {} : { crawler: options.crawler }),
       expiresAt: new Date(now.getTime() + KEEP_DAYS * 86_400_000),
     })
     .catch(() => undefined)
@@ -244,8 +255,17 @@ export interface Insights {
    * something with it.
    */
   funnel: {
-    /** Reads of the protocol. Traffic, not boards: it has no project to belong to. */
+    /**
+     * Reads of the protocol by something that did not say it was a crawler.
+     *
+     * Traffic, not boards: it has no project to belong to. Crawlers are counted
+     * beside it rather than inside it, because "how often are we indexed" and
+     * "how many agents read this and walked away" are different questions, and
+     * the second one is the one a decision gets made on.
+     */
     discovered: number;
+    /** The same reads, by something that said it was a crawler. */
+    discoveredByCrawlers: number;
     signups: number;
     withAnAgent: number;
     withWork: number;
@@ -418,6 +438,7 @@ export async function insights(store: Store): Promise<Insights> {
 
   const [
     discovered,
+    discoveredByCrawlers,
     cohort,
     asked,
     doorRows,
@@ -435,7 +456,11 @@ export async function insights(store: Store): Promise<Insights> {
     answerDoorRows,
     busiest,
   ] = await Promise.all([
-    store.events.countDocuments({ kind: 'discover' }),
+    // Absent reads as "not known to be one": everything written before this
+    // split existed is counted where it has always been counted, and the two
+    // numbers separate from the day the question was asked.
+    store.events.countDocuments({ kind: 'discover', crawler: { $ne: true } }),
+    store.events.countDocuments({ kind: 'discover', crawler: true }),
     // Every stage of the funnel, counted over one population of boards. Both
     // doors into ownership are in it: a board handed over by its agents and
     // accepted by a person is owned exactly as much as one claimed with a code,
@@ -540,6 +565,7 @@ export async function insights(store: Store): Promise<Insights> {
     generatedAt: new Date(),
     funnel: {
       discovered,
+      discoveredByCrawlers,
       signups: counted.signups,
       withAnAgent: counted.withAnAgent,
       withWork: counted.withWork,

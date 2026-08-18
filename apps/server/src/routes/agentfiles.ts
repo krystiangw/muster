@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
-import { record } from '../events.js';
+import { isCrawler, record } from '../events.js';
 import {
   agentAccessJson,
   agentSignupMd,
@@ -20,7 +20,19 @@ export function registerAgentFiles(app: FastifyInstance, config: Config, store: 
   // The top of the funnel. Reading the protocol and deciding not to sign up
   // leaves nothing behind otherwise, so the one number that says whether the
   // front door works at all would be unknowable.
-  const seen = (detail: string) => record(store, 'discover', { door: 'http', detail });
+  //
+  // Which of them said it was a crawler is kept beside the read rather than
+  // instead of it. Both numbers are worth having and they answer different
+  // questions: how often these files are indexed, and how many agents read them
+  // and walked away. Counted together, the second question gets the first
+  // question's answer, and "two hundred reads per signup" stops meaning
+  // anything. Nothing about the reader is stored beyond the one bit.
+  const seen = (detail: string, request: { headers: { 'user-agent'?: string | undefined } }) =>
+    record(store, 'discover', {
+      door: 'http',
+      detail,
+      crawler: isCrawler(request.headers['user-agent']),
+    });
 
   const skill = skillMd(config);
   const signup = agentSignupMd(config);
@@ -31,14 +43,16 @@ export function registerAgentFiles(app: FastifyInstance, config: Config, store: 
 
   // Public text with nothing secret in it, which is what makes it safe to
   // compress. See the allowlist in app.ts.
-  const markdown = (body: string, detail: string) => (_request: unknown, reply: any) => {
-    seen(detail);
-    reply.compressible = true;
-    return reply
-      .type('text/markdown; charset=utf-8')
-      .header('cache-control', 'public, max-age=300')
-      .send(body);
-  };
+  const markdown =
+    (body: string, detail: string) =>
+    (request: { headers: { 'user-agent'?: string | undefined } }, reply: any) => {
+      seen(detail, request);
+      reply.compressible = true;
+      return reply
+        .type('text/markdown; charset=utf-8')
+        .header('cache-control', 'public, max-age=300')
+        .send(body);
+    };
 
   // Agents probe several conventional names. Serving the same file under each
   // costs nothing and saves a round trip of guessing.
@@ -47,8 +61,8 @@ export function registerAgentFiles(app: FastifyInstance, config: Config, store: 
   }
   app.get('/agent-signup.md', { schema: { hide: true } }, markdown(signup, 'agent-signup.md'));
 
-  app.get('/llms.txt', { schema: { hide: true } }, (_request, reply) => {
-    seen('llms.txt');
+  app.get('/llms.txt', { schema: { hide: true } }, (request, reply) => {
+    seen('llms.txt', request);
     reply.compressible = true;
     return reply
       .type('text/plain; charset=utf-8')
@@ -90,13 +104,13 @@ export function registerAgentFiles(app: FastifyInstance, config: Config, store: 
       .send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`);
   });
 
-  app.get('/.well-known/agent-access.json', { schema: { hide: true } }, async (_request, reply) => {
-    seen('agent-access.json');
+  app.get('/.well-known/agent-access.json', { schema: { hide: true } }, async (request, reply) => {
+    seen('agent-access.json', request);
     reply.compressible = true;
     return access;
   });
-  app.get('/.well-known/mcp.json', { schema: { hide: true } }, async () => {
-    seen('mcp.json');
+  app.get('/.well-known/mcp.json', { schema: { hide: true } }, async (request) => {
+    seen('mcp.json', request);
     return mcpCard;
   });
   // The legacy plugin manifest, kept for clients that still look for it. Its
@@ -104,14 +118,14 @@ export function registerAgentFiles(app: FastifyInstance, config: Config, store: 
   // required field is one a strict client throws away: publishing an invalid
   // one is worse than publishing none, so a deployment with nobody to write to
   // does not publish it at all.
-  app.get('/.well-known/ai-plugin.json', { schema: { hide: true } }, async (_request, reply) => {
+  app.get('/.well-known/ai-plugin.json', { schema: { hide: true } }, async (request, reply) => {
     if (!config.contactEmail) {
       return reply.code(404).send({
         error: 'not_configured',
         message: 'This deployment publishes no plugin manifest: it has no contact address set.',
       });
     }
-    seen('ai-plugin.json');
+    seen('ai-plugin.json', request);
     return {
       schema_version: 'v1',
       name_for_model: 'muster',

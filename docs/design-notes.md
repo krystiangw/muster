@@ -784,6 +784,27 @@ to what the search means, not a change to how it is stored. And the insights
 report costs half a second over two hundred thousand events, which is a page one
 person opens, against the one collection every request writes to.
 
+## The top of the funnel was counting robots, 2026-08-18
+
+Page views drop crawlers where they are recorded, because "how often are we
+indexed" is a different question from "how many people looked". The reads of the
+protocol files, which are the top of the agent funnel, dropped nothing: every
+fetch of `skill.md` or `llms.txt` counted, whatever fetched it. So the headline
+the announcement decision rests on, two hundred and thirty three reads per
+signup, was a mixture of agents that read the protocol and walked away and
+robots that index a file every day and were never going to sign up.
+
+Both numbers are worth having, so the crawler reads are kept and counted beside
+the others rather than dropped. What is stored is one bit, read off the user
+agent and not the user agent itself: the test that asserts these events hold
+nothing about a person now names that bit explicitly, which is what stops the
+next reason to look at a header from becoming a second copy of it.
+
+The split starts the day it shipped. Everything written before has no bit at
+all, and absent reads as "not known to be a crawler", so the old number keeps
+its old meaning instead of quietly becoming a different one. Events are kept
+ninety days, so the mixture ages out on its own.
+
 ## A clock on the one read that has no ceiling, 2026-08-18
 
 The search above was left alone as a cost. A decision audit written the same day
