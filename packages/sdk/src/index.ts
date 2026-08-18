@@ -346,6 +346,8 @@ export class Muster {
       stale?: boolean;
       /** True for items somebody holds right now. An expired claim counts as free. */
       claimed?: boolean;
+      /** Words to look for in the slug or the title, case insensitive. */
+      q?: string;
       limit?: number;
       /**
        * `urgency` (default) is most urgent first. `id` is a stable order for
@@ -371,6 +373,7 @@ export class Muster {
       source: query.source,
       stale: query.stale === undefined ? undefined : String(query.stale),
       claimed: query.claimed === undefined ? undefined : String(query.claimed),
+      q: query.q,
       limit: query.limit === undefined ? undefined : String(query.limit),
       order: query.order,
       cursor: query.cursor,

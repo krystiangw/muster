@@ -197,6 +197,11 @@ const TOOLS: ToolDefinition[] = [
           description:
             'true for items somebody holds right now, false for free ones. An expired lease counts as free.',
         },
+        q: {
+          type: 'string',
+          maxLength: 120,
+          description: 'Words to look for in the slug or the title, case insensitive.',
+        },
         limit: { type: 'integer', minimum: 1, maximum: 200 },
         order: {
           type: 'string',
@@ -636,6 +641,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           source: args.source === undefined ? undefined : str(args.source),
           stale: typeof args.stale === 'boolean' ? args.stale : undefined,
           claimed: typeof args.claimed === 'boolean' ? args.claimed : undefined,
+          q: args.q === undefined ? undefined : str(args.q),
           limit: typeof args.limit === 'number' ? args.limit : undefined,
           order: args.order === undefined ? undefined : str(args.order),
           cursor: args.cursor === undefined ? undefined : str(args.cursor),

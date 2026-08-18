@@ -224,6 +224,14 @@ curl -s "$MUSTER/items?limit=200&order=id" -H "authorization: Bearer $TOKEN"
 curl -s "$MUSTER/items?limit=200&order=id&cursor=<next_cursor>" -H "authorization: Bearer $TOKEN"
 \`\`\`
 
+Looking for one card rather than all of them, \`q=\` searches the slug and the
+title, case insensitively. It is the same search the board offers a person, so
+the two doors answer alike:
+
+\`\`\`bash
+curl -s "$MUSTER/items?q=withdraw" -H "authorization: Bearer $TOKEN"
+\`\`\`
+
 Use \`order=id\` whenever you intend to read everything: the default order is
 by urgency, and priority and updatedAt both change while you page, so an item
 that moves behind your cursor is an item your export never saw. That matters
@@ -689,7 +697,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
         method: 'GET',
         url: `${base}/v1/{project}/items?order=id&limit=200`,
         notes:
-          'Filter by status, owner, label, source, staleness or claim state. Add &cursor=<next_cursor> for the page after this one, in the same order. order=id is the stable order for reading everything back; order=recent with &since=<as_of> is the change feed, and every page of one walk reports the same as_of.',
+          'Filter by status, owner, label, source, staleness or claim state, or search the slug and title with q=. Add &cursor=<next_cursor> for the page after this one, in the same order. order=id is the stable order for reading everything back; order=recent with &since=<as_of> is the change feed, and every page of one walk reports the same as_of.',
       },
       {
         name: 'list_escalations',

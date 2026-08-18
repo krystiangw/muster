@@ -503,6 +503,12 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
                 description:
                   'true for items somebody holds right now, false for free ones. A lease that has expired counts as free, the same way the board reads it, whether or not hygiene has cleared it yet.',
               },
+              q: {
+                type: 'string',
+                maxLength: 120,
+                description:
+                  'Words to look for in the slug or the title, case insensitive. The same search the board offers a person, so both doors answer alike.',
+              },
               limit: { type: 'integer', minimum: 1, maximum: 200 },
               order: {
                 type: 'string',
@@ -540,6 +546,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           source: query.source as string | undefined,
           stale: query.stale as boolean | undefined,
           claimed: query.claimed as boolean | undefined,
+          q: query.q as string | undefined,
           limit: query.limit as number | undefined,
           order: query.order as string | undefined,
           cursor: query.cursor as string | undefined,

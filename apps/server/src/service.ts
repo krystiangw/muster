@@ -1299,6 +1299,8 @@ export interface ListItemsQuery {
   claimed?: boolean;
   limit?: number;
   includeTimeline?: boolean;
+  /** Words to look for in the slug or the title, the way the board's search does. */
+  q?: string;
   order?: ItemOrder;
   /** From a previous page's `next_cursor`, read in the same order. */
   cursor?: string;
@@ -1400,6 +1402,20 @@ async function listItems(
   const order: ItemOrder =
     query.order === 'id' ? 'id' : query.order === 'recent' ? 'recent' : 'urgency';
   const conditions: Record<string, unknown>[] = [...claimConditions];
+  if (query.q) {
+    // Slug or title, case insensitive, escaped: the query is somebody's words,
+    // not a pattern, and a stray bracket should find nothing rather than throw.
+    // The same reading the board's own search takes, because an agent asking
+    // for "the withdrawal one" and a person typing it into the board should not
+    // get two different answers.
+    const words = query.q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    conditions.push({
+      $or: [
+        { slug: { $regex: words, $options: 'i' } },
+        { title: { $regex: words, $options: 'i' } },
+      ],
+    });
+  }
   if (query.since) conditions.push({ updatedAt: { $gte: query.since } });
   if (query.cursor) {
     const after = afterCursor(query.cursor, order);
@@ -1449,6 +1465,7 @@ export interface ReadItemsInput {
   source?: string | undefined;
   stale?: boolean | undefined;
   claimed?: boolean | undefined;
+  q?: string | undefined;
   limit?: number | undefined;
   order?: string | undefined;
   cursor?: string | undefined;
@@ -1527,6 +1544,7 @@ export async function readItems(
     ...(input.source === undefined ? {} : { source: input.source }),
     ...(input.stale === undefined ? {} : { stale: input.stale }),
     ...(input.claimed === undefined ? {} : { claimed: input.claimed }),
+    ...(input.q ? { q: input.q.slice(0, 120) } : {}),
     ...(keyset === undefined ? {} : { cursor: keyset }),
     ...(since ? { since } : {}),
     limit,

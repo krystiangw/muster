@@ -227,6 +227,68 @@ describe('one read, two doors', () => {
     );
   });
 
+  it('finds an item by its words, through either door and the way the board does', async () => {
+    // The board has had a search box since it had columns, and the API it is
+    // built on could not do it: an agent with two hundred items had filters and
+    // no way to ask for "the withdrawal one".
+    const project = await createProject(harness);
+    await post(project, '/items', {
+      slug: 'errors:venue-withdraw-stuck',
+      title: 'withdrawal stuck at the venue',
+      actor: 'a',
+    });
+    await post(project, '/items', { slug: 'ops:backups', title: 'nightly backups', actor: 'a' });
+
+    const overHttp = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/items?q=withdraw`,
+      headers: authed(project),
+    });
+    assert.deepEqual(
+      overHttp.json().items.map((item: { slug: string }) => item.slug),
+      ['errors:venue-withdraw-stuck'],
+      'the slug matches',
+    );
+
+    const byTitle = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/items?q=NIGHTLY`,
+      headers: authed(project),
+    });
+    assert.deepEqual(
+      byTitle.json().items.map((item: { slug: string }) => item.slug),
+      ['ops:backups'],
+      'and so does the title, whatever case it was typed in',
+    );
+
+    const overMcp = await harness.server.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: authed(project),
+      payload: {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'list_items', arguments: { q: 'withdraw' } },
+      },
+    });
+    assert.deepEqual(
+      overMcp.json().result.structuredContent.items.map((item: { slug: string }) => item.slug),
+      ['errors:venue-withdraw-stuck'],
+      'the other door answers the same',
+    );
+
+    // Somebody's words, not a pattern. A stray bracket finds nothing rather
+    // than throwing, and a dot is a dot.
+    const bracket = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/items?q=${encodeURIComponent('with[drawal')}`,
+      headers: authed(project),
+    });
+    assert.equal(bracket.statusCode, 200);
+    assert.deepEqual(bracket.json().items, []);
+  });
+
   it('reads a lapsed lease as free work, the way the board does', async () => {
     // The board has always taken an expired claim as no claim: hygiene clearing
     // the field is a tidy-up, not the moment the work became free. The list
