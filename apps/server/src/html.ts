@@ -282,6 +282,9 @@ button.ghost { background:transparent; color:var(--accent); }
 /* A name nobody registered. Drawn as what it is, a handle read off an item,
    rather than filed under a second heading that costs a row to say the same. */
 .chip-link.loose { border-style:dashed; }
+/* Chosen and undeclared at once: the dashes have to stay readable, and against
+   the accent fill an accent border has no gaps to see. */
+.chip-link.loose.on { border-color:var(--surface); }
 .filter-more { display:inline; }
 .filter-more summary { display:inline; font-family:var(--mono); font-size:12px;
   color:var(--muted); cursor:pointer; }
