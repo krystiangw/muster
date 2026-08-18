@@ -163,9 +163,17 @@ describe('B. agent entry', () => {
     const skill = await harness.server.inject({ method: 'GET', url: '/skill.md' });
     if (json.sdk?.published === true) {
       assert.match(String(json.sdk.npm ?? ''), /^[a-z0-9@._/-]+$/, 'a published sdk is named');
-      assert.ok(
-        skill.body.includes(`npm install ${json.sdk.npm}`),
-        `skill.md installs ${json.sdk.npm}, the package the card publishes`,
+      // The whole token, compared as a set. Asking whether the text contains
+      // "npm install muster" is true of a document that installs musterboard,
+      // and a card naming one package while the protocol names another is the
+      // exact drift this is here to catch.
+      const installs = [...skill.body.matchAll(/npm install ([@a-z0-9._/-]+)/g)].map(
+        (match) => match[1],
+      );
+      assert.deepEqual(
+        [...new Set(installs)],
+        [json.sdk.npm],
+        'skill.md installs exactly the package the card publishes, and no other',
       );
     } else {
       assert.equal(json.sdk?.npm, undefined, 'no package name until there is a package');
