@@ -666,7 +666,34 @@ address. Claiming is free and raises the limits:</p>
 
   // ----------------------------------------------------------- read view
 
+  /**
+   * The same ceiling the API gives this project, on the pages that show it.
+   *
+   * The read link is a capability, and the API door already counts what one
+   * token may read in a minute. These two pages counted nothing at all, so the
+   * same address that is allowed six hundred reads a minute as an agent had no
+   * ceiling as a browser, on the one page that carries a search box. Six
+   * hundred a minute is ten a second, which no person browsing will meet.
+   */
+  const limitReads = (request: FastifyRequest, reply: FastifyReply): boolean => {
+    const { readToken } = request.params as { readToken: string };
+    const verdict = limiter.check(`rlread:${readToken}`, config.rateLimits.read);
+    if (verdict.ok) return true;
+    void reply
+      .code(429)
+      .header('retry-after', String(verdict.retryAfterSeconds))
+      .type('text/html; charset=utf-8')
+      .send(
+        layout(
+          { title: 'Slow down' },
+          `<h1>Too many reads at once</h1><p>This link is being read faster than the board is meant to be read. Try again in ${verdict.retryAfterSeconds} seconds.</p>`,
+        ),
+      );
+    return false;
+  };
+
   app.get('/r/:readToken', { schema: { hide: true } }, async (request, reply) => {
+    if (!limitReads(request, reply)) return reply;
     const { readToken } = request.params as { readToken: string };
     const project = await store.projects.findOne({ readToken });
     if (!project) {
@@ -1011,6 +1038,7 @@ ${
   });
 
   app.get('/r/:readToken/board', { schema: { hide: true } }, async (request, reply) => {
+    if (!limitReads(request, reply)) return reply;
     const { readToken } = request.params as { readToken: string };
     const project = await store.projects.findOne({ readToken });
     if (!project) {

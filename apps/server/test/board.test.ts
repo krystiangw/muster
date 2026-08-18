@@ -704,6 +704,31 @@ describe('moving an item into a column', () => {
     );
   });
 
+  it('rate limits reads through a read link too, since one of them is a search', async () => {
+    // The API door counts what one token may read in a minute; these two pages
+    // counted nothing, and one of them carries a search box whose worst case is
+    // a pass over the whole collection. Same capability, same ceiling.
+    const isolated = await startHarness({ LIMIT_READS_PER_MINUTE: '2' });
+    try {
+      const project = await createProject(isolated, 'read often');
+      const readToken = project.readUrl.split('/r/')[1]!;
+      const read = () => isolated.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+
+      assert.equal((await read()).statusCode, 200);
+      assert.equal((await read()).statusCode, 200);
+      const third = await read();
+      assert.equal(third.statusCode, 429);
+      assert.ok(third.headers['retry-after'], 'and it says when to come back');
+
+      // The board and the page beside it share the ceiling, because they share
+      // the link: counting them apart would double what the link is allowed.
+      const beside = await isolated.server.inject({ method: 'GET', url: `/r/${readToken}` });
+      assert.equal(beside.statusCode, 429);
+    } finally {
+      await isolated.stop();
+    }
+  });
+
   it('rate limits writes through a read link, which is a shareable capability', async () => {
     const isolated = await startHarness({ LIMIT_WRITES_PER_MINUTE: '2' });
     try {
