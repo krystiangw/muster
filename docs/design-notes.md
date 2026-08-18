@@ -619,3 +619,39 @@ The shape worth remembering: a decision taken from a read has to be applied
 under a guard that still holds, or not applied at all. `$set` on a document you
 have not read is neither, and it is invisible, because the write succeeds and
 the wrong number is the only trace.
+
+## A heading that counts the page, 2026-08-18
+
+Three pages carried the same fault today, and it took a review of the fix to
+the first one to see that it was a shape rather than a bug.
+
+A query is capped, sensibly: two hundred items, fifty questions, a hundred
+across a fleet. The list under the heading then renders what came back, and the
+heading counts the same array. The two are the same number right up until
+somebody is busy, and after that the heading is about the page while the reader
+believes it is about the world. The project page said "200 item(s)" above a
+table that admitted, one line lower, that it was showing 200 of 205. The
+operator page, whose entire promise is "everything waiting on you", put the size
+of its own first page in the title. The same page counted each project's waiting
+questions by filtering the slice, so a project's number shrank as other projects
+got busier.
+
+Worse than either, because it is silent in both directions: the questions on the
+capability page were fetched as "the newest fifty of any kind" and split by
+status afterwards, so fifty answers newer than an open question hid it
+completely, and the page said the agents were unblocked. That is the bug the
+audit found in the MCP inbox in July and fixed there. The door a person actually
+opens kept it for another month.
+
+Three rules came out of it, and they are cheap:
+
+**Count with a count.** A heading is about the world, so it takes a
+`countDocuments` or a maintained counter, never `list.length`.
+
+**Say what is missing.** Every capped list says "showing N of M", the way the
+board has always said "and N more". A page that quietly drops work is worse than
+one that admits it cannot show everything.
+
+**Ask for the kind you are going to show.** A query that fetches a mixture and
+filters in memory has a cap on the mixture, not on the thing. The fix is one
+query per kind, in the index built for it.
