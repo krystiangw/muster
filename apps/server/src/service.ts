@@ -767,6 +767,15 @@ export interface UpsertItemInput {
    */
   insertOnly?: boolean;
   /**
+   * Write only if these fields still say what the caller last saw.
+   *
+   * For a form somebody had open while somebody else wrote. The check has to be
+   * part of the write and not a look before it: between a read and an update
+   * there is room for exactly the change this is trying not to lose. A mismatch
+   * is a 409 and nothing is written.
+   */
+  expect?: { title?: string; body?: string };
+  /**
    * The writer is not an agent of this project: an anonymous report through
    * `/feedback`, and nothing else so far.
    *
@@ -1068,7 +1077,7 @@ export async function upsertItem(
 
   const write = () =>
     store.items.findOneAndUpdate(
-      { projectId: project._id, slug },
+      { projectId: project._id, slug, ...(input.expect ?? {}) },
       {
         $set: set,
         $setOnInsert: setOnInsert,
@@ -1097,8 +1106,18 @@ export async function upsertItem(
   }
 
   // Only reachable with mustExist: without it the write upserts and always
-  // returns a document. The item was deleted between the lookup above and here.
-  if (!result.value) throw notFound(slug);
+  // returns a document. The item was deleted between the lookup above and here,
+  // or a guarded write found the field already saying something else.
+  if (!result.value) {
+    if (input.expect && (await store.items.findOne({ projectId: project._id, slug }))) {
+      throw new ServiceError(
+        409,
+        'changed_underneath',
+        `Somebody wrote to "${slug}" while this was open, so nothing was saved: writing your copy back would have thrown their words away. Open it again and redo the change on what it says now.`,
+      );
+    }
+    throw notFound(slug);
+  }
 
   const created = !result.lastErrorObject?.updatedExisting;
   const item = result.value as ItemDoc;

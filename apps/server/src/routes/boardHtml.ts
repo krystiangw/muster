@@ -667,11 +667,15 @@ function agentOptions(agents: AgentFacet[], selected: string | undefined): strin
 /**
  * The narrowing controls, and the one control that is not a narrowing.
  *
- * "Keep up" reloads the page every minute, for the case this board is for:
- * agents writing while somebody watches. It is off unless asked for, and it
- * lives in the URL like every filter here, so it survives a reload and can be
- * kept as a bookmark. Off by default because a page that reloads under
- * somebody's hands throws away the note they were half way through typing.
+ * The switch reloads the page every minute, for the case this board is for:
+ * agents writing while somebody watches. It says what it does rather than what
+ * it is for, because the first person to meet it asked what it meant, and a
+ * control nobody can read is a control nobody turns on.
+ *
+ * Off unless asked for, and in the URL like every filter here, so it survives
+ * the reload it causes and can be kept as a bookmark. Off by default because a
+ * page that reloads under somebody's hands throws away the note they were half
+ * way through typing.
  */
 export function renderBoardFilters(
   view: BoardView,
@@ -732,8 +736,9 @@ export function renderBoardFilters(
     <input type="search" name="q" value="${escapeHtml(view.filter.q ?? '')}"
       placeholder="slug or title" size="16">
   </label>
-  <label class="live"><input type="checkbox" name="live" value="1"${live ? ' checked' : ''}>
-    Keep up</label>
+  <label class="live" title="The agents write to this board while you are looking at it. On, the page fetches itself again once a minute.">
+    <input type="checkbox" name="live" value="1"${live ? ' checked' : ''}>
+    Reload every minute</label>
   <button type="submit">Show</button>
   ${
     view.filter.owner || view.filter.agent || view.filter.label || view.filter.q

@@ -827,6 +827,7 @@ describe('moving an item into a column', () => {
     });
     assert.match(watching.body, /<meta http-equiv="refresh" content="60">/);
     assert.match(watching.body, /name="live" value="1" checked/, 'and the switch says so');
+    assert.match(still.body, /Reload every minute/, 'named by what it does');
   });
 
   it('files a card from the board, and never on top of one already there', async () => {

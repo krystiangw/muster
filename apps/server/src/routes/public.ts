@@ -1282,7 +1282,9 @@ ${
           ? `"${touched.slug}" is now tagged ${
               touched.labels.length > 0 ? touched.labels.join(', ') : 'nothing'
             }.`
-          : query.what === 'edit'
+          : query.what === 'unchanged'
+            ? `Nothing was written to "${touched.slug}": it already said that.`
+            : query.what === 'edit'
             ? `"${touched.slug}" now reads as you wrote it, and the timeline says who changed it.`
             : query.what === 'priority'
             ? `"${touched.slug}" is urgency ${touched.priority > 0 ? '+' : ''}${touched.priority}. Every queue here sorts by it, so this is what an agent is offered next.`
@@ -1291,7 +1293,7 @@ ${
             : query.what === 'note'
             ? `Your note is on "${touched.slug}", where every agent that reads it will see it.`
             : query.what === 'nothing'
-              ? `Nothing was written to "${touched.slug}": it already said that.`
+              ? `Nothing was written to "${touched.slug}": the note was empty.`
               : `"${touched.slug}" is ${touched.owner ? `owned by ${touched.owner}` : 'unassigned'}.`
         : undefined;
     const notice = answeredHere
@@ -1704,32 +1706,27 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     const wasTitle = one(form.was_title) ?? '';
     const wasBody = one(form.was_body) ?? '';
 
-    // Only what this person actually changed, checked against what they were
-    // looking at. Two people share this card by construction, and writing back
-    // a field somebody never touched is how a form quietly undoes an agent's
-    // work between the render and the submit.
-    const item = await store.items.findOne({ projectId: project._id, slug: form.slug });
-    if (!item) throw new ServiceError(404, 'not_found', 'No such item.');
+    // Only what this person actually changed, guarded on what they were looking
+    // at. Two people share this card by construction, and writing back a field
+    // somebody never touched is how a form quietly undoes an agent's work
+    // between the render and the submit. The guard travels with the write
+    // rather than preceding it: a check before an update leaves room for
+    // exactly the change it is trying not to lose.
     const changed: { title?: string; body?: string } = {};
-    if (title !== '' && title !== wasTitle) changed.title = title;
-    if (body !== wasBody) changed.body = body;
-    for (const [field, stored] of [
-      ['title', item.title ?? ''],
-      ['body', item.body ?? ''],
-    ] as const) {
-      const was = field === 'title' ? wasTitle : wasBody;
-      if (changed[field] !== undefined && stored !== was) {
-        throw new ServiceError(
-          409,
-          'changed_underneath',
-          `Somebody wrote to "${form.slug}" while this was open, so nothing was saved: writing your copy back would have thrown their words away. Open the card again and redo the change on what it says now.`,
-        );
-      }
+    const expect: { title?: string; body?: string } = {};
+    if (title !== '' && title !== wasTitle) {
+      changed.title = title;
+      expect.title = wasTitle;
+    }
+    if (body !== wasBody) {
+      changed.body = body;
+      expect.body = wasBody;
     }
     if (Object.keys(changed).length > 0) {
       await upsertItem(store, project, {
         slug: form.slug,
         ...changed,
+        expect,
         actor: 'operator',
         note: `${Object.keys(changed).join(' and ')} edited from the board`,
         mustExist: true,
@@ -1737,7 +1734,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     }
     const params = new URLSearchParams({
       done: form.slug,
-      what: Object.keys(changed).length > 0 ? 'edit' : 'nothing',
+      what: Object.keys(changed).length > 0 ? 'edit' : 'unchanged',
       ...keptParams(form),
     });
     return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
