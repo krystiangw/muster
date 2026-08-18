@@ -1055,3 +1055,24 @@ retry can take a second item with, and the rate limiter classifies by method, so
 claiming through a GET was charged against the read budget, five times the
 writes an agent is allowed. `POST /next` on the HTTP door; on MCP, where there
 is no method to read, the tool is counted as a write when it is asked to claim.
+
+
+## The filter bar, third shape, 2026-08-18
+
+A select with a Show button was a choice that had not happened yet. Links applied
+themselves and cost a row per name, which on a board with thirty labels is most
+of the screen before the first card. The operator asked for the third shape: a
+field per thing to narrow by, with the names this board already knows behind it,
+so the values are one keystroke away and a name nobody has used yet can still be
+typed.
+
+**One form, and a submit button nobody sees.** A form with several fields and no
+submit button does not submit on Enter: the rule is one field, or a button. The
+button is off screen rather than absent, because there is still nothing to press
+after choosing. Worth knowing when testing: with the suggestion list open, the
+first Enter accepts the suggestion and the second submits, which is the
+browser's behaviour and not something a page can change without script.
+
+**And the address stays the one to share.** A form sends every field it has, so
+narrowing by one wrote `?owner=&agent=errors-loop&label=&q=` into the bar. The
+empties are dropped once, in the route, before the page is drawn.

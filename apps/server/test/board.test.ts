@@ -1807,22 +1807,23 @@ describe('a board many agents write to', () => {
     const readToken = project.readUrl.split('/r/')[1]!;
     const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
 
-    // A handle is a line number; what it is for is the name, and on a control
-    // made of links that description is what the browser shows on hover.
+    // A handle is a line number; what it is for is the name, and in a field
+    // with a list behind it that description is the label the browser shows
+    // beside the handle.
     assert.match(
       page.body,
-      /title="watches the exchange error feed"[^>]*>errors-loop<\/a>/,
+      /<option value="errors-loop">watches the exchange error feed<\/option>/,
       'the description travels with the handle',
     );
     assert.match(
       page.body,
-      /<a class="chip-link" title="registered here"[^>]*>idle-loop<\/a>/,
+      /<option value="idle-loop">registered here<\/option>/,
       'registered and silent still gets offered',
     );
     assert.match(
       page.body,
-      /<a class="chip-link loose" title="seen on items, not registered here"[^>]*>passer-by<\/a>/,
-      'and a name that only ever wrote is drawn as one',
+      /<option value="passer-by">seen on items, not registered here<\/option>/,
+      'and a name that only ever wrote is offered as one',
     );
 
     const described = (
@@ -1860,28 +1861,58 @@ describe('a board many agents write to', () => {
     assert.match(page.body, /said nothing/);
   });
 
+  it('drops the empty fields a form sends, so the URL is the one to share', async () => {
+    // Every field goes up on submit, so narrowing by one leaves the other three
+    // in the address as `owner=&label=&q=`. That address is what somebody
+    // copies to somebody else.
+    const project = await createProject(harness, 'clean urls');
+    await post(project, '/items', { slug: 'one', title: 'one', actor: 'errors-loop' });
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    const submitted = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?owner=&agent=errors-loop&label=&q=`,
+    });
+    assert.equal(submitted.statusCode, 303);
+    assert.equal(submitted.headers.location, `/r/${readToken}/board?agent=errors-loop`);
+
+    const nothing = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?owner=&agent=&label=&q=`,
+    });
+    assert.equal(nothing.headers.location, `/r/${readToken}/board`);
+
+    // An address with nothing empty in it is drawn rather than bounced.
+    const clean = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?agent=errors-loop`,
+    });
+    assert.equal(clean.statusCode, 200);
+  });
+
   it('keeps the agent it is already filtered by in the list', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'one', title: 'one', actor: 'errors-loop' });
     const readToken = project.readUrl.split('/r/')[1]!;
 
     // A name that no longer has anything behind it, arriving from a kept URL.
-    // Without it in the list, pressing Show silently means everybody.
+    // It is in the box, so what it filtered by is visible and can be cleared.
     const page = await harness.server.inject({
       method: 'GET',
       url: `/r/${readToken}/board?agent=gone-loop`,
     });
     assert.match(
       page.body,
-      /<a class="chip-link on loose"[^>]*>gone-loop<\/a>/,
-      'so the control that turned it on can turn it off',
+      /<input id="filter-agent" name="agent" list="filter-agent-list"[\s\S]*?value="gone-loop"/,
+      'so what turned it on can turn it off',
     );
+    assert.match(page.body, /<option value="gone-loop">/, 'and it is still on the list');
   });
 
-  it('shows the filter it is filtering by, even past the fold', async () => {
-    // A board with more labels than the row holds folds the rest away. The one
-    // in force cannot be in there: a filter bar that does not show what it is
-    // filtering by is a page disagreeing with itself.
+  it('shows the filter it is filtering by, whatever the list holds', async () => {
+    // A filter bar that does not show what it is filtering by is a page
+    // disagreeing with itself. The value is in the box now rather than
+    // somewhere in a row of names, so the length of the list cannot hide it.
     const project = await createProject(harness);
     const labels = ['aa', 'bb', 'cc', 'dd', 'ee', 'ff', 'gg', 'hh', 'zz-last'];
     for (const label of labels) {
@@ -1893,11 +1924,12 @@ describe('a board many agents write to', () => {
       method: 'GET',
       url: `/r/${readToken}/board?label=zz-last`,
     });
-    const row = /<span class="filter-key">Label<\/span>([\s\S]*?)<\/div>/.exec(page.body)![1]!;
-    const fold = row.indexOf('<details');
-    const chosen = row.indexOf('>zz-last</a>');
-    assert.ok(chosen >= 0, 'the chosen label is in the row');
-    assert.ok(fold === -1 || chosen < fold, 'and not behind the fold');
+    assert.match(
+      page.body,
+      /<input id="filter-label" name="label" list="filter-label-list"[\s\S]*?value="zz-last"/,
+      'the chosen label is in the box',
+    );
+    assert.match(page.body, /<option value="aa">/, 'and every name is behind the field');
   });
 
   it('stops offering an agent whose only trace is a lapsed claim', async () => {

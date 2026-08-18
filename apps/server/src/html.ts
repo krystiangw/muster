@@ -279,36 +279,21 @@ button.ghost { background:transparent; color:var(--accent); }
 .peeked .sheet .none { color:var(--muted); font-style:italic; margin:0; font-size:14px; }
 .peeked .sheet .timeline { border-top:1px solid var(--rule); padding-top:4px; }
 /* Filters that apply themselves. Every value is a link, so choosing is the
-   whole interaction: no button to press afterwards, and choosing what is
-   already chosen turns it off. */
-.filters { display:flex; flex-direction:column; gap:6px; margin:0 0 16px;
+   whole interaction: a field with the names behind it, and Enter applies the
+   lot. No button to press after choosing, which is what the operator asked
+   for, and the value in force is in the box rather than somewhere in a row. */
+.filters { display:flex; flex-direction:row; flex-wrap:wrap; align-items:flex-end;
+  gap:8px 14px; margin:0 0 16px; max-width:none;
   border:1px solid var(--rule); border-radius:6px; padding:10px 12px; background:var(--surface); }
-.filter-row { display:flex; flex-wrap:wrap; align-items:center; gap:6px 8px; }
-.filter-key { font-family:var(--mono); font-size:10.5px; letter-spacing:.09em;
-  text-transform:uppercase; color:var(--muted); min-width:52px; }
-.chip-link { font-family:var(--mono); font-size:12px; padding:2px 8px; border-radius:999px;
-  border:1px solid var(--rule); color:var(--ink-2); text-decoration:none; }
-.chip-link:hover { border-color:var(--accent); color:var(--accent); }
-.chip-link.on { background:var(--accent); border-color:var(--accent); color:var(--surface); }
-/* A name nobody registered. Drawn as what it is, a handle read off an item,
-   rather than filed under a second heading that costs a row to say the same. */
-.chip-link.loose { border-style:dashed; }
-/* Chosen and undeclared at once: the dashes have to stay readable, and against
-   the accent fill an accent border has no gaps to see. */
-.chip-link.loose.on { border-color:var(--surface); }
-.filter-more { display:inline; }
-.filter-more summary { display:inline; font-family:var(--mono); font-size:12px;
-  color:var(--muted); cursor:pointer; }
-.filter-row form { display:inline-flex; margin:0; max-width:none; }
-.filter-row input[type="search"] { font-size:13px; padding:4px 9px; }
-.reset { font-family:var(--mono); font-size:12px; padding:3px 10px; border-radius:4px;
+.filters label { display:flex; flex-direction:column; gap:3px; font-family:var(--mono);
+  font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); }
+.filters input { font-size:13.5px; padding:5px 9px; font-family:var(--sans);
+  letter-spacing:normal; text-transform:none; color:var(--ink); }
+.filters input[type="search"] { min-width:180px; }
+.filters .hint { align-self:flex-end; font-size:12.5px; color:var(--muted); padding-bottom:5px; }
+.reset { font-family:var(--mono); font-size:12px; padding:5px 10px; border-radius:4px;
   border:1px solid var(--rule); color:var(--ink-2); text-decoration:none; margin-left:auto; }
 .reset:hover { border-color:var(--accent); color:var(--accent); }
-.filters label { font-family:var(--mono); font-size:11px; letter-spacing:.09em;
-  text-transform:uppercase; color:var(--muted); }
-.filters select { font-size:14px; padding:6px 9px; min-width:170px; max-width:230px; }
-.filters button { padding:7px 14px; }
-.filters .hint { align-self:center; font-size:12.5px; color:var(--muted); }
 .ghost-link { align-self:center; font-size:13.5px; }
 .col .more { font-family:var(--mono); font-size:11px; color:var(--muted); }
 .col .none { font-size:12.5px; color:var(--muted); font-style:italic; }

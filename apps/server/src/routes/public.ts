@@ -1189,6 +1189,18 @@ ${
     // stop doing that while somebody is typing into one.
     const openCard = one(query.card)?.slice(0, 200) ?? '';
     const openNew = one(query.new) === '1';
+    // A form sends every field it has, so narrowing by one leaves the other
+    // three in the URL as `owner=&label=&q=`. That URL is the thing somebody
+    // copies to somebody else, so the empties are dropped once, here, and the
+    // page is drawn for the address that stays in the bar.
+    const raw = new URLSearchParams(request.url.split('?')[1] ?? '');
+    if ([...raw.entries()].some(([, value]) => value === '')) {
+      const kept = new URLSearchParams();
+      for (const [name, value] of raw.entries()) if (value !== '') kept.append(name, value);
+      const query = kept.toString();
+      return reply.redirect(`/r/${readToken}/board${query === '' ? '' : `?${query}`}`, 303);
+    }
+
     const narrowing = {
       ...(query.owner ? { owner: query.owner.slice(0, 48) } : {}),
       ...(query.agent ? { agent: query.agent.slice(0, 48) } : {}),

@@ -678,25 +678,12 @@ ${
 }
 
 /**
- * The narrowing controls, as links rather than a form with a button.
+ * A URL for this board with one thing changed.
  *
- * There is no JavaScript on this page and there is not going to be, so a
- * `<select>` cannot apply itself: it needs a submit button beside it, and a
- * button somebody has to press after choosing is a choice that has not happened
- * yet. Links do apply themselves, which is the whole of it. Choosing keeps
- * whatever else is narrowed, and choosing what is already chosen clears it, so
- * the same control turns a filter on and off and there is no small x to hunt
- * for.
- *
- * The search is the one thing that cannot be a link, because it is typed. It is
- * a form of one field, which every browser submits on Enter without being told,
- * and it carries the other narrowings so searching does not drop them.
- *
- * Long lists fold: the first few are in the row, the rest are one click away in
- * a `<details>`, which is a disclosure a browser does for free.
+ * Used by the sheets rather than by the filters now: the filter bar is a form
+ * of fields with a list behind each, so what it sends is whatever is in the
+ * boxes when somebody presses Enter.
  */
-const FILTER_INLINE = 8;
-
 function narrowedUrl(
   action: string,
   filter: BoardFilter,
@@ -717,57 +704,6 @@ function narrowedUrl(
   return query === '' ? action : `${action}?${query}`;
 }
 
-function filterRow(
-  action: string,
-  filter: BoardFilter,
-  key: 'owner' | 'agent' | 'label',
-  title: string,
-  anyLabel: string,
-  values: Array<{ value: string; note?: string; loose?: boolean }>,
-  omitted: number,
-): string {
-  if (values.length === 0) return '';
-  const current = filter[key];
-  const chip = (entry: { value: string; note?: string; loose?: boolean }) => {
-    const on = entry.value === current;
-    return `<a class="chip-link${on ? ' on' : ''}${entry.loose ? ' loose' : ''}"${
-      entry.note ? ` title="${escapeHtml(entry.note)}"` : ''
-    } href="${escapeHtml(
-      narrowedUrl(action, filter, { [key]: on ? undefined : entry.value }),
-    )}"${on ? ' aria-current="true"' : ''}>${escapeHtml(entry.value)}</a>`;
-  };
-  // What is on is always in the row. On a board with thirty labels the chosen
-  // one could sort past the fold, and a filter bar that does not show what it
-  // is filtering by is a page disagreeing with itself.
-  const ordered = current
-    ? [
-        ...values.filter((entry) => entry.value === current),
-        ...values.filter((entry) => entry.value !== current),
-      ]
-    : values;
-  const shown = ordered.slice(0, FILTER_INLINE);
-  const rest = ordered.slice(FILTER_INLINE);
-  return `<div class="filter-row">
-  <span class="filter-key">${escapeHtml(title)}</span>
-  <a class="chip-link${current ? '' : ' on'}" href="${escapeHtml(
-    narrowedUrl(action, filter, { [key]: undefined }),
-  )}">${escapeHtml(anyLabel)}</a>
-  ${shown.map(chip).join('\n  ')}
-  ${
-    rest.length === 0
-      ? ''
-      : `<details class="filter-more"><summary>${rest.length} more</summary>
-    ${rest.map(chip).join('\n    ')}
-  </details>`
-  }
-  ${
-    omitted === 0
-      ? ''
-      : `<span class="hint">${omitted} more exist; add <code>?${key}=</code> to the URL to use one.</span>`
-  }
-</div>`;
-}
-
 export function renderBoardFilters(view: BoardView, facets: BoardFacets, action: string): string {
   if (facets.owners.length === 0 && facets.agents.length === 0 && facets.labels.length === 0) {
     return '';
@@ -775,23 +711,60 @@ export function renderBoardFilters(view: BoardView, facets: BoardFacets, action:
   const filter = view.filter;
   const narrowed = Boolean(filter.owner || filter.agent || filter.label || filter.q);
   // A name somebody reached this board by is offered even when it is not on the
-  // list any more, so the control that turned it on can turn it off.
+  // list any more, so what turned the filter on can turn it off.
   const withCurrent = (values: string[], current: string | undefined) =>
     current && !values.includes(current) ? [current, ...values] : values;
 
-  return `<div class="filters">
-${filterRow(
-    action,
-    filter,
+  /**
+   * One field, with the names this board already knows behind it.
+   *
+   * A row of links applied itself on one click and cost a row per name; on a
+   * board with thirty labels that is most of the screen before the first card.
+   * A field with a list is what the operator asked for: the names are one
+   * keystroke away, a name nobody has used yet can still be typed, and the
+   * value in force is in the box rather than somewhere in a row.
+   */
+  const field = (
+    key: 'owner' | 'agent' | 'label',
+    title: string,
+    empty: string,
+    options: Array<{ value: string; note?: string }>,
+    omitted: number,
+  ): string => {
+    if (options.length === 0) return '';
+    const id = `filter-${key}`;
+    return `  <label for="${id}">${escapeHtml(title)}
+    <input id="${id}" name="${key}" list="${id}-list" size="14"
+      value="${escapeHtml(filter[key] ?? '')}" placeholder="${escapeHtml(empty)}">
+  </label>
+  <datalist id="${id}-list">
+${options
+  .map(
+    (option) =>
+      `    <option value="${escapeHtml(option.value)}">${
+        option.note ? escapeHtml(option.note) : ''
+      }</option>`,
+  )
+  .join('\n')}
+  </datalist>${
+    omitted === 0
+      ? ''
+      : `\n  <span class="hint">${omitted} more ${key}s exist than this list holds.</span>`
+  }`;
+  };
+
+  // Every field in one form, so Enter anywhere applies the lot and there is no
+  // button to press after choosing, which is what the operator asked for when
+  // the "show" button went.
+  return `<form class="filters" method="get" action="${escapeHtml(action)}">
+${field(
     'owner',
     'Owner',
     'anyone',
     withCurrent(facets.owners, filter.owner).map((value) => ({ value })),
     facets.omitted.owners,
   )}
-${filterRow(
-    action,
-    filter,
+${field(
     'agent',
     'Agent',
     'any agent',
@@ -800,15 +773,10 @@ ${filterRow(
       filter.agent,
     ).map((handle) => {
       const agent = facets.agents.find((entry) => entry.handle === handle);
-      // A handle nobody registered is drawn loosely rather than filed under a
-      // second heading: the two groups the dropdown used to have cost a row to
-      // say what a dashed border says. What the agent is for rides along as the
-      // tooltip, because a handle is a line number and the description is the
-      // name.
       const registered = agent?.registered === true;
-      // The door a person writes through is neither of the two things this
-      // marking is about, so it says what it is instead of implying somebody
-      // forgot to register it.
+      // What the agent is for rides along as the option's label, which is what
+      // a browser shows beside the handle in the list: a handle is a line
+      // number and the description is the name.
       if (normalizeHandle(handle) === OPERATOR_ACTOR) {
         return { value: handle, note: 'written from this page, by a person' };
       }
@@ -819,53 +787,37 @@ ${filterRow(
             ? agent.description
             : 'registered here'
           : 'seen on items, not registered here',
-        ...(registered ? {} : { loose: true }),
       };
     }),
     facets.omitted.agents,
   )}
-${filterRow(
-    action,
-    filter,
+${field(
     'label',
     'Label',
     'any label',
     withCurrent(facets.labels, filter.label).map((value) => ({ value })),
     facets.omitted.labels,
   )}
-<div class="filter-row">
-  <span class="filter-key">Find</span>
-  <form method="get" action="${escapeHtml(action)}">
-    ${(['owner', 'agent', 'label'] as const)
-      .filter((key) => filter[key])
-      .map(
-        (key) =>
-          `<input type="hidden" name="${key}" value="${escapeHtml(filter[key] as string)}">`,
-      )
-      .join('')}
-    <input type="search" name="q" value="${escapeHtml(filter.q ?? '')}"
-      placeholder="slug or title, then Enter" size="24">
-  </form>
+  <label for="filter-q">Find
+    <input id="filter-q" type="search" name="q" size="20"
+      value="${escapeHtml(filter.q ?? '')}" placeholder="slug or title">
+  </label>
+  <span class="hint">Pick or type, then Enter.</span>
   ${
+    // A form with several fields and no submit button does not submit on
+    // Enter: the rule is one field, or a button. The button is off screen
+    // rather than absent, because the operator asked for no button to press
+    // and every browser needs one to exist for Enter to mean apply.
+    ''
+  }<button class="sr-only" type="submit">Apply the filter</button>
+${
     narrowed
-      ? `<a class="reset" href="${escapeHtml(action)}">Clear filters</a>`
+      ? `  <a class="reset" href="${escapeHtml(action)}">Clear filters</a>`
       : ''
   }
-</div>
-</div>`;
+</form>`;
 }
 
-/**
- * Consolidating two spellings of one agent, from the page that shows both.
- *
- * The API has had this since the warnings did. A person reading the filter is
- * the one who notices `trades_loop` sitting beside `trades-loop`, and sending
- * them to curl to fix what they are looking at is how a board keeps both.
- *
- * Offered only when there is more than one name to choose between, and folded
- * into the settings, because it rewrites whose work an item is and that is not
- * a control anybody should meet by accident.
- */
 function renderAgentMerge(facets: BoardFacets, action: string, keep: BoardFilter): string {
   // Not the door. A person's own writes are signed with it, and offering it
   // here as a name to consolidate is offering to file everything a human did
