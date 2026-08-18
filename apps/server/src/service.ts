@@ -808,6 +808,17 @@ export async function upsertItem(
   const now = new Date();
   const warnings: string[] = [];
 
+  // A guarded write is for correcting words that somebody was looking at. The
+  // status has its own guard, decided by who owns the transition, and the two
+  // run as separate updates: letting them arrive together would move a card and
+  // then refuse the edit, which is the opposite of "nothing was written".
+  if (input.expect && input.status !== undefined) {
+    throw badRequest(
+      'guarded_status',
+      'A write guarded on what you last saw cannot also move the status. Send the correction, then the move.',
+    );
+  }
+
   // Parsed before anything is written. A bad timestamp buried in a hundred
   // carried entries must not surface as a 400 after the item has already
   // changed status and moved the project's counters.
@@ -1085,7 +1096,10 @@ export async function upsertItem(
         $inc: { timelineCount: entries.length },
       },
       {
-        upsert: input.mustExist !== true,
+        // A guard is a statement about a document that already exists, so it
+        // never creates one: without this, a mismatch fell into the upsert
+        // path and either raised a duplicate key or filed a second card.
+        upsert: input.mustExist !== true && input.expect === undefined,
         returnDocument: 'after',
         includeResultMetadata: true,
       },
@@ -1110,6 +1124,9 @@ export async function upsertItem(
   // or a guarded write found the field already saying something else.
   if (!result.value) {
     if (input.expect && (await store.items.findOne({ projectId: project._id, slug }))) {
+      // The item is there and the guard did not match, which is the whole
+      // reason the guard exists.
+
       throw new ServiceError(
         409,
         'changed_underneath',

@@ -1089,6 +1089,37 @@ describe('moving an item into a column', () => {
       'and nothing was saved',
     );
 
+    // A guard is a statement about a card that exists, so it never files one,
+    // and it never carries a status: the transition has its own guard, and the
+    // two arriving together would move the card and then refuse the edit.
+    const { upsertItem } = await import('../src/service.js');
+    const projectDoc = (await harness.store.projects.findOne({ _id: project.id }))!;
+    await assert.rejects(
+      upsertItem(harness.store, projectDoc, {
+        slug: 'card',
+        title: 'x',
+        status: 'done',
+        expect: { title: 'The bridge fee' },
+        actor: 'operator',
+      }),
+      (error: { statusCode?: number; code?: string }) =>
+        error.statusCode === 400 && error.code === 'guarded_status',
+    );
+    await assert.rejects(
+      upsertItem(harness.store, projectDoc, {
+        slug: 'never-filed',
+        title: 'x',
+        expect: { title: 'something' },
+        actor: 'operator',
+      }),
+      (error: { statusCode?: number }) => error.statusCode === 404,
+    );
+    assert.equal(
+      await harness.store.items.countDocuments({ projectId: project.id, slug: 'never-filed' }),
+      0,
+      'a guarded write files nothing',
+    );
+
     // The form is on the card, and it is folded shut: an edit replaces part of
     // the record, and a note adds to it.
     const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
