@@ -1109,3 +1109,104 @@ with what `blocked` currently means here and deserves the operator's opinion;
 and an attempt counter that reopens failed work and escalates when the attempts
 run out, which is hygiene deciding to reopen somebody's card and is therefore
 not mine to switch on unasked.
+
+## The two proposals that came out of that audit, decided 2026-08-19
+
+Both were filed as questions for the operator and both came back through a
+decision audit, which is worth recording because the cheaper half of each
+proposal turned out to be the whole value.
+
+**Blocking dependencies: ship the data, never the status.** The tempting
+implementation sets `blocked` when a prerequisite is unfinished and clears it
+when the prerequisite closes. It is also wrong here, because `blocked` is
+published as the queue for work waiting on a person, in skill.md and in the
+operator's own headline. An engine writing it for a dependency two agents can
+settle between themselves puts work no human can act on into a human's list,
+and every edge case then resolves badly: a dropped blocker unblocks its
+dependent because the prerequisite was *abandoned*, a deleted one blocks on a
+slug nobody can find, hygiene re-blocks a card somebody holds a live lease on,
+and a cycle parks two cards in a queue with nothing anybody can do about them.
+
+So `blockedBy` is stored and never written by the server. It does two things an
+agent meets rather than reads about: `/next` does not offer a card whose
+blockers are unfinished, and a claim on one is refused with `blocked_by` naming
+each unfinished card, its status and its title. A named card nobody has filed
+counts as unfinished, because silently treating a typo as a finished
+prerequisite is the failure only a person can find.
+
+The answer is computed on the two paths that need it rather than kept as a
+counter. That was the other half of the decision: a denormalized count needs a
+fan-out write on every terminal crossing, a reverse index and a repair pass, and
+this repository already has a forty-line note about how hard its two existing
+counters were. Finishing a blocker now takes effect with nothing else running.
+
+The cost of reversal decided it. This version unwinds to one unread field, one
+paragraph of protocol and a refusal that stops firing. The version that writes
+the status leaves cards in a state only a person can repair, with no provenance
+to tell an engine-blocked card from a human-blocked one.
+
+**Attempt counting: cut, and not to a rule that defaults to off.** "Failed" is
+not observable from here. An expired claim is evidence a process stopped, which
+this codebase already says twice: `markStale` exempts held work because a
+heartbeat means somebody is on it, and the operator page treats an expired lease
+as the operator's problem. Charging an attempt for a crashed loop bills the card
+for the fleet's uptime. The other proxy is worse: `blocked` means waiting on a
+person, so counting it as a failure and reopening pulls work out of a human's
+queue and hands it back to the agent that just said it needs a human. Reopening
+is also not a mark, and "hygiene marks, agents unmark" is the invariant the
+whole engine rests on: it moves a status, clears `closedAt` and charges the item
+counter, which `upsertItem` refuses at the cap, so the rule would have had a
+failure mode with nobody to report it to.
+
+What was real in it is the crash loop nobody hears about, and that is a push
+rather than a rule on a card. It went into the timer pass that already existed.
+
+## A read may tidy, but it may not close, 2026-08-19
+
+Publishing MCP tool annotations turned a documentation question into a design
+one. Two tools said they were read-only, and several clients run a read-only
+tool without asking anybody; both of them triggered the whole hygiene sweep, so
+listing items could expire claims, drop contentless cards and close items whose
+source had gone quiet, unattended.
+
+Hygiene is now split by what a caller is allowed to cause. A read expires leases
+that have already lapsed, and nothing else. Writes and the five-minute timer do
+the rest. Expiry stays on the read path because a read is the only place its
+absence shows: a lapsed lease is free work the moment it lapses, but the row
+does not change until something clears it, so a poller asking for unclaimed work
+with `since` would never be told. Nothing else hygiene does has that property.
+
+It takes its own throttle stamp rather than sharing `lastSweptAt`. Sharing it
+meant a read could take the slot for a tenth of the work and leave the write a
+second later skipping rules it was the only trigger for.
+
+The annotations then say what is true rather than what is convenient.
+`list_items` and `board` are not read-only, because clearing a lease is a write,
+and the comment beside them says so. What they are is non-destructive, which is
+the half a client actually weighs.
+
+## The notice that exists because nothing happened, 2026-08-19
+
+Everything else in this server waits to be read, which is right for a record and
+useless for a fleet that died at three in the morning: an agent in a crash loop
+never files the question that would have told anybody, because filing one is
+work and it is not getting that far.
+
+The condition is two things, not one. Silence alone is a board somebody parked;
+silence plus hygiene's own judgement that the work is rotting is what a stopped
+fleet leaves behind. The threshold for "rotting" is the project's own stale
+setting rather than a number invented in the notifier.
+
+One message per quiet spell, not one per period: the stamp only re-arms when the
+board is written to again, so a month of silence is one message and a board that
+wakes up and stops again is a second. A notice that repeats on a timer is a
+notice people filter, and this one is about the absence of events, which does
+not become more true by being said twice.
+
+Two things learned from the review of it, both about messages that never
+arrive. Ordering the candidates by when each was last *told* starves everything
+behind twenty busy boards that have never been told anything; ordering by when
+each was last *looked at* turns the queue over. And a delivery of `discarded`,
+which is what a deployment with no mail provider answers, has to give the stamp
+back: keeping it marks the board as told for ever, including after somebody
+configures the provider.
