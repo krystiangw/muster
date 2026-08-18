@@ -54,6 +54,13 @@ export interface Escalation {
   acted_at: string | null;
   acted_by: string | null;
   acted_note: string | null;
+  /**
+   * When the human was told, which is a different question from whether they
+   * have replied. Null on a claimed board means nothing has gone out about this
+   * one yet: either it is younger than the periodic pass, or nothing is leaving
+   * the building at all.
+   */
+  notified_at: string | null;
   created_at: string;
 }
 

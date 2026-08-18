@@ -339,6 +339,35 @@ describe('counting the people, not the agents', () => {
     assert.equal((await insights(harness.store)).pages.signup ?? 0, before + 1);
   });
 
+  it('measures how long a human takes, not how long an agent takes', async () => {
+    // A board nobody has claimed has no human on it. Whatever answers there is
+    // holding the project token, which is an agent, or one of our own checks
+    // driving the published SDK against production, and those answer in
+    // seconds. Counting them says the operator replies instantly.
+    const ownerless = await createProject(harness, 'nobody owns this');
+    const filed = await harness.server.inject({
+      method: 'POST',
+      url: `${ownerless.api}/escalations`,
+      headers: authed(ownerless),
+      payload: { agent: 'agent', question: 'answered by whatever holds the token?' },
+    });
+    const before = await insights(harness.store);
+    await harness.server.inject({
+      method: 'PATCH',
+      url: `${ownerless.api}/escalations/${filed.json().escalation.id}`,
+      headers: authed(ownerless),
+      payload: { status: 'resolved', answer: 'instantly' },
+    });
+    await flushEvents();
+
+    const after = await insights(harness.store);
+    assert.equal(
+      after.behaviour.answersSampled,
+      before.behaviour.answersSampled,
+      'an answer on an unowned board is not a human answering',
+    );
+  });
+
   /**
    * The number that was missing the night every form on the capability pages
    * answered 403: a browser that is refused gets a page and tells nobody, and

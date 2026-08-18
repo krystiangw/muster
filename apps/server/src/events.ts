@@ -394,11 +394,25 @@ export async function insights(store: Store): Promise<Insights> {
     // Sorted before it is cut. An unsorted limit takes whatever the storage
     // engine hands back first, which past five hundred answers means a median
     // of an arbitrary old subset that silently stops moving.
-    store.escalations
-      .find({ answeredAt: { $ne: null } }, { projection: { createdAt: 1, answeredAt: 1 } })
-      .sort({ answeredAt: -1 })
-      .limit(ANSWER_SAMPLE)
-      .toArray(),
+    //
+    // Boards with an owner only. This is "how long does a human take", and a
+    // board nobody has claimed has no human on it: whatever answered was
+    // holding the project token, which is to say an agent, or one of our own
+    // checks. Those answer in seconds and would pull the number that matters
+    // toward zero.
+    store.projects
+      .find({ claimedBy: { $ne: null } }, { projection: { _id: 1 } })
+      .toArray()
+      .then((owned) =>
+        store.escalations
+          .find(
+            { answeredAt: { $ne: null }, projectId: { $in: owned.map((project) => project._id) } },
+            { projection: { createdAt: 1, answeredAt: 1 } },
+          )
+          .sort({ answeredAt: -1 })
+          .limit(ANSWER_SAMPLE)
+          .toArray(),
+      ),
     store.items.countDocuments({
       status: { $in: ['done', 'dropped'] },
       'timeline.by': 'hygiene',

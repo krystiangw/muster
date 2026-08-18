@@ -91,7 +91,12 @@ const reuse = async () => {
 
 const { client, how } = saved
   ? await reuse().catch(async (error) => {
-      console.log(`the board from last time is gone (${String(error).slice(0, 60)}), signing up again`);
+      // Gone is 404 or a token that no longer opens anything. Anything else,
+      // a bad minute on the provider, a 500, a response this package cannot
+      // parse, is the failure this tool exists to report, and signing up
+      // around it would both hide it and write the signup this run avoids.
+      if (error?.status !== 404 && error?.status !== 401) throw error;
+      console.log(`the board from last time is gone (${error.status}), signing up again`);
       return signUp();
     })
   : await signUp();
@@ -102,7 +107,12 @@ await step('summary', async () => {
   return `claimed=${summary.claimed} notice_sent_at=${summary.notice_sent_at}`;
 });
 await step('registerAgent', async () => (await client.registerAgent({ handle: 'sdk-smoke', scope: ['smoke:'] })).agent.handle);
-await step('upsert', async () => (await client.upsert({ slug: 'smoke:one', title: 'work the SDK wrote', priority: 1 })).item.slug);
+// `status: 'open'` on purpose, and load bearing on a reused board: without it
+// the item stays `done` from last time, the move below is not a transition, and
+// so it does not release the claim. The release at the end would then be an
+// ordinary release of live work rather than the case this tool was written for,
+// and it would pass while the regression was back.
+await step('upsert', async () => (await client.upsert({ slug: 'smoke:one', title: 'work the SDK wrote', status: 'open', priority: 1 })).item.slug);
 await step('claim', async () => {
   const claimed = await client.claim('smoke:one', 'sdk-smoke', 10);
   return claimed.ok ? `held until ${claimed.expires_at}` : `refused: held by ${claimed.held_by}`;
@@ -114,16 +124,32 @@ await step('next', async () => {
   const next = await client.next('sdk-smoke');
   return next.item ? next.item.slug : `nothing: ${next.reason}`;
 });
-await step('escalate', async () => (await client.escalate({ question: 'Does the published SDK reach the inbox?', agent: 'sdk-smoke', item_slug: 'smoke:one' })).escalation.id);
+let asked = null;
+await step('escalate', async () => {
+  asked = (await client.escalate({ question: 'Does the published SDK reach the inbox?', agent: 'sdk-smoke', item_slug: 'smoke:one' })).escalation.id;
+  return asked;
+});
 await step('inbox', async () => {
   const inbox = await client.inbox();
   return `${inbox.waiting.length} waiting, ${inbox.answers.length} answered`;
 });
 await step('board', async () => (await client.board()).totals.map((column) => `${column.key}:${column.count}`).join(' '));
-await step('move', async () => `landed in ${(await client.move('smoke:one', 'done')).landed_in ?? 'nowhere'}`);
+await step('move', async () => {
+  const landed = await client.move('smoke:one', 'done');
+  // Read back rather than assumed. The release below is only the case this tool
+  // was written for if closing actually let go of the claim, and an item that
+  // was already done would move without transitioning and keep it.
+  const { item } = await client.item('smoke:one');
+  if (item.claim !== null) throw new Error('closing did not release the claim, so the next step proves nothing');
+  return `landed in ${landed.landed_in ?? 'nowhere'}, claim cleared`;
+});
 // Last on purpose: closing released the claim, so this is the call that arrives
 // with nothing to do, which is the one that used to fail.
 await step('release after close', async () => `took it: ${(await client.release('smoke:one', 'sdk-smoke')).ok}`);
+// Closed rather than left waiting. A board this tool reuses would otherwise
+// collect one open question per run and hit the cap on the twenty first, and
+// every deploy after that would read as a broken SDK.
+await step('answer', async () => (asked ? `${(await client.answer(asked, 'resolved', 'closed by the smoke test')).escalation.status}` : 'nothing was asked'));
 
 console.log(failures === 0 ? '\nall good' : `\n${failures} failed`);
 process.exit(failures === 0 ? 0 : 1);

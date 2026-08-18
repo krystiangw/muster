@@ -245,4 +245,43 @@ describe('the typed SDK', () => {
       return true;
     });
   });
+
+  /**
+   * The types are a published promise about the responses, and they are
+   * released separately from them. A field added to a serializer and not to the
+   * interface is invisible: nothing fails, the package keeps working, and the
+   * consumer simply cannot see the thing we added. It happened the morning
+   * `notified_at` arrived.
+   *
+   * Read out of the two files rather than from the types, because interfaces do
+   * not exist at runtime and this is the check that matters: what the server
+   * puts in the object, and what the package says is in it.
+   */
+  it('describes every field the responses actually carry', async () => {
+    const read = async (path: string) =>
+      (await import('node:fs/promises')).readFile(new URL(path, import.meta.url), 'utf8');
+    const serializers = await read('../src/serialize.ts');
+    const types = await read('../../../packages/sdk/src/index.ts');
+
+    const emitted = (fn: string): string[] => {
+      const body = new RegExp(`export function ${fn}\\([^)]*\\)[^{]*\\{([\\s\\S]*?)\\n\\}`).exec(
+        serializers,
+      );
+      assert.ok(body, `no ${fn} in serialize.ts`);
+      return [...body[1]!.matchAll(/^ {4}([a-z_0-9]+):/gm)].map((match) => match[1]!);
+    };
+    const declared = (name: string): Set<string> => {
+      const body = new RegExp(`export interface ${name} \\{([\\s\\S]*?)\\n\\}`).exec(types);
+      assert.ok(body, `no ${name} in the SDK`);
+      return new Set([...body[1]!.matchAll(/^ {2}([a-z_0-9]+)\??:/gm)].map((match) => match[1]!));
+    };
+
+    for (const [fn, type] of [
+      ['itemJson', 'Item'],
+      ['escalationJson', 'Escalation'],
+    ] as const) {
+      const missing = emitted(fn).filter((key) => !declared(type).has(key));
+      assert.deepEqual(missing, [], `${type} does not describe what ${fn} returns`);
+    }
+  });
 });
