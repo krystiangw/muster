@@ -228,6 +228,53 @@ describe('one read, two doors', () => {
     );
   });
 
+  it('windows by since in every order, not only in the change feed', async () => {
+    // Reported by an agent on another board: "since is silently inert outside
+    // order=recent". It was not. The cutoff used was older than every item on
+    // the board, so every order returned the same page with it and without it,
+    // which is the filter working. Pinned here because the next person to read
+    // "recent is what since is for" can reach the same conclusion, and the fix
+    // for that reading is a test, not a sentence.
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'old', title: 'written before', actor: 'a' });
+    const cut = new Date();
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await post(project, '/items', { slug: 'new', title: 'written after', actor: 'a', priority: -3 });
+
+    for (const order of ['urgency', 'recent', 'id']) {
+      const windowed = await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/items?order=${order}&since=${encodeURIComponent(cut.toISOString())}`,
+        headers: authed(project),
+      });
+      assert.deepEqual(
+        windowed.json().items.map((item: { slug: string }) => item.slug),
+        ['new'],
+        `since holds in order=${order}`,
+      );
+
+      // And a cutoff older than the board is not a filter being ignored.
+      const wide = await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/items?order=${order}&since=2020-01-01T00:00:00.000Z`,
+        headers: authed(project),
+      });
+      assert.equal(wide.json().items.length, 2, `everything is after 2020 in order=${order}`);
+    }
+
+    // The default order is one of the three, and carries the window too: it is
+    // the call anybody writes first.
+    const plain = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/items?since=${encodeURIComponent(cut.toISOString())}`,
+      headers: authed(project),
+    });
+    assert.deepEqual(
+      plain.json().items.map((item: { slug: string }) => item.slug),
+      ['new'],
+    );
+  });
+
   it('stops a search that reads too long, and says so rather than answering nothing', async () => {
     // A search that matches nothing reads every item in the project, 1016 ms at
     // two hundred thousand of them, and the page that carries the search box

@@ -534,13 +534,13 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
                 type: 'string',
                 enum: ['urgency', 'id', 'recent'],
                 description:
-                  'urgency (default) is most urgent first. id is a stable order for reading everything back: priority and updatedAt change while you page, and an item that moves behind the cursor is one your export never saw. recent is the change feed: whatever happened last, first, and it is what `since` is for.',
+                  'urgency (default) is most urgent first. id is a stable order for reading everything back: priority and updatedAt change while you page, and an item that moves behind the cursor is one your export never saw. recent is whatever happened last, first, which is the order to poll a change feed in. `since` filters in every order, this one included; what recent changes is where the changed rows sit, not whether they are there.',
               },
               since: {
                 type: 'string',
                 format: 'date-time',
                 description:
-                  'Only what changed at or after this moment. Pass back the as_of from your previous read rather than your own clock, which is not the one that stamped these rows.',
+                  'Only what changed at or after this moment, in every order and not only in recent. Pass back the as_of from your previous read rather than your own clock, which is not the one that stamped these rows. A `since` older than everything on the board matches everything on the board: the same page you would get without it is the correct answer, not a filter being ignored.',
               },
               cursor: {
                 type: 'string',

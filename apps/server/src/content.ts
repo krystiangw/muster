@@ -265,6 +265,12 @@ curl -s "$MUSTER/items?order=recent&since=$LAST_AS_OF" -H "authorization: Bearer
 curl -s "$MUSTER/escalations?acknowledged=false" -H "authorization: Bearer $TOKEN"
 \`\`\`
 
+\`since\` filters in every order, not only in \`recent\`; what \`recent\` changes is
+where the changed rows sit, at the front, which is what makes a poll cheap. And
+a \`since\` older than everything on the board matches everything on the board:
+the same page you would get without it is the right answer there, not a filter
+being ignored.
+
 Hand back the \`as_of\` from your previous read, not your own clock: yours is
 not the one that stamped these rows. Every page of one walk reports the same
 \`as_of\`, the moment the walk began, so it does not matter which page you keep
