@@ -112,6 +112,34 @@ describe('stale marking', () => {
     assert.equal(item.timeline.at(-1)!.by, 'hygiene');
   });
 
+  it('clears a legacy flag when the holder lets go, and when the rule is off', async () => {
+    // Two ways the repair pass alone would never reach an item: the holder
+    // releases it before the next sweep, and a project that has since turned
+    // stale marking off entirely.
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'let-go', title: 'let go', actor: 'a' });
+    await post(project, '/items/let-go/claim', { agent: 'a' });
+    await harness.store.items.updateOne(
+      { projectId: project.id, slug: 'let-go' },
+      { $set: { stale: true, staleSince: new Date(Date.now() - 86_400_000) } },
+    );
+    await post(project, '/items/let-go/release', { agent: 'a' });
+    assert.equal((await itemDoc(project, 'let-go')).stale, false, 'letting go is a write like any other');
+
+    await post(project, '/items', { slug: 'rule-off', title: 'rule off', actor: 'a' });
+    await post(project, '/items/rule-off/claim', { agent: 'a' });
+    await harness.store.items.updateOne(
+      { projectId: project.id, slug: 'rule-off' },
+      { $set: { stale: true, staleSince: new Date(Date.now() - 86_400_000) } },
+    );
+    await harness.store.projects.updateOne(
+      { _id: project.id },
+      { $set: { 'rules.staleAfterHours': null } },
+    );
+    await sweepProject(harness.store, await projectDoc(project));
+    assert.equal((await itemDoc(project, 'rule-off')).stale, false);
+  });
+
   it('flags an untouched item without closing it, and never counts as activity', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'forgotten', title: 'forgotten', actor: 'a' });

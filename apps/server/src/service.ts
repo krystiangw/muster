@@ -1232,7 +1232,19 @@ export async function releaseItem(
   const item = await store.items.findOneAndUpdate(
     { projectId: project._id, slug: normalizeSlug(slug), 'claim.agent': agent },
     {
-      $set: { claim: null, updatedAt: now, touchedAt: now, lastActor: agent },
+      // Clearing the flag as well, because a release is an agent write like any
+      // other and every other one clears it. Without this an item that hygiene
+      // marked while it was held, back when held work was not exempt, would
+      // keep the mark for ever: the repair pass wants a live claim, and the
+      // marking pass skips anything already flagged.
+      $set: {
+        claim: null,
+        updatedAt: now,
+        touchedAt: now,
+        lastActor: agent,
+        stale: false,
+        staleSince: null,
+      },
       $push: {
         timeline: {
           $each: [

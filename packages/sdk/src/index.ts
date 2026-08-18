@@ -650,7 +650,13 @@ export class Muster {
     });
   }
 
-  async sweep(): Promise<{ swept: Record<string, number> }> {
+  /**
+   * Runs the hygiene rules now. `swept` counts what each rule acted on;
+   * `unmarked` appears only when a rule took a flag back *off* something,
+   * which is rare enough that reporting it as a zero every time would be
+   * noise.
+   */
+  async sweep(): Promise<{ swept: Record<string, number>; unmarked?: Record<string, number> }> {
     return this.request('POST', '/sweep');
   }
 

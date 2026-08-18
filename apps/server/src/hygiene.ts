@@ -116,9 +116,10 @@ export async function markStale(
   rules: HygieneRules,
   now: Date,
 ): Promise<HygieneOutcome> {
-  if (rules.staleAfterHours === null) return { rule: 'stale', affected: 0 };
-  const cutoff = hoursAgo(now, rules.staleAfterHours);
-  // First, undo what this rule got wrong before the exemption existed. Hygiene
+  // The repair runs first and unconditionally. A project that has since turned
+  // the rule off can still be carrying flags from when it was on, and those
+  // are exactly the ones nothing else will ever clear.
+  // Undo what this rule got wrong before the exemption existed. Hygiene
   // marks and agents unmark, so a rule that clears its own flag is a departure
   // worth naming: it is this rule correcting its own past output, on items
   // where the correction can never come from anywhere else. A heartbeat writes
@@ -144,6 +145,15 @@ export async function markStale(
       },
     ],
   );
+
+  if (rules.staleAfterHours === null) {
+    return {
+      rule: 'stale',
+      affected: 0,
+      ...(repaired.modifiedCount > 0 ? { unmarked: repaired.modifiedCount } : {}),
+    };
+  }
+  const cutoff = hoursAgo(now, rules.staleAfterHours);
 
   const result = await store.items.updateMany(
     {
