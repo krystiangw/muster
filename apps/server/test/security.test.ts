@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { redactCapabilities } from '../src/app.js';
-import { ensureIndexes } from '../src/db.js';
+import { connectStore, ensureIndexes } from '../src/db.js';
 import { hashToken } from '../src/ids.js';
 import {
   authed,
@@ -484,6 +484,23 @@ describe('starting up against a database that has already run', () => {
     const indexes = await harness.store.operatorCodes.indexes();
     const email = indexes.find((index) => index.name === 'email');
     assert.equal(email?.unique, true, 'and it ends up with the definition the code asked for');
+  });
+
+  it('opens a connection for a report without building anything', async () => {
+    // The report the operator runs against production says in its own header
+    // that it never writes. It reached for the same constructor the server
+    // uses, which builds every index and runs every migration on the way in:
+    // a promise nobody could rely on, and a command that fails outright on a
+    // connection that is only allowed to read.
+    const store = await connectStore(harness.config.mongoUri, 'never-touched-by-a-report');
+    try {
+      const indexes = await store.items.indexes().catch(() => []);
+      assert.deepEqual(indexes, [], 'a database nothing has written to stays that way');
+      const collections = await store.db.listCollections().toArray();
+      assert.deepEqual(collections, []);
+    } finally {
+      await store.close();
+    }
   });
 
   it('replaces the index that changed and leaves the unique one alone', async () => {

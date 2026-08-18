@@ -102,7 +102,17 @@ export interface Store {
   close(): Promise<void>;
 }
 
-export async function createStore(uri: string, dbName: string): Promise<Store> {
+/**
+ * The collections, and nothing done to them.
+ *
+ * Split out for the tools that read production with a credential that may not
+ * be allowed to write, and for the one that promises in its own header that it
+ * never writes. `createStore` builds the indexes and runs the migrations, which
+ * is right for a server starting up and wrong for a report: a read only report
+ * that quietly creates an index is a report that fails on a read only
+ * connection, and a promise nobody can rely on.
+ */
+export async function connectStore(uri: string, dbName: string): Promise<Store> {
   const client = new MongoClient(uri, {
     // Agents call this in a loop; a request should fail fast rather than hang
     // on a wedged primary and burn the caller's own timeout budget.
@@ -133,6 +143,11 @@ export async function createStore(uri: string, dbName: string): Promise<Store> {
     close: () => client.close(),
   };
 
+  return store;
+}
+
+export async function createStore(uri: string, dbName: string): Promise<Store> {
+  const store = await connectStore(uri, dbName);
   await ensureIndexes(store);
   await runMigrations(store);
   return store;

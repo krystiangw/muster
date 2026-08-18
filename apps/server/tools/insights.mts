@@ -24,7 +24,7 @@
  *
  * Reads only. It never writes, so running it against production is safe.
  */
-import { createStore } from '../src/db.js';
+import { connectStore } from '../src/db.js';
 import { insights } from '../src/events.js';
 
 const uri = process.env.MONGODB_URI;
@@ -37,7 +37,9 @@ if (!uri) {
   process.exit(1);
 }
 
-const store = await createStore(uri, dbName);
+// Not `createStore`: that one builds indexes and runs migrations, which is a
+// server starting up rather than a report being read.
+const store = await connectStore(uri, dbName);
 const { events, projects, items } = store;
 const since = (days: number) => new Date(Date.now() - days * 86_400_000);
 
