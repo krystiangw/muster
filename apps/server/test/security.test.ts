@@ -949,6 +949,70 @@ describe('a read link can ask for a project and never take one', () => {
  * a browser does, to every form the pages actually render, and it finds the next
  * such pair without anybody having to think of it.
  */
+describe('every link these pages render', () => {
+  /**
+   * A link that goes nowhere is invisible to a test that only asserts it is
+   * there, which is how the operator's "Your work" link spent an afternoon
+   * pointing at a board with the card shut: the assertion said the href
+   * existed. This follows every internal one and refuses a 404.
+   */
+  const linksOn = (html: string): string[] => {
+    const found = new Set<string>();
+    for (const link of html.matchAll(/href="(\/[^"]*)"/g)) {
+      const href = link[1]!
+        .replace(/&amp;/g, '&')
+        .replace(/&#39;/g, "'")
+        .split('#')[0]!;
+      if (href !== '') found.add(href);
+    }
+    return [...found];
+  };
+
+  it('goes somewhere, on every page a person is handed', async () => {
+    const project = await createProject(harness, 'linked');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    await post(project, '/items', {
+      slug: 'ops:bridge',
+      title: 'the bridge',
+      owner: 'owner@example.com',
+      status: 'blocked',
+      actor: 'errors-loop',
+    });
+    await post(project, '/escalations', {
+      question: 'Bridge it?',
+      agent: 'errors-loop',
+      item_slug: 'ops:bridge',
+    });
+    await claimForEmail(project, 'owner@example.com');
+    const session = await signIn(harness, 'owner@example.com');
+
+    const pages = ['/', '/docs', '/pricing', '/signup', `/r/${readToken}`, `/r/${readToken}/board`, '/operator'];
+    const checked = new Set<string>();
+    for (const page of pages) {
+      const rendered = await harness.server.inject({
+        method: 'GET',
+        url: page,
+        headers: { accept: 'text/html', cookie: session.cookie },
+      });
+      assert.equal(rendered.statusCode, 200, page);
+      for (const href of linksOn(rendered.body)) {
+        if (checked.has(href)) continue;
+        checked.add(href);
+        const followed = await harness.server.inject({
+          method: 'GET',
+          url: href,
+          headers: { accept: 'text/html', cookie: session.cookie },
+        });
+        assert.ok(
+          followed.statusCode < 400,
+          `${page} links to ${href}, which answers ${followed.statusCode}`,
+        );
+      }
+    }
+    assert.ok(checked.size > 12, `only ${checked.size} links were followed`);
+  });
+});
+
 describe('every form these pages render', () => {
   interface Rendered {
     page: string;
