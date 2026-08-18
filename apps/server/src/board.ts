@@ -398,6 +398,11 @@ export function applyForColumn(column: BoardColumn): BoardApply {
   // deliberately do not carry, so a move into such a column is the claim itself.
   if (column.match.claimed === true) derived.claim = true;
   if (column.match.claimed === false) derived.release = true;
+  // A move is a write and a write clears staleness, so a column for work that
+  // is not stale is reachable by moving into it. Naming the operation is what
+  // makes that visible: the alternative is an empty apply, which the board
+  // reads as "not a destination".
+  if (column.match.stale === false) derived.touch = true;
   return derived;
 }
 
@@ -851,6 +856,10 @@ function parseApply(raw: unknown, columnKey: string): BoardApply {
   if (source.release !== undefined) {
     if (typeof source.release !== 'boolean') throw bad('apply.release must be true or false.');
     apply.release = source.release;
+  }
+  if (source.touch !== undefined) {
+    if (typeof source.touch !== 'boolean') throw bad('apply.touch must be true or false.');
+    apply.touch = source.touch;
   }
   if (apply.claim && apply.release) {
     throw bad(`Column "${columnKey}" both claims and releases; it can do one or the other.`);

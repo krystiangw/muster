@@ -128,6 +128,12 @@ export interface BoardApply {
   priority?: number;
   claim?: boolean;
   release?: boolean;
+  /**
+   * For a column that asks for work which is not stale. Nothing is set: any
+   * write clears the flag, and a move is a write. It has a name so that such a
+   * column counts as a destination rather than deriving an empty apply.
+   */
+  touch?: boolean;
 }
 
 /**

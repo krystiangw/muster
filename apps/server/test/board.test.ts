@@ -1293,6 +1293,36 @@ describe('a layout that would trap finished work', () => {
     assert.ok(!page.body.includes('value="rotting"'));
   });
 
+  it('reaches a column whose only filter is freshness, because the move is the write', async () => {
+    // A column asking only for `stale: false` derived nothing to apply, so the
+    // board decided it was not a destination and a direct move answered
+    // column_has_no_move. The operation was always there: any agent write
+    // clears the flag, and a move is a write. It just had no name.
+    const project = await createProject(harness, 'fresh only');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    await put(project, '/board', {
+      rows: 'none',
+      columns: [
+        { key: 'fresh', title: 'Fresh', match: { stale: false } },
+        { key: 'rotting', title: 'Rotting', match: { stale: true } },
+      ],
+    });
+    await post(project, '/items', { slug: 'old', title: 'old', actor: 'a' });
+    await harness.store.items.updateOne(
+      { projectId: project.id, slug: 'old' },
+      { $set: { stale: true, staleSince: new Date(Date.now() - 86_400_000) } },
+    );
+
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.ok(page.body.includes('value="fresh"'), 'and the control offers it');
+
+    const moved = await post(project, '/items/old/move', { column: 'fresh', actor: 'op' });
+    assert.equal(moved.statusCode, 200);
+    assert.equal(moved.json().applied.touch, true, 'the move says what it did');
+    assert.equal(moved.json().item.stale, false);
+    assert.equal(moved.json().landed_in, 'fresh');
+  });
+
   it('keeps a column for fresh work as a destination, since a move makes it fresh', async () => {
     // The first version of the rule read "stale" as unreachable either way and
     // took the built-in signals preset's own column off the board. A move goes

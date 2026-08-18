@@ -231,6 +231,16 @@ export interface BoardApply {
   claim?: boolean;
   /** Releases the claim, for a column that means "back in the pool". */
   release?: boolean;
+  /**
+   * The move is the write, and the write is the point.
+   *
+   * For a column that asks for work that is not stale. Nothing has to be set:
+   * any write by an agent clears the flag, and a move is a write. Without a
+   * name for it, a column whose only filter is `"stale": false` derives an
+   * empty apply and the board decides it is not a destination, which leaves an
+   * ordinary column unreachable for a reason nobody can see.
+   */
+  touch?: boolean;
 }
 
 export interface BoardColumn {

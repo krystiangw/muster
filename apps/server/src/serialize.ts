@@ -101,6 +101,7 @@ export function boardApplyJson(apply: BoardApply): Record<string, unknown> {
     ...(apply.priority === undefined ? {} : { priority: apply.priority }),
     ...(apply.claim === undefined ? {} : { claim: apply.claim }),
     ...(apply.release === undefined ? {} : { release: apply.release }),
+    ...(apply.touch === undefined ? {} : { touch: apply.touch }),
   };
 }
 
