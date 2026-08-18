@@ -156,16 +156,20 @@ describe('B. agent entry', () => {
     assert.equal(mcp.json().transport, 'streamable-http');
 
     // Three surfaces once told a newcomer to run `npm install @muster/sdk`
-    // while the registry answered 404. The package is published now, under the
-    // name its owner chose, and this is what keeps the two ends together: the
-    // day it is unpublished or renamed, the install line has to go with it.
-    if (json.sdk?.published !== true) {
-      assert.equal(json.sdk?.npm, undefined, 'no package name until there is a package');
-      const skill = await harness.server.inject({ method: 'GET', url: '/skill.md' });
+    // while the registry answered 404. Both states are checked, because both
+    // have a way of going wrong: an advertised package that does not exist, and
+    // a published one the protocol forgets to name. The name is read from the
+    // card rather than written here, so a rename stays consistent by itself.
+    const skill = await harness.server.inject({ method: 'GET', url: '/skill.md' });
+    if (json.sdk?.published === true) {
+      assert.match(String(json.sdk.npm ?? ''), /^[a-z0-9@._/-]+$/, 'a published sdk is named');
       assert.ok(
-        !/npm install/.test(skill.body),
-        'and nothing tells an agent to install one',
+        skill.body.includes(`npm install ${json.sdk.npm}`),
+        `skill.md installs ${json.sdk.npm}, the package the card publishes`,
       );
+    } else {
+      assert.equal(json.sdk?.npm, undefined, 'no package name until there is a package');
+      assert.ok(!/npm install/.test(skill.body), 'and nothing tells an agent to install one');
     }
   });
 
