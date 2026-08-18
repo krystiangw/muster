@@ -164,6 +164,40 @@ describe('what the service knows about its own use', () => {
     }
   });
 
+  it('drops a board out of every stage at once when its signup falls out of the window', async () => {
+    const project = await createProject(harness, 'signed up before the log');
+    await post(project, '/agents', { handle: 'errors-loop', scope: [] });
+    await post(project, '/items', { slug: 'work', title: 'work', actor: 'errors-loop' });
+    await flushEvents();
+
+    const before = await insights(harness.store);
+
+    // Events are kept ninety days, so a board that signed up before that keeps
+    // writing here with no signup left to be counted against. In production
+    // five of the six boards writing were in exactly this state, and the stages
+    // being independent counts of different populations printed six hundred
+    // percent of signups as having written something.
+    await harness.store.events.deleteMany({ kind: 'signup', projectId: project.id });
+
+    const after = await insights(harness.store);
+    assert.equal(after.funnel.signups, before.funnel.signups - 1);
+    assert.equal(
+      after.funnel.withWork,
+      before.funnel.withWork - 1,
+      'a board with no signup in the window is in no stage below it either',
+    );
+    assert.equal(after.funnel.withAnAgent, before.funnel.withAnAgent - 1);
+    assert.equal(after.funnel.outsideWindow, before.funnel.outsideWindow + 1, 'and is visible');
+    assert.ok(after.behaviour.activationRate <= 1, 'so the percentage stays a percentage');
+
+    // The board is still there, still working. It is out of the funnel, not out
+    // of the service, and what counts the work still holds it.
+    assert.equal(
+      await harness.store.events.countDocuments({ kind: 'first_write', projectId: project.id }),
+      1,
+    );
+  });
+
   it('does not count a project that predates the marker as newly activated', async () => {
     const project = await createProject(harness, 'from before');
     await post(project, '/items', { slug: 'old', title: 'written long ago', actor: 'x' });

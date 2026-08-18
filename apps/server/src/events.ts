@@ -231,13 +231,33 @@ export function recordFirstWrite(store: Store, projectId: string, door: EventDoo
 
 export interface Insights {
   generatedAt: Date;
-  /** Projects, and how far each got. */
+  /**
+   * Projects, and how far each got.
+   *
+   * Every stage below `signups` counts boards that signed up inside this window
+   * and then reached that stage, rather than every board that ever reached it.
+   * Counted the other way, a stage can exceed the one above it, and it did: the
+   * first production reading of this said six hundred percent of signups wrote
+   * something, because five of the six boards writing here had signed up before
+   * events were logged at all. A funnel with a stage above a hundred percent is
+   * a funnel nobody believes twice, including the person who has to decide
+   * something with it.
+   */
   funnel: {
+    /** Reads of the protocol. Traffic, not boards: it has no project to belong to. */
     discovered: number;
     signups: number;
     withAnAgent: number;
     withWork: number;
     claimed: number;
+    /**
+     * Boards writing here whose signup is not in this window, so no stage can
+     * count them. Events are kept for ninety days, so this is both the boards
+     * older than the log and the ones whose signup has since expired out of it.
+     * Printed beside the funnel because a number nobody can see is a number
+     * somebody eventually rediscovers as a bug.
+     */
+    outsideWindow: number;
   };
   /**
    * Projects where a person asked the agents to hand the board over.
@@ -335,13 +355,71 @@ export async function insights(store: Store): Promise<Insights> {
     { $match: { 'project.claimedBy': { $ne: null } } },
   ];
 
+  /**
+   * One pass over the events a board leaves behind, grouped by board.
+   *
+   * The stages used to be four independent counts, and independent counts of
+   * different populations do not make a funnel: `first_write` counted every
+   * board that ever wrote, `signup` only the boards that signed up while this
+   * log existed, and dividing one by the other printed six hundred percent.
+   * Grouping by project first means every stage is asking about the same
+   * boards, which is what makes them comparable at all.
+   */
+  const stage = (...kinds: string[]): Record<string, unknown> => ({
+    $and: kinds.map((kind) => ({ $in: [kind, '$kinds'] })),
+  });
+  const cohortRows = store.events
+    .aggregate<{
+      signups: number;
+      withAnAgent: number;
+      withWork: number;
+      claimed: number;
+      outsideWindow: number;
+    }>([
+      {
+        $match: {
+          kind: { $in: ['signup', 'register', 'first_write', 'claim', 'accept'] },
+          projectId: { $ne: null },
+        },
+      },
+      { $group: { _id: '$projectId', kinds: { $addToSet: '$kind' } } },
+      {
+        $group: {
+          _id: null,
+          signups: { $sum: { $cond: [stage('signup'), 1, 0] } },
+          withAnAgent: { $sum: { $cond: [stage('signup', 'register'), 1, 0] } },
+          withWork: { $sum: { $cond: [stage('signup', 'first_write'), 1, 0] } },
+          claimed: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    { $in: ['signup', '$kinds'] },
+                    {
+                      $or: [
+                        { $in: ['claim', '$kinds'] },
+                        { $in: ['accept', '$kinds'] },
+                      ],
+                    },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+          outsideWindow: {
+            $sum: { $cond: [{ $not: { $in: ['signup', '$kinds'] } }, 1, 0] },
+          },
+        },
+      },
+    ])
+    .toArray();
+
   const [
     discovered,
-    signups,
-    registered,
-    firstWrites,
+    cohort,
     asked,
-    claims,
     doorRows,
     pageRows,
     viewsLastWeek,
@@ -358,35 +436,14 @@ export async function insights(store: Store): Promise<Insights> {
     busiest,
   ] = await Promise.all([
     store.events.countDocuments({ kind: 'discover' }),
-    store.events.countDocuments({ kind: 'signup' }),
-    // Projects that got an agent, not agents that got registered. One project
-    // with six loops is one project that reached this stage, and counting the
-    // registrations would push a funnel stage above the signups above it.
-    store.events
-      .aggregate<{ n: number }>([
-        { $match: { kind: 'register', projectId: { $ne: null } } },
-        { $group: { _id: '$projectId' } },
-        { $count: 'n' },
-      ])
-      .toArray(),
-    store.events.countDocuments({ kind: 'first_write' }),
+    // Every stage of the funnel, counted over one population of boards. Both
+    // doors into ownership are in it: a board handed over by its agents and
+    // accepted by a person is owned exactly as much as one claimed with a code,
+    // and the handover is the path our own documentation recommends.
+    cohortRows,
     store.events
       .aggregate<{ n: number }>([
         { $match: { kind: 'handover_request', projectId: { $ne: null } } },
-        { $group: { _id: '$projectId' } },
-        { $count: 'n' },
-      ])
-      .toArray(),
-    // Both doors into ownership, counted as projects rather than as events. A
-    // project handed over by an agent and accepted by a person is owned exactly
-    // as much as one claimed with a code, and the handover is the path our own
-    // documentation recommends, so counting only the code path understated the
-    // thing this number exists to measure. Counting the events instead would
-    // overstate it: one project can go through both doors, and a funnel stage
-    // above a hundred percent is a funnel nobody believes twice.
-    store.events
-      .aggregate<{ n: number }>([
-        { $match: { kind: { $in: ['claim', 'accept'] }, projectId: { $ne: null } } },
         { $group: { _id: '$projectId' } },
         { $count: 'n' },
       ])
@@ -465,6 +522,16 @@ export async function insights(store: Store): Promise<Insights> {
       .toArray(),
   ]);
 
+  // An empty database groups to no rows at all, which is a shape rather than a
+  // number, so it is turned into zeroes once here instead of at every use.
+  const counted = cohort[0] ?? {
+    signups: 0,
+    withAnAgent: 0,
+    withWork: 0,
+    claimed: 0,
+    outsideWindow: 0,
+  };
+
   const answerHours = answered
     .map((doc) => (doc.answeredAt.getTime() - doc.createdAt.getTime()) / 3_600_000)
     .filter((hours) => hours >= 0);
@@ -473,10 +540,11 @@ export async function insights(store: Store): Promise<Insights> {
     generatedAt: new Date(),
     funnel: {
       discovered,
-      signups,
-      withAnAgent: registered[0]?.n ?? 0,
-      withWork: firstWrites,
-      claimed: claims[0]?.n ?? 0,
+      signups: counted.signups,
+      withAnAgent: counted.withAnAgent,
+      withWork: counted.withWork,
+      claimed: counted.claimed,
+      outsideWindow: counted.outsideWindow,
     },
     handoverRequests: asked[0]?.n ?? 0,
     doors: Object.fromEntries(doorRows.map((row) => [row._id, row.count])),
@@ -492,8 +560,8 @@ export async function insights(store: Store): Promise<Insights> {
       staleItems,
     },
     behaviour: {
-      activationRate: signups === 0 ? 0 : firstWrites / signups,
-      claimRate: signups === 0 ? 0 : (claims[0]?.n ?? 0) / signups,
+      activationRate: counted.signups === 0 ? 0 : counted.withWork / counted.signups,
+      claimRate: counted.signups === 0 ? 0 : counted.claimed / counted.signups,
       medianAnswerHours: median(answerHours),
       answersSampled: answerHours.length,
       closedByHygiene: hygieneClosed,

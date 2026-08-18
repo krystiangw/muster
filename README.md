@@ -155,7 +155,7 @@ project id, with no address, token, body, user agent or IP, and it expires after
 ninety days.
 
 ```bash
-MONGODB_URI="$(heroku config:get MONGODB_URI -a muster-web)" node apps/server/tools/insights.mjs
+MONGODB_URI="$(heroku config:get MONGODB_URI -a muster-web)" npx tsx apps/server/tools/insights.mts
 ```
 
 A terminal command rather than a page: this is the operator of the service
