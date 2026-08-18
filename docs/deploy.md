@@ -57,6 +57,20 @@ domain this deployment does not own sends every reply to a stranger. Without it,
 the legacy plugin manifest is not published at all, because a manifest missing a
 required field is one a strict client throws away.
 
+`SITE_VERIFICATION` is optional too, and its absence is silent: every page
+renders without the `google-site-verification` meta tag and nothing says so.
+That silence cost an hour once, because a note claimed the tag was live when the
+variable had never been set. If you verify a search property with the HTML tag,
+set it and check the tag arrived:
+
+```bash
+heroku config:set SITE_VERIFICATION='<token from the search console>' -a muster-web
+curl -s https://musterboard.dev/ | grep -c google-site-verification   # expect 1
+```
+
+Verifying by DNS instead needs nothing from the app: the TXT record on the
+domain is the whole method, and `dig +short TXT <domain>` is how to see it.
+
 The repo already carries `Procfile`, `app.json` and a `heroku-postbuild` script,
 and pnpm comes from the `packageManager` field, exactly like `equity-analyst-web`.
 
