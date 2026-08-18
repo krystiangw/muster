@@ -505,15 +505,39 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       },
     );
 
-    scoped.get('/v1/:project/agents', { schema: { tags: ['agents'], summary: 'List agents' } }, async (request) => {
-      const { project } = auth(request);
-      const agents = await store.agents
-        .find({ projectId: project._id })
-        .sort({ lastSeenAt: -1 })
-        .limit(200)
-        .toArray();
-      return { agents: agents.map((a) => agentJson(a)) };
-    });
+    scoped.get(
+      '/v1/:project/agents',
+      {
+        schema: {
+          tags: ['agents'],
+          summary: 'List agents',
+          description:
+            'Everything registered here, and beside it every handle that has written to this board without registering. The second list is where a typo shows up: two spellings of one loop, or a name nobody described. POST /agents/{handle}/rename moves the work onto one of them.',
+        },
+      },
+      async (request) => {
+        const { project } = auth(request);
+        const agents = await store.agents
+          .find({ projectId: project._id })
+          .sort({ lastSeenAt: -1 })
+          .limit(200)
+          .toArray();
+        // The names on the work, minus the names that declared themselves. The
+        // browser has shown this since the filter existed; an agent auditing
+        // its own board over the API could see only the half that registered,
+        // which is the half that was never the problem.
+        const registered = new Set(agents.map((agent) => agent.handle));
+        const written = await store.items.distinct('lastActor', { projectId: project._id });
+        const seen = written
+          .filter(
+            (handle): handle is string =>
+              typeof handle === 'string' && handle !== '' && !registered.has(handle),
+          )
+          .sort()
+          .slice(0, 200);
+        return { agents: agents.map((a) => agentJson(a)), seen };
+      },
+    );
 
     // -------------------------------------------------------------- items
 

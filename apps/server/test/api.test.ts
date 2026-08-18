@@ -1107,6 +1107,60 @@ describe('who is writing, and by what name', () => {
     assert.deepEqual(fine.json().warnings ?? [], []);
   });
 
+  it('lists the names on the work beside the names that declared themselves', async () => {
+    // The browser has shown this since the filter existed. An agent auditing
+    // its own board over the API could see only the half that registered,
+    // which is the half that was never the problem.
+    const project = await createProject(harness);
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/agents`,
+      headers: authed(project),
+      payload: { handle: 'errors-loop', scope: [] },
+    });
+    for (const [slug, actor] of [
+      ['one', 'errors-loop'],
+      ['two', 'errors_loop'],
+      ['three', 'passer-by'],
+    ] as const) {
+      await harness.server.inject({
+        method: 'POST',
+        url: `${project.api}/items`,
+        headers: authed(project),
+        payload: { slug, title: slug, actor },
+      });
+    }
+
+    const listed = (
+      await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/agents`,
+        headers: authed(project),
+      })
+    ).json();
+    assert.deepEqual(
+      listed.agents.map((agent: { handle: string }) => agent.handle),
+      ['errors-loop'],
+    );
+    assert.deepEqual(listed.seen, ['errors_loop', 'passer-by']);
+
+    // And after consolidating, the list says so without being asked twice.
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/agents/errors_loop/rename`,
+      headers: authed(project),
+      payload: { to: 'errors-loop' },
+    });
+    const after = (
+      await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/agents`,
+        headers: authed(project),
+      })
+    ).json();
+    assert.deepEqual(after.seen, ['passer-by']);
+  });
+
   it('consolidates a handle that was already written two ways', async () => {
     // The warnings catch a typo the first time it is used, which does nothing
     // for a board that collected work under both spellings before anybody read
