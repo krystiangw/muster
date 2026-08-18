@@ -1270,7 +1270,26 @@ export async function releaseItem(
     { returnDocument: 'after' },
   );
   if (!item) {
-    throw new ServiceError(409, 'not_claim_holder', `You do not hold the claim on "${slug}".`);
+    // Asking to stop holding something nobody holds is not a failure: what the
+    // caller wanted is already true. This is the ordinary end of a piece of
+    // work, not an edge case, because closing an item releases its claim and
+    // the release in an agent's `finally` then arrives second. Refusing it made
+    // the documented sequence, claim, work, close, release, end in an
+    // exception. No timeline entry either: there was nothing to release, and a
+    // second "released" line is noise in the record.
+    //
+    // Held by somebody else is still a refusal. That is the case the guard
+    // exists for, and it is the opposite of this one.
+    const current = await store.items.findOne({ projectId: project._id, slug: normalizeSlug(slug) });
+    if (!current) {
+      throw new ServiceError(404, 'not_found', `No item "${slug}" in this project.`);
+    }
+    if (current.claim === null) return current as ItemDoc;
+    throw new ServiceError(
+      409,
+      'not_claim_holder',
+      `"${slug}" is held by ${current.claim.agent}, not by you.`,
+    );
   }
   return item as ItemDoc;
 }

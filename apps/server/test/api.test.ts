@@ -376,6 +376,38 @@ describe('claims', () => {
     const taken = await post(project, '/items/work/claim', { agent: 'agent-b' });
     assert.equal(taken.json().ok, true);
   });
+
+  it('takes a release of work nobody holds, and refuses one held by somebody else', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'work', title: 'work', actor: 'a' });
+    await post(project, '/items/work/claim', { agent: 'agent-a' });
+
+    // The ordinary end of a piece of work: closing releases the claim, so the
+    // release an agent runs in its `finally` arrives second and finds nothing
+    // to do. That is the sequence the protocol documents, and it used to end in
+    // a 409.
+    await post(project, '/items', { slug: 'work', status: 'done', actor: 'agent-a' });
+    const after = await post(project, '/items/work/release', { agent: 'agent-a' });
+    assert.equal(after.statusCode, 200);
+    const timeline = after.json().item.timeline_count;
+
+    // And again, to make the point that it is the state and not the sequence:
+    // nothing more is written for a release with nothing to release.
+    const again = await post(project, '/items/work/release', { agent: 'agent-a' });
+    assert.equal(again.statusCode, 200);
+    assert.equal(again.json().item.timeline_count, timeline, 'nothing to say twice');
+
+    // Somebody else's claim is the case the refusal is for, and it still is.
+    await post(project, '/items', { slug: 'held', title: 'held', actor: 'a' });
+    await post(project, '/items/held/claim', { agent: 'agent-a' });
+    const notYours = await post(project, '/items/held/release', { agent: 'agent-b' });
+    assert.equal(notYours.statusCode, 409);
+    assert.match(notYours.json().message, /agent-a/, 'and it names who does hold it');
+
+    // A slug that was never written is a different mistake and says so.
+    const missing = await post(project, '/items/never-existed/release', { agent: 'agent-a' });
+    assert.equal(missing.statusCode, 404);
+  });
 });
 
 describe('next', () => {

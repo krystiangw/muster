@@ -223,20 +223,46 @@ export async function runMigrations(store: Store): Promise<void> {
    *
    * Runs on every boot rather than once, because a claimed project that has
    * never had a question is missing this field legitimately and always will be,
-   * so there is no "everything is backfilled" state to detect. It groups a
-   * collection the escalation cap and the TTL both keep small.
+   * so there is no "everything is backfilled" state to detect. Which is exactly
+   * why it is driven from the projects that lack it, in pages, and writes a
+   * page in one round trip: asking the whole escalation history instead, and
+   * then updating project by project, would have grown with every project that
+   * ever sent a notice and would have been paid at every restart, for nothing.
    */
-  const lastNotices = await store.escalations
-    .aggregate<{ _id: string; last: Date }>([
-      { $match: { notifiedAt: { $ne: null } } },
-      { $group: { _id: '$projectId', last: { $max: '$notifiedAt' } } },
-    ])
-    .toArray();
-  for (const notice of lastNotices) {
-    await store.projects.updateOne(
-      { _id: notice._id, escalationNoticeSentAt: { $exists: false } },
-      { $set: { escalationNoticeSentAt: notice.last } },
-    );
+  let unstamped: string | null = null;
+  for (;;) {
+    const page = await store.projects
+      .find(
+        {
+          escalationNoticeSentAt: { $exists: false },
+          ...(unstamped === null ? {} : { _id: { $gt: unstamped } }),
+        },
+        { projection: { _id: 1 } },
+      )
+      .sort({ _id: 1 })
+      .limit(BATCH)
+      .toArray();
+    if (page.length === 0) break;
+
+    const ids = page.map((project) => project._id);
+    const lastNotices = await store.escalations
+      .aggregate<{ _id: string; last: Date }>([
+        { $match: { projectId: { $in: ids }, notifiedAt: { $ne: null } } },
+        { $group: { _id: '$projectId', last: { $max: '$notifiedAt' } } },
+      ])
+      .toArray();
+    if (lastNotices.length > 0) {
+      await store.projects.bulkWrite(
+        lastNotices.map((notice) => ({
+          updateOne: {
+            filter: { _id: notice._id, escalationNoticeSentAt: { $exists: false } },
+            update: { $set: { escalationNoticeSentAt: notice.last } },
+          },
+        })),
+      );
+    }
+    unstamped = ids[ids.length - 1]!;
+    if (page.length < BATCH) break;
   }
 }
 
