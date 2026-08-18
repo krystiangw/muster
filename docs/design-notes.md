@@ -846,8 +846,10 @@ stop finding `svc-oauth-token` when somebody types `auth`, on a product whose ow
 slugs are namespaced and hyphenated. It also buys an eleventh index on the
 collection every write pays for, larger than the `labels` index this repository
 deleted two hours earlier for buying nothing. Worth revisiting on a trigger and
-not before: any single project passing fifty thousand items, or a search bearing
-read passing 300 ms at the ninety ninth percentile in production. The first of
-those is printed by `tools/insights.mts` as "largest board, items stored", with
-a line under it naming this note once it is past. A trigger nobody measures is
-a sentence in a document, and this repository has enough of those.
+not before, and both triggers are measured rather than described. Any single
+project passing fifty thousand items, printed by `tools/insights.mts` as
+"largest board, items stored", with a line under it naming this note once it is
+past. And any search that actually hits the clock: each one is recorded as a
+refusal with the reason `search_too_slow`, so the question is "has this happened
+here at all" rather than a percentile nothing computes. A trigger nobody
+measures is a sentence in a document, and this repository has enough of those.

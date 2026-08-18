@@ -1485,7 +1485,7 @@ async function listItems(
   try {
     return (await cursor.toArray()) as ItemDoc[];
   } catch (error) {
-    const stopped = words ? searchTooSlow(error) : null;
+    const stopped = words ? searchTooSlow(store, error) : null;
     if (stopped) throw stopped;
     throw error;
   }
@@ -1522,9 +1522,14 @@ export const SEARCH_BUDGET_MS = 500;
  * stopped search means: an empty page would say there is nothing to find, which
  * is precisely what nobody established.
  */
-export function searchTooSlow(error: unknown): ServiceError | null {
+export function searchTooSlow(store: Store, error: unknown): ServiceError | null {
   const failure = error as { code?: unknown; codeName?: unknown } | null;
   if (failure?.code !== 50 && failure?.codeName !== 'MaxTimeMSExpired') return null;
+  // Counted, because otherwise the only evidence that a board outgrew its
+  // search is somebody mentioning that the box stopped working. This is also
+  // the trigger the search decision was deferred on: not a percentile nothing
+  // computes, but "has this ever happened here at all".
+  record(store, 'refused', { door: 'http', detail: 'search_too_slow' });
   return new ServiceError(
     503,
     'search_too_slow',

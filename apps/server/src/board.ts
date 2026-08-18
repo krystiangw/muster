@@ -280,7 +280,7 @@ export async function loadBoard(
   // the same door: this one has no rate limiter in front of it at all.
   if (options.q) scan.maxTimeMS(SEARCH_BUDGET_MS);
   const items = (await scan.toArray().catch((error: unknown) => {
-    const stopped = options.q ? searchTooSlow(error) : null;
+    const stopped = options.q ? searchTooSlow(store, error) : null;
     if (stopped) throw stopped;
     throw error;
   })) as ItemDoc[];

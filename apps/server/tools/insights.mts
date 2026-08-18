@@ -269,8 +269,11 @@ if (answerDoorRows.length > 0) {
 // this check at all. `cross-site` and `origin` climbing together is somebody
 // probing the forms; either one climbing while the boards are quiet is this
 // service refusing pages it served itself, which is what it did for a night.
+// `search_too_slow` is a different animal in the same list: a board that has
+// outgrown a search that reads everything, which is the one number the search
+// decision in docs/design-notes.md was deferred on.
 const refusedRows = Object.entries(report.behaviour.refusedForms).sort((a, b) => b[1] - a[1]);
-console.log("\nForms refused as somebody else's page");
+console.log('\nRefused, by reason');
 row('all of them', refusedRows.reduce((total, [, n]) => total + n, 0));
 for (const [reason, n] of refusedRows) row(`  ${reason}`, n);
 

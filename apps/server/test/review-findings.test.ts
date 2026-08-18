@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { SEARCH_MAX_CHARS, claimProjectWithEmail, upsertItem } from '../src/service.js';
+import { flushEvents } from '../src/events.js';
 import {
   authed,
   createProject,
@@ -287,6 +288,17 @@ describe('one read, two doors', () => {
       assert.equal(page.statusCode, 200);
       assert.match(page.body, /was reading for longer than this board allows/);
       assert.match(page.body, /ops:backups/, 'and the board underneath it is the whole board');
+
+      // Counted, because otherwise the only evidence that a board has outgrown
+      // its search is somebody mentioning that the box stopped working.
+      await flushEvents();
+      assert.ok(
+        (await harness.store.events.countDocuments({
+          kind: 'refused',
+          detail: 'search_too_slow',
+        })) >= 2,
+        'both doors record the stop',
+      );
     } finally {
       (harness.store.items as { find: typeof realFind }).find = realFind;
     }
