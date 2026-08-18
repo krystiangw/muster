@@ -1842,6 +1842,7 @@ export async function createEscalation(
     acknowledgedAt: null,
     acknowledgedBy: null,
     acknowledgedNote: null,
+    notifiedAt: null,
     createdAt: now,
     updatedAt: now,
   };

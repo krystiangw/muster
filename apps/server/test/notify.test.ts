@@ -140,6 +140,75 @@ describe('the mail an escalation sends', () => {
     });
   });
 
+  it('comes back for the question the hour swallowed', async () => {
+    // The throttle is right for a burst and wrong for the question that lands
+    // inside another question's hour: nothing is sent, and the only record of
+    // it is a page nobody has open. Two of the three questions on this
+    // project's own board were in exactly that state this morning.
+    await withMailer(async (harness, sent) => {
+      const project = await claimedProject(harness, 'owner@example.com');
+      await ask(harness, project, 'first, which sends');
+      await ask(harness, project, 'second, which the hour swallows');
+      await ask(harness, project, 'third, same');
+      assert.equal(sent.length, 1, 'one message for the burst');
+
+      // The hour passes, and the swallowed questions are old enough to count
+      // as missed rather than as a notice still on its way.
+      await harness.store.projects.updateOne(
+        { _id: project.id },
+        { $set: { escalationNotifiedAt: new Date(Date.now() - 2 * 3_600_000) } },
+      );
+      await harness.store.escalations.updateMany(
+        { projectId: project.id, notifiedAt: null },
+        { $set: { createdAt: new Date(Date.now() - 30 * 60_000) } },
+      );
+
+      assert.equal(await harness.notifier.sweepMissed(), 1, 'one project heard from');
+      assert.equal(sent.length, 2);
+      assert.match(sent[1]!.notice.question, /second/, 'the oldest one nobody had been told about');
+
+      // And it does not turn into a nag: the hour it just claimed still holds.
+      assert.equal(await harness.notifier.sweepMissed(), 0);
+      assert.equal(sent.length, 2);
+
+      // The third one is still owed a mention, and gets it an hour later.
+      await harness.store.projects.updateOne(
+        { _id: project.id },
+        { $set: { escalationNotifiedAt: new Date(Date.now() - 2 * 3_600_000) } },
+      );
+      assert.equal(await harness.notifier.sweepMissed(), 1);
+      assert.match(sent[2]!.notice.question, /third/);
+
+      // Nothing is left owed, so a later pass is silent.
+      await harness.store.projects.updateOne(
+        { _id: project.id },
+        { $set: { escalationNotifiedAt: new Date(Date.now() - 2 * 3_600_000) } },
+      );
+      assert.equal(await harness.notifier.sweepMissed(), 0);
+      assert.equal(sent.length, 3);
+    });
+  });
+
+  it('says nothing about a question that was answered before anybody was told', async () => {
+    await withMailer(async (harness, sent) => {
+      const project = await claimedProject(harness, 'owner@example.com');
+      await ask(harness, project, 'first, which sends');
+      const swallowed = await ask(harness, project, 'second, which the hour swallows');
+      const id = swallowed.json().escalation.id;
+      await harness.store.escalations.updateOne(
+        { _id: id },
+        { $set: { status: 'resolved', answeredAt: new Date(), createdAt: new Date(Date.now() - 30 * 60_000) } },
+      );
+      await harness.store.projects.updateOne(
+        { _id: project.id },
+        { $set: { escalationNotifiedAt: new Date(Date.now() - 2 * 3_600_000) } },
+      );
+
+      assert.equal(await harness.notifier.sweepMissed(), 0, 'a settled question needs no message');
+      assert.equal(sent.length, 1);
+    });
+  });
+
   it('gives the hour back when the message did not leave', async () => {
     // A provider having a bad day would otherwise buy an hour of silence on the
     // strength of a message nobody received.

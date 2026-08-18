@@ -7,7 +7,7 @@ import type { Config } from './config.js';
 import type { Store } from './db.js';
 import { createMailer, type Mailer } from './email.js';
 import { layout, setSiteVerification } from './html.js';
-import { createNotifier } from './notify.js';
+import { createNotifier, type Notifier } from './notify.js';
 import { RateLimiter } from './rateLimit.js';
 import { registerAgentFiles } from './routes/agentfiles.js';
 import { registerApi } from './routes/api.js';
@@ -20,6 +20,8 @@ import { ServiceError } from './service.js';
 export interface App {
   server: FastifyInstance;
   limiter: RateLimiter;
+  /** Exposed so the process can run the periodic pass that requests cannot. */
+  notifier: Notifier;
 }
 
 /**
@@ -301,5 +303,5 @@ export async function buildApp(
     });
   });
 
-  return { server, limiter };
+  return { server, limiter, notifier };
 }

@@ -4,6 +4,7 @@ import { buildApp, type BuildOverrides } from '../src/app.js';
 import { loadConfig, type Config } from '../src/config.js';
 import { createStore, type Store } from '../src/db.js';
 import { hashToken } from '../src/ids.js';
+import type { Notifier } from '../src/notify.js';
 import type { RateLimiter } from '../src/rateLimit.js';
 
 export interface Harness {
@@ -11,6 +12,7 @@ export interface Harness {
   store: Store;
   config: Config;
   limiter: RateLimiter;
+  notifier: Notifier;
   stop: () => Promise<void>;
 }
 
@@ -57,7 +59,7 @@ export async function startHarness(
     ...overrides,
   });
   const store = await createStore(config.mongoUri, config.mongoDb);
-  const { server, limiter } = await buildApp(config, store, build);
+  const { server, limiter, notifier } = await buildApp(config, store, build);
   await server.ready();
 
   return {
@@ -65,6 +67,7 @@ export async function startHarness(
     store,
     config,
     limiter,
+    notifier,
     stop: async () => {
       limiter.stop();
       await server.close();

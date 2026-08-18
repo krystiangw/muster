@@ -10,7 +10,7 @@ const SWEEP_BATCH = 50;
 async function main(): Promise<void> {
   const config = loadConfig();
   const store = await createStore(config.mongoUri, config.mongoDb);
-  const { server, limiter } = await buildApp(config, store);
+  const { server, limiter, notifier } = await buildApp(config, store);
 
   /**
    * The scheduled pass. Requests already trigger a throttled sweep of the
@@ -38,6 +38,15 @@ async function main(): Promise<void> {
         }
         if (touched > 0) {
           server.log.info({ projects: stale.length, changes: touched }, 'hygiene sweep');
+        }
+
+        // The other thing a quiet board cannot do for itself. A question filed
+        // inside another question's hour is silently not sent, and the only
+        // record of it is a page nobody has open; this is where it finally
+        // reaches somebody.
+        const told = await notifier.sweepMissed();
+        if (told > 0) {
+          server.log.info({ projects: told }, 'told somebody about questions that were missed');
         }
       } catch (error) {
         server.log.error({ err: error }, 'hygiene sweep failed');

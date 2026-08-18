@@ -140,6 +140,16 @@ export interface EscalationDoc {
   answeredAt: Date | null;
   itemSlug: string | null;
   /**
+   * When a message about this question left the building, if one ever did.
+   *
+   * The immediate notice is throttled to one per project per hour, which is
+   * right for a burst and wrong for the question that arrives inside somebody
+   * else's hour: without this it would be swallowed and the only trace of it
+   * would be a page nobody has open. Null means nobody has been told yet, and
+   * something periodic will.
+   */
+  notifiedAt?: Date | null;
+  /**
    * When an agent said it had acted on the answer, and what it did.
    *
    * A separate axis from the four statuses on purpose: those are the human's

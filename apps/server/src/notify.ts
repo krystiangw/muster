@@ -29,8 +29,32 @@ import type { EscalationDoc, ProjectDoc } from './types.js';
  */
 const NOTIFY_EVERY_MS = 60 * 60 * 1000;
 
+/**
+ * How long a question waits before the periodic pass counts it as missed.
+ *
+ * Long enough that a notice already on its way is not raced, short enough that
+ * a question filed inside somebody else's hour still reaches a person while
+ * the agent that asked it is plausibly still around.
+ */
+const MISSED_AFTER_MS = 10 * 60 * 1000;
+
+/** How many projects one periodic pass will look after. */
+const REMINDER_BATCH = 20;
+
 export interface Notifier {
   escalationRaised(project: ProjectDoc, escalation: EscalationDoc): Promise<void>;
+  /**
+   * The questions the hourly throttle swallowed.
+   *
+   * The immediate notice is one per project per hour, which is right for a
+   * burst and wrong for the question that lands inside another question's
+   * hour: nothing is sent, and the only record is a page nobody has open. This
+   * runs on a timer, finds questions nobody was ever told about, and sends one
+   * message per project naming the oldest of them. Every question is covered
+   * by exactly one message, and no project gets more than one an hour, so
+   * repairing the hole does not turn into a nag.
+   */
+  sweepMissed(): Promise<number>;
 }
 
 export function createNotifier(deps: {
@@ -41,7 +65,7 @@ export function createNotifier(deps: {
 }): Notifier {
   const { store, config, mailer, log } = deps;
 
-  return {
+  const notifier: Notifier = {
     async escalationRaised(project, escalation) {
       const now = new Date();
       let before: ProjectDoc | null = null;
@@ -102,6 +126,12 @@ export function createNotifier(deps: {
         if (delivery !== 'sent') {
           log(`escalation notice for ${project._id} was ${delivery}, not sent`);
         }
+        // Only the one this message named. The others keep waiting to be
+        // mentioned by name, which is what the periodic pass is for: a count
+        // in somebody else's message is not being told about your question.
+        await store.escalations
+          .updateOne({ _id: escalation._id }, { $set: { notifiedAt: now } })
+          .catch(() => undefined);
       } catch (error) {
         // An hour of silence is a worse failure than a duplicate message, so a
         // send that threw gives the hour back. Guarded on our own stamp: if a
@@ -116,5 +146,52 @@ export function createNotifier(deps: {
         log(`escalation notice for ${project._id} failed: ${(error as Error).message}`);
       }
     },
+
+    async sweepMissed() {
+      const now = new Date();
+      const missedSince = new Date(now.getTime() - MISSED_AFTER_MS);
+      // Open, never answered, and nobody was ever told. Grouped by project
+      // because the throttle is per project: one message covers whatever that
+      // board has accumulated.
+      const projects = await store.escalations
+        .aggregate<{ _id: string; oldest: EscalationDoc }>([
+          {
+            $match: {
+              status: 'open',
+              createdAt: { $lte: missedSince },
+              $or: [{ notifiedAt: null }, { notifiedAt: { $exists: false } }],
+            },
+          },
+          { $sort: { createdAt: 1 } },
+          { $group: { _id: '$projectId', oldest: { $first: '$$ROOT' } } },
+          { $limit: REMINDER_BATCH },
+        ])
+        .toArray();
+
+      let sent = 0;
+      for (const entry of projects) {
+        const project = await store.projects.findOne({ _id: entry._id });
+        if (!project?.claimedBy) continue;
+        if (await notifyOnce(project, entry.oldest)) sent += 1;
+      }
+      return sent;
+    },
   };
+
+  return notifier;
+
+  /**
+   * Whether a message actually left, which the periodic pass needs and the
+   * request path does not: an agent filing a question does not wait to hear
+   * whether the operator's mail provider was reachable. The stamp is the
+   * evidence, because only the send path writes it.
+   */
+  async function notifyOnce(project: ProjectDoc, escalation: EscalationDoc): Promise<boolean> {
+    await notifier.escalationRaised(project, escalation);
+    const stamped = await store.escalations.countDocuments({
+      _id: escalation._id,
+      notifiedAt: { $ne: null },
+    });
+    return stamped > 0;
+  }
 }
