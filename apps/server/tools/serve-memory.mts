@@ -8,6 +8,11 @@
  *
  *   npx tsx apps/server/tools/serve-memory.mts        # http://127.0.0.1:4600
  *   PORT=4700 npx tsx apps/server/tools/serve-memory.mts
+ *   PORT=0 npx tsx apps/server/tools/serve-memory.mts    # any free port, printed
+ *
+ * The line it prints carries the address it actually bound, which is what makes
+ * `PORT=0` useful to a script: nothing has to agree on a number in advance, and
+ * a port somebody else is already holding cannot be mistaken for this one.
  *
  * The limits are lifted rather than merely raised. A soak fires thousands of
  * writes a minute from one address, and against production limits it would be
@@ -31,8 +36,8 @@ const config = loadConfig({
 });
 const store = await createStore(config.mongoUri, config.mongoDb);
 const { server } = await buildApp(config, store);
-await server.listen({ port, host: '127.0.0.1' });
-console.log(`listening on http://127.0.0.1:${port}`);
+const address = await server.listen({ port, host: '127.0.0.1' });
+console.log(`listening on ${address}`);
 
 const stop = async () => {
   await server.close();

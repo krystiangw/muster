@@ -14,43 +14,70 @@
  * collection, permanently, because nothing repairs a counter that is too low.
  */
 import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-const PORT = Number(process.env.PORT ?? 4601);
-const BASE = `http://127.0.0.1:${PORT}`;
 const rounds = process.argv[2] ?? '400';
+// Generous, and a bound rather than a guess: the first run on a machine has to
+// download a MongoDB binary before it can listen at all.
+const READY_TIMEOUT_MS = Number(process.env.SOAK_STARTUP_MS ?? 300_000);
 
-const server = spawn('npx', ['tsx', 'apps/server/tools/serve-memory.mts'], {
-  env: { ...process.env, PORT: String(PORT) },
-  stdio: ['ignore', 'inherit', 'inherit'],
+
+// Through the workspace that has it. `tsx` is a dependency of the server, not
+// of the repository root, so a root `npx` goes to the registry for a copy of
+// something `pnpm install` already put on this disk.
+//
+// On a port of its own choosing, and the address comes back from the child.
+// Agreeing on a number in advance is how a soak ends up writing thousands of
+// items into whatever else happens to be listening: another copy of this
+// server, or a development one pointed at a real database. Both answer /health
+// exactly as ours would.
+const server = spawn('pnpm', ['--dir', 'apps/server', 'exec', 'tsx', 'tools/serve-memory.mts'], {
+  env: { ...process.env, PORT: '0' },
+  stdio: ['ignore', 'pipe', 'inherit'],
 });
-const done = new Promise((resolve) => server.on('exit', resolve));
+let serverExit = null;
+const done = new Promise((resolve) =>
+  server.on('exit', (code, signal) => {
+    serverExit = { code, signal };
+    resolve();
+  }),
+);
 
-const up = async () => {
-  for (let attempt = 0; attempt < 60; attempt += 1) {
-    try {
-      if ((await fetch(`${BASE}/health`)).ok) return true;
-    } catch {
-      // Not listening yet. Mongo takes a moment to come up the first time it is
-      // asked to, and a great deal longer if it has to download itself.
-    }
-    await sleep(1000);
-  }
-  return false;
-};
+const address = await new Promise((resolve) => {
+  const lines = createInterface({ input: server.stdout });
+  lines.on('line', (line) => {
+    console.log(line);
+    const listening = /listening on (http:\/\/\S+)/.exec(line);
+    if (listening) resolve(listening[1]);
+  });
+  // Either of the two ways this ends without an address: the child died, or it
+  // is taking longer than any first run reasonably does.
+  void done.then(() => resolve(null));
+  void sleep(READY_TIMEOUT_MS).then(() => resolve(null));
+});
 
-if (!(await up())) {
-  console.error('the server never answered, so there is nothing to soak');
+if (address === null) {
+  console.error(
+    serverExit
+      ? `the server exited before it was listening (${serverExit.signal ?? `code ${serverExit.code}`})`
+      : 'the server never said where it was listening, so there is nothing to soak',
+  );
   server.kill('SIGTERM');
   process.exit(1);
 }
+const BASE = address;
 
 const soak = spawn('node', ['tools/soak.mjs', rounds], {
   env: { ...process.env, BASE },
   stdio: ['ignore', 'inherit', 'inherit'],
 });
-const verdict = await new Promise((resolve) => soak.on('exit', resolve));
+// A run killed by a signal reports no code at all, and reading that as zero
+// would turn an out-of-memory kill into a release check that passed.
+const verdict = await new Promise((resolve) =>
+  soak.on('exit', (code, signal) => resolve(signal ? 1 : (code ?? 1))),
+);
 
 server.kill('SIGTERM');
 await Promise.race([done, sleep(5000)]);
-process.exit(verdict ?? 0);
+process.exit(verdict);
