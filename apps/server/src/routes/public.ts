@@ -1165,6 +1165,21 @@ ${
     if (!(await readableBy(store, request, project))) {
       return reply.code(404).type('text/html; charset=utf-8').send(noSuchProject(request));
     }
+    // A form sends every field it has, so narrowing by one leaves the other
+    // three in the URL as `owner=&label=&q=`. That URL is what somebody copies
+    // to somebody else, so the empties are dropped once and the page is drawn
+    // for the address that stays in the bar. Before the counting and before
+    // the ceiling: this bounce is the same reader on the same page, and
+    // charging them twice for one filter is a board that answers 429 to
+    // somebody who pressed Enter once.
+    const raw = new URLSearchParams(request.url.split('?')[1] ?? '');
+    if ([...raw.entries()].some(([, value]) => value === '')) {
+      const kept = new URLSearchParams();
+      for (const [name, value] of raw.entries()) if (value !== '') kept.append(name, value);
+      const canonical = kept.toString();
+      return reply.redirect(`/r/${readToken}/board${canonical === '' ? '' : `?${canonical}`}`, 303);
+    }
+
     if (!limitReads(request, reply)) return reply;
     // Counted once the page is actually going to be drawn. A stale bookmark and
     // a token probe both end above this line, and neither is somebody reading.
@@ -1189,18 +1204,6 @@ ${
     // stop doing that while somebody is typing into one.
     const openCard = one(query.card)?.slice(0, 200) ?? '';
     const openNew = one(query.new) === '1';
-    // A form sends every field it has, so narrowing by one leaves the other
-    // three in the URL as `owner=&label=&q=`. That URL is the thing somebody
-    // copies to somebody else, so the empties are dropped once, here, and the
-    // page is drawn for the address that stays in the bar.
-    const raw = new URLSearchParams(request.url.split('?')[1] ?? '');
-    if ([...raw.entries()].some(([, value]) => value === '')) {
-      const kept = new URLSearchParams();
-      for (const [name, value] of raw.entries()) if (value !== '') kept.append(name, value);
-      const query = kept.toString();
-      return reply.redirect(`/r/${readToken}/board${query === '' ? '' : `?${query}`}`, 303);
-    }
-
     const narrowing = {
       ...(query.owner ? { owner: query.owner.slice(0, 48) } : {}),
       ...(query.agent ? { agent: query.agent.slice(0, 48) } : {}),

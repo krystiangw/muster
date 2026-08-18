@@ -1888,6 +1888,22 @@ describe('a board many agents write to', () => {
       url: `/r/${readToken}/board?agent=errors-loop`,
     });
     assert.equal(clean.statusCode, 200);
+
+    // And the bounce is free: it happens before the read is charged and before
+    // the view is counted, because it is the same reader pressing Enter once.
+    const counted = await harness.store.events.countDocuments({
+      projectId: project.id,
+      kind: 'view',
+    });
+    await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?owner=&agent=errors-loop&label=&q=`,
+    });
+    assert.equal(
+      await harness.store.events.countDocuments({ projectId: project.id, kind: 'view' }),
+      counted,
+      'a redirect is not somebody reading the board',
+    );
   });
 
   it('keeps the agent it is already filtered by in the list', async () => {
