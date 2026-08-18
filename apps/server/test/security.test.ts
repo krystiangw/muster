@@ -1017,8 +1017,11 @@ describe('every link these pages render', () => {
             headers: { accept: 'text/html', cookie: session.cookie },
           });
         }
+        // Under 300, which is a page rather than a promise of one. Still 3xx
+        // here means the five hops ran out: a loop or a maze, and reading
+        // "< 400" off that last redirect would pass both.
         assert.ok(
-          followed.statusCode < 400,
+          followed.statusCode < 300,
           `${page} links to ${href}, which ends at ${at} answering ${followed.statusCode}`,
         );
       }
