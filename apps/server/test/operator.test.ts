@@ -114,6 +114,29 @@ describe('the operator view', () => {
     assert.equal(answer.answer, 'Not this week');
   });
 
+  it('forgets a cookie that opens nothing, so the navigation stops lying', async () => {
+    // The navigation is drawn from the cookie's presence and nothing else, on
+    // purpose: no page reads the database to decide one word. The cost is a
+    // session that ended still saying "your projects" on the page asking the
+    // same person to sign in, so the page that finds it dead drops it.
+    const session = await signIn(harness, 'gone@example.com');
+    await harness.store.operatorSessions.deleteMany({ email: 'gone@example.com' });
+
+    const asked = await harness.server.inject({
+      method: 'GET',
+      url: '/operator',
+      headers: { cookie: session.cookie },
+    });
+    assert.match(asked.body, /<h1>Sign in<\/h1>/);
+    const dropped = String(asked.headers['set-cookie'] ?? '');
+    assert.match(dropped, /muster_session=;/, 'and the cookie goes with it');
+
+    // Somebody who was never signed in is answered without a header nobody
+    // needs.
+    const stranger = await harness.server.inject({ method: 'GET', url: '/operator' });
+    assert.equal(stranger.headers['set-cookie'], undefined);
+  });
+
   it('links a person straight at the card, open on the board it lives on', async () => {
     // The link on this page and the sheet on the board are one feature: when
     // the sheets became addresses, a link built out of a search and a fragment

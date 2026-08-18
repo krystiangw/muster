@@ -121,6 +121,21 @@ export async function readSession(
   return { id: doc._id, email: doc.email, csrf: doc.csrf };
 }
 
+/**
+ * Forget a cookie that no longer opens anything.
+ *
+ * The navigation is drawn from the presence of this cookie and nothing else,
+ * deliberately: no page should read the database to decide one word. The cost
+ * is a session that expired, or a deployment whose sessions were wiped, still
+ * saying "your projects" on the page that is asking the same person to sign in.
+ * The page that discovers it is dead is the page that clears it, so the lie
+ * lasts exactly one screen.
+ */
+export function forgetDeadSession(config: Config, request: FastifyRequest, reply: FastifyReply): void {
+  if (!hasSessionCookie(request)) return;
+  reply.header('set-cookie', `${SESSION_COOKIE}=; ${cookieFlags(config, 0)}`);
+}
+
 export async function endSession(
   store: Store,
   config: Config,

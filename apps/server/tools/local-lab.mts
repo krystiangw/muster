@@ -191,7 +191,9 @@ console.log(`
   ${base}                      the landing page
   ${base}${made.read_url.replace(base, '')}            the read link
   ${base}${made.read_url.replace(base, '')}/board      the board
-  ${base}/operator                 sign in as anything, the code is always ${CODE}
+  ${base}/operator                 sign in as ${EMAIL}, the code is always ${CODE}
+                                    (any other address signs in to an empty page:
+                                    the board below is claimed by that one)
 
   project ${made.project}
   token   ${token}

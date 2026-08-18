@@ -19,6 +19,7 @@ import {
   checkCsrf,
   csrfField,
   endSession,
+  forgetDeadSession,
   readSession,
   startSession,
   type OperatorSession,
@@ -159,7 +160,12 @@ and you can end that from the view itself.</p>
   app.get('/operator', { schema: { hide: true } }, async (request, reply) => {
     recordView(store, 'operator', request);
     const session = await readSession(store, request);
-    if (!session) return html(request, reply, 'Sign in to Muster', signInForm());
+    if (!session) {
+      // A cookie that opens nothing is dropped here, so the navigation stops
+      // calling this person by a name the next page cannot honour.
+      forgetDeadSession(config, request, reply);
+      return html(request, reply, 'Sign in to Muster', signInForm());
+    }
     return html(request, reply, 'Your Muster projects', await renderView(session), 200);
   });
 
