@@ -10,6 +10,23 @@ import type { Config } from './config.js';
  * documentation about the product, they are the product's onboarding.
  */
 
+/**
+ * What holding the read link lets somebody do, written once.
+ *
+ * Three documents tell an agent how carefully to treat this link: the protocol
+ * it reads on the way in, the OpenAPI description of the route that rotates it,
+ * and the page a person reads. Two of them still said "reads the board, lays it
+ * out, moves cards and answers your questions" a day after the link learned to
+ * file work, write notes and rewrite a card. An understatement here is not a
+ * stale sentence, it is a security notice that undersells the thing it is
+ * warning about.
+ */
+export const READ_LINK_GRANTS =
+  'reads the board, answers the questions your agents filed, files work of its own, ' +
+  'writes notes onto the timeline the agents read, corrects the words on a card, sets ' +
+  'urgency, owners and labels, moves cards, consolidates two spellings of one agent and ' +
+  'replaces the layout';
+
 export function skillMd(config: Config): string {
   const base = config.baseUrl;
   return `# Muster
@@ -358,9 +375,10 @@ is unaffected either way, so this never changes how you work.
 
 ## If a link gets out
 
-The read link is a capability: whoever holds it reads the board, lays it out,
-moves cards and answers your questions. That is what makes it worth handing to a
-person. If one ends up somewhere it should not be, replace it:
+The read link is a capability: whoever holds it ${READ_LINK_GRANTS}, with no
+sign in at all. That is what makes it worth handing to a person, and why it is a
+password rather than a bookmark. If one ends up somewhere it should not be,
+replace it:
 
 \`\`\`bash
 curl -sX POST $MUSTER/read-link/rotate -H "authorization: Bearer $ADMIN_TOKEN"
@@ -423,6 +441,7 @@ somebody else's ticket.
 - ${config.tiers.demo.items} **open** items, ${config.tiers.demo.agents} agents and ${config.tiers.demo.escalations} escalations per unclaimed project, and it is deleted after ${config.demoTtlDays} days. Closing an item frees its slot; \`DELETE /items/<slug>\` removes it entirely.
 - A human claiming the project by email raises those to ${config.tiers.free.items} open items, ${config.tiers.free.agents} agents and ${config.tiers.free.escalations} escalations and removes the expiry. Free, no card.
 - ${config.rateLimits.write.requests} writes and ${config.rateLimits.read.requests} reads per minute per token; ${config.rateLimits.createProject.requests} new projects per hour per source address. Over the limit returns 429 with \`retry-after\`. An ordinary loop never comes near it; an import does, so pace one and read \`retry-after\` rather than treating the refusal as an outage.
+- The two refusals mean different things and the codes say which. A cap answers **409** and never clears on its own: finish something or have the project claimed. A rate limit answers **429**, always carries \`retry-after\`, and clears by waiting. Retrying a 409 the way you retry a 429 is a loop that never ends.
 
 ## Also available
 

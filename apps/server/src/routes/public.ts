@@ -12,6 +12,7 @@ import {
   type BoardView,
 } from '../board.js';
 import type { Config } from '../config.js';
+import { READ_LINK_GRANTS } from '../content.js';
 import type { Store } from '../db.js';
 import { redactAddress, type Mailer } from '../email.js';
 import { record, recordView } from '../events.js';
@@ -470,8 +471,7 @@ which is also the point. Ownership is an email address and a six digit code: no 
 password, nothing to lose but access to a mailbox.</p>
 <p>Before that, and after it, there is the read link. While a project is open by link, which is
 how every project starts, that address is a capability: the token is in it, so whoever opens it
-reads the board, answers the questions, files new items, writes notes onto the timeline the agents
-read, sets urgency, moves cards, sets owners and labels and replaces the layout, with no sign in at
+${READ_LINK_GRANTS}, with no sign in at
 all. That is what makes it answerable from a phone at three in the
 morning, and it is why the link is a password rather than a bookmark. Hand it to the person who
 should answer, not to a channel. Narrowing the project to its owner ends all of that: the link then

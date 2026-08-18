@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
+import { READ_LINK_GRANTS } from '../content.js';
 import type { Store } from '../db.js';
 import { maybeSweep, sweepProject } from '../hygiene.js';
 import {
@@ -1503,7 +1504,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           tags: ['projects'],
           summary: 'Replace the read link',
           description:
-            'The read link is a capability: whoever holds it reads the board, lays it out, moves cards and answers questions. That is what makes it useful to hand to a person, and it is also why a leaked one has to be revocable. Rotating mints a new link and stops the old one dead.',
+            `The read link is a capability: whoever holds it ${READ_LINK_GRANTS}, with no sign in at all. That is what makes it useful to hand to a person, and it is also why a leaked one has to be revocable. Rotating mints a new link and stops the old one dead.`,
         },
       },
       async (request) => {

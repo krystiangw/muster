@@ -347,10 +347,26 @@ describe('what the link says about itself', () => {
     assert.match(docs.body, /password rather than a bookmark/);
     assert.match(docs.body, /read-link\/rotate/);
     // Every power it grants, not the three that came to mind: a warning that
-    // undersells the authority is worse than none, because it is believed.
-    for (const power of [/answers the questions/, /moves cards/, /sets owners and labels/, /replaces the\s+layout/]) {
-      assert.match(docs.body, power);
+    // undersells the authority is worse than none, because it is believed. The
+    // list is one exported sentence for that reason, so the three documents
+    // that carry it cannot drift apart again; this checks all three.
+    for (const power of [
+      /answers the questions/,
+      /files work of its own/,
+      /writes notes onto the timeline/,
+      /corrects the words on a card/,
+      /sets\s+urgency, owners and labels/,
+      /moves cards/,
+      /consolidates two spellings/,
+      /replaces the\s+layout/,
+    ]) {
+      assert.match(docs.body, power, String(power));
     }
+
+    const protocol = await harness.server.inject({ method: 'GET', url: '/skill.md' });
+    assert.match(protocol.body, /files work of its own/, 'the protocol says the same');
+    const openapi = await harness.server.inject({ method: 'GET', url: '/openapi.json' });
+    assert.match(openapi.body, /consolidates two spellings/, 'and so does the route that rotates it');
     // And it is true only while the board is open by link, which is the state
     // the sentence is about.
     assert.match(docs.body, /Narrowing the project to its owner ends all of that/);
