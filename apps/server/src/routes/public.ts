@@ -853,8 +853,9 @@ yours.</p>`
             // mail, which has room for it; the page needs the fact.
             (project.visibility ?? 'link') === 'owner'
               ? 'Private: this page opens only for its owner, signed in.'
-              : `Open by link: anybody who has this address can answer here without signing in.
-<a href="/operator">Your projects</a> has the switch that closes it.`
+              : `Open by link: anybody who has this address can answer these questions and change
+this board without signing in. <a href="/operator">Your projects</a> has the switch that closes
+it.`
           }</p>`
     }
 

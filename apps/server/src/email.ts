@@ -144,7 +144,7 @@ export function createMailer(config: Config, log: (msg: string) => void): Mailer
               ]
             : [
                 'The page needs no sign in, so anyone holding that link can answer your',
-                'agents on your behalf. Treat it like a password.',
+                'agents on your behalf and change the board. Treat it like a password.',
                 '',
                 `Every project you own: ${notice.operatorUrl}`,
               ]),
