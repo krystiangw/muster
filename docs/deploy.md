@@ -325,11 +325,16 @@ The commands below are the registry's own, checked against its CLI reference
 rather than remembered:
 
 1. Generate an Ed25519 keypair. Keep `key.pem` in `~/.muster/`, chmod 600,
-   outside every checkout, like the rest of them. macOS ships LibreSSL, which
-   cannot do Ed25519 in `genpkey`: use `$(brew --prefix openssl@3)/bin/openssl`.
+   outside every checkout, like the rest of them.
+
+   macOS ships LibreSSL as `openssl`, and it cannot generate Ed25519 keys at
+   all: `genpkey` answers "Algorithm Ed25519 not found". So the binary is named
+   once here and used by every command below, rather than mentioned as a
+   warning somebody reads after the first one fails.
 
    ```bash
-   openssl genpkey -algorithm Ed25519 -out ~/.muster/mcp-registry-key.pem
+   SSL="$(brew --prefix openssl@3)/bin/openssl"   # on Linux: SSL=openssl
+   "$SSL" genpkey -algorithm Ed25519 -out ~/.muster/mcp-registry-key.pem
    chmod 600 ~/.muster/mcp-registry-key.pem
    ```
 
@@ -337,7 +342,7 @@ rather than remembered:
    it as `MCP_REGISTRY_AUTH` on the deployment:
 
    ```bash
-   PUBLIC_KEY="$(openssl pkey -in ~/.muster/mcp-registry-key.pem -pubout -outform DER | tail -c 32 | base64)"
+   PUBLIC_KEY="$("$SSL" pkey -in ~/.muster/mcp-registry-key.pem -pubout -outform DER | tail -c 32 | base64)"
    heroku config:set MCP_REGISTRY_AUTH="v=MCPv1; k=ed25519; p=${PUBLIC_KEY}" -a muster-web
    curl -s https://musterboard.dev/.well-known/mcp-registry-auth
    ```
@@ -349,7 +354,7 @@ rather than remembered:
    it at all. The key is passed as hex, not as the PEM:
 
    ```bash
-   PRIVATE_KEY="$(openssl pkey -in ~/.muster/mcp-registry-key.pem -noout -text | grep -A3 'priv:' | tail -n +2 | tr -d ' :\n')"
+   PRIVATE_KEY="$("$SSL" pkey -in ~/.muster/mcp-registry-key.pem -noout -text | grep -A3 'priv:' | tail -n +2 | tr -d ' :\n')"
    mcp-publisher login http --domain=musterboard.dev --private-key="${PRIVATE_KEY}"
    ```
 

@@ -74,6 +74,11 @@ export function demoBoard(now = new Date()): BoardView {
         lastActor: 'errors-loop',
         labels: ['withdraw'],
         priority: 6,
+        // The card this one cannot finish without, which is the card waiting
+        // on a person. It is the shape the whole board is for: the fleet keeps
+        // moving, one piece of work is parked behind a decision, and nobody
+        // had to invent a status to say so.
+        blockedBy: ['ops:bridge-or-wait'],
         timeline: [
           { at: new Date(now.getTime() - 3 * HOUR), by: 'errors-loop', kind: 'created', message: 'four withdraws pending past their usual window' },
           { at: new Date(now.getTime() - 2 * HOUR), by: 'errors-loop', kind: 'note', message: 'venue says accepted, signer says sent, so it is between them' },

@@ -304,9 +304,24 @@ ${(() => {
   // reading "60 min ago" while its neighbour reads "1 h ago".
   const now = new Date();
   const demo = demoBoard(now);
+  // The same rule the real board follows, computed over the six items in hand
+  // rather than over a database: a card is waiting while the cards it names
+  // are unfinished, and not a moment longer.
+  const finished = new Set(
+    demo.rows
+      .flatMap((row) => row.columns.flatMap((cell) => cell.items))
+      .filter((entry) => entry.status === 'done' || entry.status === 'dropped')
+      .map((entry) => entry.slug),
+  );
+  const waiting = new Map<string, string[]>();
+  for (const entry of demo.rows.flatMap((row) => row.columns.flatMap((cell) => cell.items))) {
+    const left = (entry.blockedBy ?? []).filter((slug) => !finished.has(slug));
+    if (left.length > 0) waiting.set(entry.slug, left);
+  }
   return renderBoard(demo, {
     now,
     agents: DEMO_AGENTS,
+    waiting,
     // The previews carry the timelines too. A card that says "3 timeline
     // entries" over an empty list is the one place on this page where the
     // product can be caught contradicting itself in a single click.
