@@ -172,6 +172,10 @@ if (broken.length === 0) {
  * age, and the alert goes on the board rather than to the pager, because the
  * service is up and the escalation mail is already throttled per project.
  *
+ * The date is written when a sweep finishes, not when one starts, which is why
+ * this can be read straight out of a request that triggers a sweep of its own:
+ * a pass that throws moves the throttle marker and leaves this alone.
+ *
  * An hour is six passes. It is generous on purpose: a deployment sweeping more
  * projects than one batch holds takes several passes to come round again, and
  * the number to raise then is the batch size, not this.
@@ -199,8 +203,23 @@ if (broken.length === 0 && apiRead?.body && 'swept_at' in apiRead.body) {
           + 'Claims will not expire and nothing will be marked stale until it runs again. '
           + 'heroku restart -a muster-web is the blunt fix; the sweeper is the interval in apps/server/src/index.ts.',
       );
-      state.hygieneAlerted = true;
-      console.log(`hygiene behind: last swept ${since} | board ${filed}`);
+      // Latched only once something actually left. A refused filing is exactly
+      // when the alert matters, and marking it sent would silence the only
+      // channel there is until hygiene fixes itself. The mail is the fallback
+      // because it shares nothing with the dyno or the database.
+      const delivery = filed === 'filed' ? 'not needed' : await mail('Muster stopped tidying', [
+        `${projectId} was last swept ${since}, and ${base} is answering normally.`,
+        '',
+        'Claims will not expire and nothing will be marked stale until hygiene runs again.',
+        `Filing this on the board was refused: ${filed}.`,
+        '',
+        'heroku restart -a muster-web',
+      ]);
+      state.hygieneAlerted = filed === 'filed' || delivery === 'sent';
+      console.log(
+        `hygiene behind: last swept ${since} | board ${filed} | email ${delivery}`
+          + (state.hygieneAlerted ? '' : ' | nothing landed, will try again'),
+      );
     } else {
       console.log(`hygiene miss ${state.hygieneMisses}: last swept ${since}`);
     }

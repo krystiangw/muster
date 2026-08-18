@@ -140,6 +140,7 @@ export async function createProject(
     expiresAt: new Date(now.getTime() + config.demoTtlDays * 86_400_000),
     createdAt: now,
     lastSweptAt: null,
+    sweptAt: null,
     counts: { items: 0, agents: 0, escalations: 0 },
   };
   await store.projects.insertOne(project);

@@ -178,12 +178,13 @@ export function projectJson(project: ProjectDoc, config: Config): Record<string,
     expires_at: project.expiresAt,
     limits: project.limits,
     counts: project.counts,
-    // When hygiene last looked at this board, from either path: the scheduled
-    // pass or the throttled one a request triggers. The stale flags and the
-    // expired claims in `counts` are exactly as old as this, and a sweeper that
-    // quietly stopped looks identical to a board with nothing to tidy until
-    // somebody can read the date.
-    swept_at: project.lastSweptAt,
+    // When a sweep last finished, from either path: the scheduled pass or the
+    // throttled one a request triggers. The stale flags and the expired claims
+    // in `counts` are exactly as old as this, and a sweeper that quietly
+    // stopped looks identical to a board with nothing to tidy until somebody
+    // can read the date. Deliberately not the throttle marker, which is taken
+    // before the work and so keeps moving through a sweep that throws.
+    swept_at: project.sweptAt ?? null,
     rules: {
       stale_after_hours: project.rules.staleAfterHours,
       absence_resolve: project.rules.absenceResolve

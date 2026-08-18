@@ -343,7 +343,18 @@ export interface ProjectDoc {
   /** Unclaimed demo projects are swept by a TTL index. Null once claimed. */
   expiresAt: Date | null;
   createdAt: Date;
+  /**
+   * The throttle claim, taken before a sweep runs, which is what keeps a burst
+   * of agents from sweeping twenty times. It advances whether or not the pass
+   * that took it finished.
+   */
   lastSweptAt: Date | null;
+  /**
+   * When a sweep last finished. Written after the rules have run, so it is the
+   * one date that tells a board with nothing to tidy apart from a sweeper that
+   * throws on every pass.
+   */
+  sweptAt?: Date | null;
   counts: { items: number; agents: number; escalations: number };
 }
 

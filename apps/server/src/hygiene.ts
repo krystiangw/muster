@@ -350,6 +350,11 @@ export async function sweepProject(
   outcomes.push(await dropContentless(store, project._id, rules, now));
   outcomes.push(await markStale(store, project._id, rules, now));
   await correctOvercount(store, project._id);
+  // After the rules, never before them. `lastSweptAt` is the throttle claim and
+  // maybeSweep takes it on the way in, so it advances even on a pass where
+  // every rule throws; a watcher asking whether hygiene still works needs the
+  // date a sweep reached the end.
+  await store.projects.updateOne({ _id: project._id }, { $set: { sweptAt: now } });
 
   return outcomes;
 }

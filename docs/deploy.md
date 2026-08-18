@@ -103,9 +103,10 @@ It also files an escalation on the board, best effort, because a partial outage
 is the common case and the note belongs with the work.
 
 The same round checks something a liveness probe cannot see: whether hygiene is
-still running. The project read carries `swept_at`, and a dyno that answers
-while its sweeper is dead looks exactly like a board with nothing to tidy, so
-an hour behind, twice in a row, files on the board. On the board and not by
+still running. The project read carries `swept_at`, written when a sweep
+finishes rather than when one starts, and a dyno that answers while its sweeper
+is dead looks exactly like a board with nothing to tidy, so an hour behind,
+twice in a row, files on the board. On the board and not by
 pager, because the service is up and the escalation mail is throttled to one
 per project per hour already.
 

@@ -309,25 +309,42 @@ describe('sweep throttle', () => {
 
     const before = await read();
     assert.ok('swept_at' in before, 'the field is there to be read');
-    assert.equal(before.swept_at, null, 'and a board hygiene has never reached says so');
 
-    await maybeSweep(harness.store, await projectDoc(project));
+    // sweepProject rather than maybeSweep: creating and reading a project each
+    // fire a throttled sweep of their own, so the explicit one would be told
+    // somebody already holds the slot and this would prove nothing.
+    await sweepProject(harness.store, await projectDoc(project));
     const after = await read();
     assert.ok(
       Date.now() - new Date(after.swept_at as string).getTime() < 60_000,
-      'a sweep is what puts a date there',
+      'a sweep that finished is what puts a date there',
     );
 
     // In memory rather than through the database and back: several routes fire
     // a throttled sweep of their own, and one of those landing after a
     // backdating write would make this measure the race instead of the field.
+    const doc = await projectDoc(project);
     const stalled = projectJson(
-      { ...(await projectDoc(project)), lastSweptAt: new Date(Date.now() - 3_600_000) },
+      { ...doc, sweptAt: new Date(Date.now() - 3_600_000) },
       harness.config,
     );
     assert.ok(
       Date.now() - new Date(stalled.swept_at as Date).getTime() > 3_000_000,
       'an hour without a sweep reads as an hour, which is what an alert needs',
+    );
+
+    // The reported date is not the throttle marker. maybeSweep takes that one
+    // on the way in, so on a deployment where every pass throws it would keep
+    // moving and report a sweeper that has not finished anything in days as
+    // one that ran a minute ago.
+    const claimed = projectJson(
+      { ...doc, lastSweptAt: new Date(), sweptAt: new Date(Date.now() - 3_600_000) },
+      harness.config,
+    );
+    assert.equal(
+      (claimed.swept_at as Date).getTime(),
+      (stalled.swept_at as Date).getTime(),
+      'claiming the throttle is not finishing a sweep',
     );
   });
 
