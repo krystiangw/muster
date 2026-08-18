@@ -485,6 +485,50 @@ describe('starting up against a database that has already run', () => {
     const email = indexes.find((index) => index.name === 'email');
     assert.equal(email?.unique, true, 'and it ends up with the definition the code asked for');
   });
+
+  it('replaces the index that changed and leaves the unique one alone', async () => {
+    // The repair used to drop every index named in the same list before
+    // rebuilding them, which takes the unique slug index with it. On a
+    // deployment still serving requests, one upsert inside that window writes
+    // the duplicate that makes the rebuild fail, and then the process never
+    // finishes booting.
+    const project = await createProject(harness, 'indexes');
+    await harness.store.items.dropIndex('recent').catch(() => undefined);
+    await harness.store.items.createIndexes([{ key: { projectId: 1, updatedAt: -1 }, name: 'recent' }]);
+
+    const dropped: string[] = [];
+    const realDrop = harness.store.items.dropIndex.bind(harness.store.items);
+    (harness.store.items as { dropIndex: typeof realDrop }).dropIndex = (async (name: string) => {
+      dropped.push(name);
+      return realDrop(name);
+    }) as typeof realDrop;
+    try {
+      await ensureIndexes(harness.store);
+    } finally {
+      (harness.store.items as { dropIndex: typeof realDrop }).dropIndex = realDrop;
+    }
+
+    assert.deepEqual(dropped, ['recent'], 'only the one whose definition changed');
+    const indexes = await harness.store.items.indexes();
+    assert.equal(indexes.find((index) => index.name === 'slug')?.unique, true);
+    assert.deepEqual(indexes.find((index) => index.name === 'recent')?.key, {
+      projectId: 1,
+      updatedAt: -1,
+      _id: -1,
+    });
+
+    // And the unique index still refuses what it is for.
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'one', title: 'one', actor: 'a' },
+    });
+    assert.equal(
+      await harness.store.items.countDocuments({ projectId: project.id, slug: 'one' }),
+      1,
+    );
+  });
 });
 
 /**

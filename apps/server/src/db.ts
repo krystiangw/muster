@@ -282,14 +282,25 @@ async function ensure(
 ): Promise<void> {
   try {
     await collection.createIndexes(specs);
+    return;
   } catch (error) {
     // 86 is IndexKeySpecsConflict: same name, different definition.
     if ((error as { code?: number }).code !== 86) throw error;
-    for (const spec of specs) {
-      if (!spec.name) continue;
+  }
+
+  // One at a time, so a redefinition replaces the index it redefines and
+  // nothing else. Dropping the whole set took the unique slug index with it,
+  // and on a deployment still serving requests a single upsert inside that
+  // window writes the duplicate that makes the rebuild fail, which means the
+  // process never finishes booting and the fix is by hand, in production.
+  for (const spec of specs) {
+    try {
+      await collection.createIndexes([spec]);
+    } catch (error) {
+      if ((error as { code?: number }).code !== 86 || !spec.name) throw error;
       await collection.dropIndex(spec.name).catch(() => undefined);
+      await collection.createIndexes([spec]);
     }
-    await collection.createIndexes(specs);
   }
 }
 
