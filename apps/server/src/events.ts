@@ -312,13 +312,28 @@ function median(values: number[]): number | null {
  * and adding a URL for it would mean adding a credential to protect it.
  */
 export async function insights(store: Store): Promise<Insights> {
-  // Read once and used by both of the questions below that are about people
-  // rather than about traffic. A board nobody has claimed has no human on it:
-  // whatever answers there is holding the project token, which is an agent, or
-  // one of our own checks driving the published SDK against production.
-  const owned = (
-    await store.projects.find({ claimedBy: { $ne: null } }, { projection: { _id: 1 } }).toArray()
-  ).map((project) => project._id);
+  /**
+   * The two questions below that are about people rather than about traffic
+   * share one condition: the answer has to have been given on a board that had
+   * an owner at the time.
+   *
+   * A board nobody has claimed has no human on it, so whatever answered was
+   * holding the project token: an agent, or one of our own checks driving the
+   * published SDK against production, answering in seconds. And "at the time"
+   * rather than "now", because a board claimed today would otherwise pull every
+   * answer its automation gave last week into the number.
+   *
+   * Written as a join rather than a list of project ids collected first. That
+   * list grows with the service, and a query carrying all of it eventually
+   * stops fitting in a command.
+   */
+  const answeredByPerson = [
+    {
+      $lookup: { from: 'projects', localField: 'projectId', foreignField: '_id', as: 'project' },
+    },
+    { $unwind: '$project' },
+    { $match: { 'project.claimedBy': { $ne: null } } },
+  ];
 
   const [
     discovered,
@@ -403,15 +418,17 @@ export async function insights(store: Store): Promise<Insights> {
     // engine hands back first, which past five hundred answers means a median
     // of an arbitrary old subset that silently stops moving.
     //
-    // Boards with an owner only, for the reason at the top of this function:
-    // this is "how long does a human take", and an agent answers in seconds.
+    // Boards with an owner only, for the reason above: this is "how long does a
+    // human take", and an agent answers in seconds.
     store.escalations
-      .find(
-        { answeredAt: { $ne: null }, projectId: { $in: owned } },
-        { projection: { createdAt: 1, answeredAt: 1 } },
-      )
-      .sort({ answeredAt: -1 })
-      .limit(ANSWER_SAMPLE)
+      .aggregate<{ createdAt: Date; answeredAt: Date }>([
+        { $match: { answeredAt: { $ne: null } } },
+        { $sort: { answeredAt: -1 } },
+        ...answeredByPerson,
+        { $match: { $expr: { $gte: ['$answeredAt', '$project.claimedAt'] } } },
+        { $limit: ANSWER_SAMPLE },
+        { $project: { createdAt: 1, answeredAt: 1 } },
+      ])
       .toArray(),
     store.items.countDocuments({
       status: { $in: ['done', 'dropped'] },
@@ -424,13 +441,15 @@ export async function insights(store: Store): Promise<Insights> {
         { $sort: { count: -1 } },
       ])
       .toArray(),
-    // Owned boards only, same reason as the median beside it, and here it is
+    // Owned boards only, same condition as the median above, and here it is
     // load bearing rather than tidy: this split exists to say whether people
     // answer from the link the mail sends them or from the page they sign in
     // to, and our own checks answer over the API on a board they created.
     store.events
       .aggregate<{ _id: string; count: number }>([
-        { $match: { kind: 'answer', projectId: { $in: owned } } },
+        { $match: { kind: 'answer', projectId: { $ne: null } } },
+        ...answeredByPerson,
+        { $match: { $expr: { $gte: ['$at', '$project.claimedAt'] } } },
         { $group: { _id: '$door', count: { $sum: 1 } } },
         { $sort: { count: -1 } },
       ])
@@ -443,7 +462,7 @@ export async function insights(store: Store): Promise<Insights> {
   ]);
 
   const answerHours = answered
-    .map((doc) => (doc.answeredAt!.getTime() - doc.createdAt.getTime()) / 3_600_000)
+    .map((doc) => (doc.answeredAt.getTime() - doc.createdAt.getTime()) / 3_600_000)
     .filter((hours) => hours >= 0);
 
   return {

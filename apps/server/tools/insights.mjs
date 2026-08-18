@@ -37,11 +37,17 @@ const escalations = db.collection('escalations');
 const count = (collection, filter = {}) => collection.countDocuments(filter);
 const since = (days) => new Date(Date.now() - days * 86_400_000);
 
-// Boards with an owner. Two of the numbers below are about people rather than
-// about traffic, and a board nobody claimed has no person on it: whatever
-// answered there held the project token, which is an agent, or one of our own
-// checks driving the published SDK against production, answering in seconds.
-const owned = (await projects.find({ claimedBy: { $ne: null } }, { projection: { _id: 1 } }).toArray()).map((p) => p._id);
+// Two of the numbers below are about people rather than about traffic, and both
+// need the same condition: the board had an owner when the answer was given. A
+// board nobody claimed has no person on it, whatever answered there held the
+// project token, and "when it was given" rather than "now" keeps a board
+// claimed today from dragging in every answer its automation gave last week.
+// A join rather than a collected list of ids, which grows with the service.
+const answeredByPerson = [
+  { $lookup: { from: 'projects', localField: 'projectId', foreignField: '_id', as: 'project' } },
+  { $unwind: '$project' },
+  { $match: { 'project.claimedBy': { $ne: null } } },
+];
 
 const [
   discovered,
@@ -87,7 +93,14 @@ const [
   count(agents),
   count(escalations, { status: 'open' }),
   count(items, { stale: true, status: { $nin: ['done', 'dropped'] } }),
-  escalations.find({ answeredAt: { $ne: null }, projectId: { $in: owned } }, { projection: { createdAt: 1, answeredAt: 1 } }).sort({ answeredAt: -1 }).limit(500).toArray(),
+  escalations.aggregate([
+    { $match: { answeredAt: { $ne: null } } },
+    { $sort: { answeredAt: -1 } },
+    ...answeredByPerson,
+    { $match: { $expr: { $gte: ['$answeredAt', '$project.claimedAt'] } } },
+    { $limit: 500 },
+    { $project: { createdAt: 1, answeredAt: 1 } },
+  ]).toArray(),
   projects.find({}, { projection: { name: 1, counts: 1 } }).sort({ 'counts.items': -1 }).limit(5).toArray(),
   count(events, { kind: 'signup', at: { $gte: since(7) } }),
   count(events, { kind: 'first_write', at: { $gte: since(7) } }),
@@ -104,7 +117,13 @@ const [
     .limit(1)
     .toArray(),
   events.aggregate([{ $match: { kind: 'refused' } }, { $group: { _id: '$detail', n: { $sum: 1 } } }, { $sort: { n: -1 } }]).toArray(),
-  events.aggregate([{ $match: { kind: 'answer', projectId: { $in: owned } } }, { $group: { _id: '$door', n: { $sum: 1 } } }, { $sort: { n: -1 } }]).toArray(),
+  events.aggregate([
+    { $match: { kind: 'answer', projectId: { $ne: null } } },
+    ...answeredByPerson,
+    { $match: { $expr: { $gte: ['$at', '$project.claimedAt'] } } },
+    { $group: { _id: '$door', n: { $sum: 1 } } },
+    { $sort: { n: -1 } },
+  ]).toArray(),
 ]);
 
 const hours = answered

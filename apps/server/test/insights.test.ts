@@ -369,6 +369,16 @@ describe('counting the people, not the agents', () => {
     // Nor is it evidence about which door people use, which is the whole point
     // of that split: our own checks answer over the API on a board they made.
     assert.equal(after.answerDoors.http ?? 0, before.answerDoors.http ?? 0);
+
+    // And claiming the board afterwards does not turn last week's automation
+    // into a human. The condition is who owned it when the answer was given.
+    await harness.store.projects.updateOne(
+      { _id: ownerless.id },
+      { $set: { claimedBy: 'late@example.com', claimedAt: new Date(), expiresAt: null } },
+    );
+    const claimedLater = await insights(harness.store);
+    assert.equal(claimedLater.behaviour.answersSampled, before.behaviour.answersSampled);
+    assert.equal(claimedLater.answerDoors.http ?? 0, before.answerDoors.http ?? 0);
   });
 
   /**
@@ -426,6 +436,31 @@ describe('counting the people, not the agents', () => {
     const readToken = project.readUrl.split('/r/')[1]!;
     const before = (await insights(harness.store)).answerDoors;
 
+    // Claimed first, and that ordering is the point rather than setup: an answer
+    // given while nobody owned the board is not somebody answering, so a board
+    // claimed afterwards would count none of this.
+    const session = await signIn(harness, 'owner@example.com');
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/claim`,
+      headers: authed(project),
+      payload: { email: 'owner@example.com' },
+    });
+    const pending = await harness.store.claimCodes.findOne({
+      projectId: project.id,
+      email: 'owner@example.com',
+    });
+    await harness.store.claimCodes.updateOne(
+      { _id: pending!._id },
+      { $set: { codeHash: hashToken('123456') } },
+    );
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/claim/verify`,
+      headers: authed(project),
+      payload: { email: 'owner@example.com', code: '123456' },
+    });
+
     const ask = async (question: string): Promise<string> => {
       const filed = await harness.server.inject({
         method: 'POST',
@@ -459,29 +494,6 @@ describe('counting the people, not the agents', () => {
       },
     });
     assert.equal(throughTheLink.statusCode, 303);
-
-    // And the operator's own page, which needs the project to be theirs.
-    const session = await signIn(harness, 'owner@example.com');
-    await harness.server.inject({
-      method: 'POST',
-      url: `${project.api}/claim`,
-      headers: authed(project),
-      payload: { email: 'owner@example.com' },
-    });
-    const pending = await harness.store.claimCodes.findOne({
-      projectId: project.id,
-      email: 'owner@example.com',
-    });
-    await harness.store.claimCodes.updateOne(
-      { _id: pending!._id },
-      { $set: { codeHash: hashToken('123456') } },
-    );
-    await harness.server.inject({
-      method: 'POST',
-      url: `${project.api}/claim/verify`,
-      headers: authed(project),
-      payload: { email: 'owner@example.com', code: '123456' },
-    });
 
     const overOperator = await ask('on the operator page?');
     const onThatPage = await harness.server.inject({
