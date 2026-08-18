@@ -747,6 +747,7 @@ ${Object.entries(BOARD_PRESETS)
 <tr><td class="mono">stale</td><td>Whether hygiene has flagged it as untouched.</td></tr>
 <tr><td class="mono">source</td><td>For items mirrored from a scanner or an error stream.</td></tr>
 <tr><td class="mono">priority_min</td><td>Priority at or above this number. Higher is more urgent: the scale runs -10 to 10, 0 is ordinary work.</td></tr>
+<tr><td class="mono">within_days</td><td>Only work touched in the last N days. What a "Done" column wants: finished work is worth reading, and all of it for ever is a landfill. Nothing is deleted, and the rest is one search away.</td></tr>
 <tr><td class="mono">fields</td><td>Values kept from another system, e.g. <code>{"legacy_status":["investigating","fix_planned"]}</code>.</td></tr>
 </tbody></table></div>
 <p>An item lands in the <b>first</b> column that matches, so order the columns the way you read them.

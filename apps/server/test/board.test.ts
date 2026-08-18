@@ -705,6 +705,67 @@ describe('moving an item into a column', () => {
     );
   });
 
+  it('lets a column show only what was touched lately', async () => {
+    // The Done column grows for ever, and finished work is still worth reading:
+    // it is how an agent finds out something was already tried. So the answer is
+    // a view, not a delete and not a fifth status.
+    const project = await createProject(harness, 'landfill');
+    await put(project, '/board', {
+      columns: [
+        { key: 'open', title: 'Open', match: { status: ['open'] } },
+        { key: 'done', title: 'Recently done', match: { status: ['done'], within_days: 14 } },
+      ],
+    });
+    for (const [slug, days] of [
+      ['fresh', 1],
+      ['ancient', 90],
+    ] as const) {
+      await post(project, '/items', { slug, title: slug, status: 'done', actor: 'a' });
+      await harness.store.items.updateOne(
+        { projectId: project.id, slug },
+        { $set: { updatedAt: new Date(Date.now() - days * 86_400_000) } },
+      );
+    }
+
+    const board = (
+      await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/board`,
+        headers: authed(project),
+      })
+    ).json();
+    const done = board.totals.find((column: { key: string }) => column.key === 'done');
+    assert.equal(done.count, 1, 'only the recent one is on the board');
+
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(page.body, /fresh/);
+    assert.ok(!page.body.includes('ancient'), 'the old one is off the board, not gone');
+
+    // Off the board and still in the project, which is the whole difference
+    // between a view and a delete.
+    const items = (
+      await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/items?status=done`,
+        headers: authed(project),
+      })
+    ).json();
+    assert.deepEqual(
+      items.items.map((item: { slug: string }) => item.slug).sort(),
+      ['ancient', 'fresh'],
+    );
+
+    // And the layout carries it back out, in the same words it went in.
+    const again = await put(project, '/board', {
+      columns: [
+        { key: 'open', title: 'Open', match: { status: ['open'] } },
+        { key: 'done', title: 'Recently done', match: { status: ['done'], within_days: 14 } },
+      ],
+    });
+    assert.equal(again.json().board.columns[1].match.within_days, 14);
+  });
+
   it('keeps up with the agents only when asked to', async () => {
     // A board is watched while loops write to it, and a page that never
     // changes is a page somebody reloads by hand. A page that reloads itself

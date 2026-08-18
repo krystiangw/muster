@@ -116,6 +116,13 @@ export function itemMatches(item: ItemDoc, match: BoardMatch, now: Date): boolea
     if (item.source === null || !match.source.includes(item.source)) return false;
   }
   if (match.priorityMin !== undefined && (item.priority ?? 0) < match.priorityMin) return false;
+  if (match.withinDays !== undefined) {
+    const since = now.getTime() - match.withinDays * 86_400_000;
+    // `updatedAt` rather than `closedAt`: the question this answers is what has
+    // been touched lately, and a note somebody added today to a card closed in
+    // March is exactly the thing worth seeing again.
+    if (item.updatedAt.getTime() < since) return false;
+  }
   if (match.fields) {
     for (const [key, allowed] of Object.entries(match.fields)) {
       const value = (item.fields ?? {})[key];
@@ -468,6 +475,9 @@ export function unsatisfiableBy(column: BoardColumn): string[] {
   if (column.match.priorityMin !== undefined) {
     reasons.push('"priority_min", which is a range rather than a value');
   }
+  // A move makes an item recent by definition, so a window is always satisfiable
+  // and never belongs in this list.
+
   if (Object.keys(column.match.fields ?? {}).length > 0) {
     reasons.push('"fields", which came from another system');
   }
@@ -834,6 +844,15 @@ function parseMatch(raw: unknown, columnKey: string): BoardMatch {
       throw bad('priority_min must be an integer.');
     }
     match.priorityMin = Math.max(-10, Math.min(10, priorityMin));
+  }
+  const withinDays = source.within_days ?? source.withinDays;
+  if (withinDays !== undefined) {
+    if (typeof withinDays !== 'number' || !Number.isInteger(withinDays) || withinDays < 1) {
+      throw bad('within_days must be a whole number of days, one or more.');
+    }
+    // A year, because past that the column is the project and the filter is
+    // pretending to do something.
+    match.withinDays = Math.min(365, withinDays);
   }
   if (source.fields !== undefined) {
     if (typeof source.fields !== 'object' || source.fields === null || Array.isArray(source.fields)) {

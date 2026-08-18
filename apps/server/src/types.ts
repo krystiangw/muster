@@ -219,6 +219,17 @@ export interface BoardMatch {
   stale?: boolean;
   source?: string[];
   priorityMin?: number;
+  /**
+   * Only work touched in the last N days.
+   *
+   * For the column that grows for ever. Finished work is still work: it is what
+   * an agent reads to find out whether something was already tried, so it is
+   * neither deleted nor given a fifth status nobody asked for. A column is a
+   * view, and "what got done lately" is a view. Everything older stays in the
+   * project, one search away, and this is the one filter that makes a Done
+   * column stop being a landfill.
+   */
+  withinDays?: number;
   /** Values of `fields`, for boards migrated from a richer schema. */
   fields?: Record<string, Array<string | number | boolean>>;
 }

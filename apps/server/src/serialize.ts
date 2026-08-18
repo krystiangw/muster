@@ -132,6 +132,7 @@ export function boardConfigJson(config: BoardConfig): Record<string, unknown> {
         ...(column.match.priorityMin === undefined
           ? {}
           : { priority_min: column.match.priorityMin }),
+        ...(column.match.withinDays === undefined ? {} : { within_days: column.match.withinDays }),
         ...(column.match.fields ? { fields: column.match.fields } : {}),
       },
     })),
