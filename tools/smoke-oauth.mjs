@@ -35,8 +35,8 @@ const step = async (name, run) => {
   }
 };
 
-const json = async (path, options = {}) => {
-  const response = await fetch(`${base}${path}`, options);
+const json = async (url, options = {}) => {
+  const response = await fetch(url.startsWith('http') ? url : `${base}${url}`, options);
   const body = await response.json().catch(() => null);
   return { status: response.status, body };
 };
@@ -57,6 +57,13 @@ await step('authorization server metadata', async () => {
   return `issuer ${metadata.issuer}, grants ${metadata.grant_types_supported.join(',')}`;
 });
 
+// Everything below goes through the addresses the metadata published, not
+// through the ones this file knows. A client follows the document; a check that
+// hard codes the paths would pass while every standards-following client fails
+// on an endpoint that moved and was advertised wrong.
+const REGISTER = metadata.registration_endpoint;
+const TOKEN = metadata.token_endpoint;
+
 await step('the resource document points back', async () => {
   const resource = (await json('/.well-known/oauth-protected-resource')).body;
   if (!resource?.authorization_servers?.includes(metadata.issuer)) {
@@ -68,7 +75,7 @@ await step('the resource document points back', async () => {
 // Refused metadata, which costs nothing: no project is provisioned for a client
 // asking for a grant this server will never run.
 await step('refuses a grant it does not have', async () => {
-  const refused = await json('/oauth/register', {
+  const refused = await json(REGISTER, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ client_name: 'smoke, wrong grant', grant_types: ['authorization_code'] }),
@@ -78,19 +85,8 @@ await step('refuses a grant it does not have', async () => {
   return refused.body.error;
 });
 
-const saved = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8'))[key] : null;
-let client = saved;
-if (client) {
-  const alive = await json(`/v1/${client.project}`, { headers: { authorization: `Bearer ${client.probe ?? ''}` } });
-  // 401 is the ordinary state here: the probe token from last run expired an
-  // hour after it was minted, which is the point of this endpoint.
-  if (alive.status === 404) {
-    console.log('the registered project is gone, registering again');
-    client = null;
-  }
-}
-if (!client) {
-  const registered = await json('/oauth/register', {
+const register = async () => {
+  const registered = await json(REGISTER, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ client_name: 'oauth smoke test', grant_types: ['client_credentials'] }),
@@ -99,29 +95,49 @@ if (!client) {
     console.error(`registration answered ${registered.status}: ${JSON.stringify(registered.body).slice(0, 200)}`);
     process.exit(1);
   }
-  client = {
+  const fresh = {
     id: registered.body.client_id,
     secret: registered.body.client_secret,
     project: registered.body.project ?? registered.body.scope?.replace('project:', ''),
   };
   mkdirSync(join(homedir(), '.muster'), { recursive: true });
   const all = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8')) : {};
-  all[key] = client;
+  all[key] = fresh;
   writeFileSync(STATE, JSON.stringify(all, null, 1), { mode: 0o600 });
+  return fresh;
+};
+
+const ask = (who) =>
+  json(TOKEN, {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'client_credentials',
+      client_id: who.id,
+      client_secret: who.secret,
+    }).toString(),
+  });
+
+// The token endpoint is the liveness probe, because it is the thing under test
+// and because it is the only one that can tell a dead registration from a live
+// one. Probing with the previous run's token cannot: that token expired an hour
+// after it was minted, so it answers 401 whether or not the project still
+// exists, and a check reading 401 as "fine" would reuse a dead registration for
+// ever while every run failed.
+let client = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8'))[key] : null;
+let issued = client ? await ask(client) : null;
+if (client && issued.status !== 200) {
+  console.log(`the saved registration is gone (${issued.status}), registering again`);
+  client = await register();
+  issued = await ask(client);
+} else if (!client) {
+  client = await register();
+  issued = await ask(client);
 }
 console.log(`client ${client.id} on project ${client.project}`);
 
 let token = null;
 await step('client_credentials', async () => {
-  const issued = await json('/oauth/token', {
-    method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'client_credentials',
-      client_id: client.id,
-      client_secret: client.secret,
-    }).toString(),
-  });
   if (issued.status !== 200) throw new Error(`${issued.status}: ${JSON.stringify(issued.body).slice(0, 160)}`);
   token = issued.body.access_token;
   if (issued.body.token_type !== 'Bearer') throw new Error(`token_type ${issued.body.token_type}`);
@@ -145,7 +161,7 @@ await step('the token writes', async () => {
 });
 
 await step('a wrong secret is refused', async () => {
-  const refused = await json('/oauth/token', {
+  const refused = await json(TOKEN, {
     method: 'POST',
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
@@ -157,12 +173,6 @@ await step('a wrong secret is refused', async () => {
   if (refused.status !== 401) throw new Error(`expected 401, got ${refused.status}`);
   return refused.body?.error ?? 'refused';
 });
-
-// Kept for the next run, so the probe above can tell "the project expired" from
-// "the token expired", which are different failures.
-const all = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8')) : {};
-all[key] = { ...client, probe: token };
-writeFileSync(STATE, JSON.stringify(all, null, 1), { mode: 0o600 });
 
 console.log(failures === 0 ? '\nall good' : `\n${failures} failed`);
 process.exit(failures === 0 ? 0 : 1);
