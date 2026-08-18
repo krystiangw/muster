@@ -839,7 +839,7 @@ describe('the open item cap', () => {
       await post(project, '/sweep', {});
       await harness.store.projects.updateOne(
         { _id: project.id },
-        { $set: { 'countsCheck.at': new Date(Date.now() - 60_000) } },
+        { $set: { 'countsCheck.items.at': new Date(Date.now() - 60_000) } },
       );
       await post(project, '/sweep', {});
     };
@@ -938,7 +938,7 @@ describe('the open item cap', () => {
     );
     await harness.store.projects.updateOne(
       { _id: project._id },
-      { $set: { 'countsCheck.at': new Date(Date.now() - 60_000) } },
+      { $set: { 'countsCheck.items.at': new Date(Date.now() - 60_000) } },
     );
     assert.equal(
       await correctOvercount(harness.store, project._id),
@@ -949,6 +949,50 @@ describe('the open item cap', () => {
       (await harness.store.projects.findOne({ _id: project._id }))!.counts.items,
       2,
       'and the counter is left for the close to correct',
+    );
+  });
+
+  it('does not mistake one halfway close for another one settling', async () => {
+    const { correctOvercount } = await import('../src/hygiene.js');
+    const { createProject: createDirect, upsertItem } = await import('../src/service.js');
+    // Two closes caught between their item write and their slot write read
+    // identically: counter N, N-1 open. Half a minute apart, a check on the
+    // numbers alone calls the second one a settled leak and repairs a counter
+    // that the first close is about to lower itself. The version every counter
+    // write bumps is what tells the two events apart.
+    const { project } = await createDirect(harness.store, harness.config, { name: 'aba' });
+    await upsertItem(harness.store, project, { slug: 'one', title: 'one', actor: 'a' });
+    await upsertItem(harness.store, project, { slug: 'two', title: 'two', actor: 'a' });
+    const counters = async () =>
+      (await harness.store.projects.findOne({ _id: project._id }))!;
+
+    // A close, halfway: the item is done, the slot not yet given back.
+    await harness.store.items.updateOne(
+      { projectId: project._id, slug: 'one' },
+      { $set: { status: 'done', updatedAt: new Date() } },
+    );
+    assert.equal(await correctOvercount(harness.store, project._id), false, 'first look records it');
+
+    // The close finishes, and another item opens: the counter is back to 2 and
+    // the work is back to 2, so the numbers alone say nothing happened.
+    await harness.store.projects.updateOne(
+      { _id: project._id },
+      { $inc: { 'counts.items': -1, 'countsVersion.items': 1 } },
+    );
+    await upsertItem(harness.store, (await counters()), { slug: 'three', title: 'three', actor: 'a' });
+    await harness.store.items.updateOne(
+      { projectId: project._id, slug: 'two' },
+      { $set: { status: 'done', updatedAt: new Date() } },
+    );
+    await harness.store.projects.updateOne(
+      { _id: project._id },
+      { $set: { 'countsCheck.items.at': new Date(Date.now() - 60_000) } },
+    );
+
+    assert.equal(
+      await correctOvercount(harness.store, project._id),
+      false,
+      'the version moved, so this is a different halfway point and not a settled leak',
     );
   });
 
@@ -971,7 +1015,7 @@ describe('the open item cap', () => {
     await correctOvercount(harness.store, project._id);
     await harness.store.projects.updateOne(
       { _id: project._id },
-      { $set: { 'countsCheck.at': new Date(Date.now() - 60_000) } },
+      { $set: { 'countsCheck.items.at': new Date(Date.now() - 60_000) } },
     );
     await correctOvercount(harness.store, project._id);
     assert.equal(

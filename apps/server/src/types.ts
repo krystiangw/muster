@@ -308,6 +308,14 @@ export interface ProjectLimits {
   escalations: number;
 }
 
+/** One reading of a counter against the work it is supposed to count. */
+export interface CounterObservation {
+  open: number;
+  counter: number;
+  version: number;
+  at: Date;
+}
+
 export interface ProjectDoc {
   _id: string;
   name: string;
@@ -349,16 +357,22 @@ export interface ProjectDoc {
    * that took it finished.
    */
   /**
-   * The last thing the overcount repair saw, so it can tell a leak from a
-   * write in flight. A repair applies only when two sweeps a minute apart read
-   * the same counter and count the same work.
+   * Bumped by every write that moves a counter, so the overcount repair can
+   * ask whether anything happened rather than whether the numbers look the
+   * same. Two closes reaching the same halfway state read identically; they
+   * cannot have the same version.
+   */
+  countsVersion?: { items?: number; escalations?: number };
+  /**
+   * What the overcount repair last saw, per counter, so it can tell a leak
+   * from a write in flight. A repair applies only when a later sweep finds the
+   * same counter at the same version, half a minute on. Kept apart per counter
+   * because a project whose items move all day would otherwise never settle
+   * long enough to repair a stuck question count.
    */
   countsCheck?: {
-    items: number;
-    escalations: number;
-    counterItems: number;
-    counterEscalations: number;
-    at: Date;
+    items?: CounterObservation;
+    escalations?: CounterObservation;
   } | null;
   lastSweptAt: Date | null;
   /**

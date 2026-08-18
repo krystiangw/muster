@@ -48,11 +48,23 @@ export interface HygieneOutcome {
  * with one extra slot, which the next create raises again, where a counter one
  * too high is work refused for good.
  */
-export function spend(field: 'counts.items' | 'counts.escalations', count = 1): Record<string, unknown>[] {
+export type CounterName = 'items' | 'escalations';
+
+/**
+ * Every write that moves a counter says so, and the repair reads that rather
+ * than trying to recognise a moment by its numbers. Two closes caught halfway
+ * look identical and are not the same event; their versions differ.
+ */
+export function charge(name: CounterName, count = 1): Record<string, unknown> {
+  return { $inc: { [`counts.${name}`]: count, [`countsVersion.${name}`]: 1 } };
+}
+
+export function spend(name: CounterName, count = 1): Record<string, unknown>[] {
   return [
     {
       $set: {
-        [field]: { $max: [0, { $subtract: [`$${field}`, count] }] },
+        [`counts.${name}`]: { $max: [0, { $subtract: [`$counts.${name}`, count] }] },
+        [`countsVersion.${name}`]: { $add: [{ $ifNull: [`$countsVersion.${name}`, 0] }, 1] },
       },
     },
   ];
@@ -89,7 +101,7 @@ function hoursAgo(now: Date, hours: number): Date {
  */
 async function releaseSlots(store: Store, projectId: string, count: number): Promise<void> {
   if (count <= 0) return;
-  await store.projects.updateOne({ _id: projectId }, spend('counts.items', count));
+  await store.projects.updateOne({ _id: projectId }, spend('items', count));
 }
 
 /**
@@ -337,14 +349,9 @@ export async function resolveAbsent(
 const SETTLE_MS = 30_000;
 
 export async function correctOvercount(store: Store, projectId: string): Promise<boolean> {
-  // The counter is read before the count and used as the guard afterwards. A
-  // create landing while we count changes it, the guard stops matching and the
-  // repair skips itself. Without that, the repair would overwrite the new
-  // increment with a number taken before it existed, and since it never raises
-  // a counter, that undercount would be permanent.
   const before = await store.projects.findOne(
     { _id: projectId },
-    { projection: { counts: 1, countsCheck: 1 } },
+    { projection: { counts: 1, countsCheck: 1, countsVersion: 1 } },
   );
   if (!before) return false;
 
@@ -353,70 +360,80 @@ export async function correctOvercount(store: Store, projectId: string): Promise
     store.escalations.countDocuments({ projectId, status: 'open' }),
   ]);
 
-  // Two sweeps, a minute apart, reading the same counter and counting the same
-  // work. Nothing here can tell a leak from a write in flight by looking once:
-  // every write that gives a slot back is two writes, the item and then the
-  // counter, and a recount taken between them is honestly stale. Guards on
-  // timestamps were tried and are full of holes, because a request stamps the
-  // clock it read on the way in and a deleted item leaves nothing behind at
-  // all. So the repair stops guessing and waits instead: a discrepancy that
-  // survives a minute of quiet is a leak, and one that does not was somebody
-  // mid-write.
-  const seen = before.countsCheck;
+  const repaired = await Promise.all([
+    repairCounter(store, projectId, 'items', openItems, before),
+    repairCounter(store, projectId, 'escalations', openEscalations, before),
+  ]);
+  return repaired.some(Boolean);
+}
+
+/**
+ * One counter, repaired only once its discrepancy has sat still.
+ *
+ * Nothing here can tell a leak from a write in flight by looking once. Every
+ * path that gives a slot back is two writes, the item and then the counter, so
+ * a recount taken between them is honestly stale, and the counter can even come
+ * back to the number the repair read while the count is already wrong: one item
+ * closing while another reopens does it. Guards on timestamps were tried twice
+ * and are full of holes, because a request stamps the clock it read on the way
+ * in and a deleted item leaves nothing behind at all.
+ *
+ * So the repair stops guessing. It writes down what it saw, with the version
+ * every counter write bumps, and acts only when a later sweep finds the same
+ * counter at the same version half a minute on. Two closes caught at the same
+ * halfway point read identically and cannot share a version, so the same
+ * numbers twice are not mistaken for nothing having happened.
+ *
+ * Per counter, because a project whose items move all day would otherwise never
+ * sit still long enough to repair a question count that has been stuck for a
+ * week.
+ */
+async function repairCounter(
+  store: Store,
+  projectId: string,
+  name: CounterName,
+  open: number,
+  before: Pick<ProjectDoc, 'counts' | 'countsCheck' | 'countsVersion'>,
+): Promise<boolean> {
+  const counter = before.counts[name];
+  const version = before.countsVersion?.[name] ?? 0;
+  const seen = before.countsCheck?.[name];
   const forget = async (): Promise<void> => {
-    if (seen) await store.projects.updateOne({ _id: projectId }, { $unset: { countsCheck: '' } });
+    if (seen) {
+      await store.projects.updateOne({ _id: projectId }, { $unset: { [`countsCheck.${name}`]: '' } });
+    }
   };
 
-  // Nothing to fix is the ordinary case, and it costs nothing: no observation
-  // is kept for a project whose counters already agree with its work, and one
-  // left over from a discrepancy that resolved itself is dropped here.
-  if (before.counts.items <= openItems && before.counts.escalations <= openEscalations) {
+  // Nothing to fix is the ordinary case and costs nothing: no observation is
+  // kept for a counter that agrees with its work, and one left from a
+  // discrepancy that resolved itself is dropped here.
+  if (counter <= open) {
     await forget();
     return false;
   }
 
   const settled =
     seen != null &&
-    seen.items === openItems &&
-    seen.escalations === openEscalations &&
-    seen.counterItems === before.counts.items &&
-    seen.counterEscalations === before.counts.escalations &&
+    seen.open === open &&
+    seen.counter === counter &&
+    seen.version === version &&
     Date.now() - new Date(seen.at).getTime() >= SETTLE_MS;
 
   if (!settled) {
     await store.projects.updateOne(
       { _id: projectId },
-      {
-        $set: {
-          countsCheck: {
-            items: openItems,
-            escalations: openEscalations,
-            counterItems: before.counts.items,
-            counterEscalations: before.counts.escalations,
-            at: new Date(),
-          },
-        },
-      },
+      { $set: { [`countsCheck.${name}`]: { open, counter, version, at: new Date() } } },
     );
     return false;
   }
-  await forget();
 
-  const repairs = await Promise.all([
-    before.counts.items > openItems
-      ? store.projects.updateOne(
-          { _id: projectId, 'counts.items': before.counts.items },
-          { $set: { 'counts.items': openItems } },
-        )
-      : Promise.resolve({ modifiedCount: 0 }),
-    before.counts.escalations > openEscalations
-      ? store.projects.updateOne(
-          { _id: projectId, 'counts.escalations': before.counts.escalations },
-          { $set: { 'counts.escalations': openEscalations } },
-        )
-      : Promise.resolve({ modifiedCount: 0 }),
-  ]);
-  return repairs.some((repair) => repair.modifiedCount > 0);
+  // The guard is the version as well as the number: a counter that left and
+  // came back is not a counter that stayed.
+  const applied = await store.projects.updateOne(
+    { _id: projectId, [`counts.${name}`]: counter, [`countsVersion.${name}`]: version },
+    { $set: { [`counts.${name}`]: open }, $unset: { [`countsCheck.${name}`]: '' } },
+  );
+  return applied.modifiedCount > 0;
 }
 
 export async function sweepProject(
