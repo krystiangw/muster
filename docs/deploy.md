@@ -152,6 +152,16 @@ The test suite asserts all fifteen checks locally
 about the deployment differs from the app: a WAF in front, a redirect that drops
 a path, or `BASE_URL` not matching the host agents actually resolve.
 
+Two more that only the deployment can answer, because both are about what
+happens between the dyno and the wire:
+
+```bash
+# hygiene is running: this date moves, and the watchdog reads the same one
+curl -s https://musterboard.dev/v1/<project> -H 'authorization: Bearer <token>' | grep swept_at
+# the public text arrives compressed, and a page with a capability does not
+curl -sI -H 'accept-encoding: gzip' https://musterboard.dev/skill.md | grep -i content-encoding
+```
+
 ## 5b. Before a second dyno
 
 Three things here assume one process, and only one of them breaks quietly.

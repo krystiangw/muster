@@ -365,12 +365,31 @@ describe('B. agent entry', () => {
 
     // The machine-readable half of the same promise. It names its methods
     // rather than printing them, so an agent that reads this instead of the
-    // prose is trusting exactly the same thing.
+    // prose is trusting exactly the same thing. Where an operation exists on
+    // both doors it carries one name, so nobody has to work out that two words
+    // describe one act.
     const access = await harness.server.inject({
       method: 'GET',
       url: '/.well-known/agent-access.json',
     });
-    for (const endpoint of access.json().endpoints as Array<{ method: string; url: string }>) {
+    const tools = await harness.server.inject({
+      method: 'POST',
+      url: '/mcp',
+      payload: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+    });
+    const toolNames = new Set(
+      (tools.json().result.tools as Array<{ name: string }>).map((tool) => tool.name),
+    );
+    const published = access.json().endpoints as Array<{ name: string; method: string; url: string }>;
+    const cardNames = new Set(published.map((endpoint) => endpoint.name));
+    const missing = [...toolNames].filter((name) => !cardNames.has(name));
+    assert.deepEqual(
+      missing,
+      [],
+      'every MCP tool names an operation the card also publishes; if one genuinely has no HTTP door, say so here rather than letting the names drift',
+    );
+
+    for (const endpoint of published) {
       calls.push({
         method: endpoint.method,
         url: endpoint.url

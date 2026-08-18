@@ -604,7 +604,10 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
         notes: 'Lease with TTL. ok:false means somebody else holds it and the holder is named.',
       },
       {
-        name: 'append_timeline',
+        // The same name the MCP tool carries. These read as operation names and
+        // an agent that meets both doors should not have to work out that two
+        // words describe one act.
+        name: 'append_note',
         method: 'POST',
         url: `${base}/v1/{project}/items/{slug}/timeline`,
         request: { actor: 'errors-loop', message: 'what you learned' },
@@ -680,6 +683,13 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
         request: { status: 'answered', answer: '...' },
         notes:
           'The operator answering from a script instead of the web view. Reopening a question costs a queue slot like a new one.',
+      },
+      {
+        name: 'list_items',
+        method: 'GET',
+        url: `${base}/v1/{project}/items?order=id&limit=200&cursor={next_cursor}`,
+        notes:
+          'Filter by status, owner, label, source, staleness or claim state. order=id is the stable one for reading everything back; order=recent with since={as_of} is the change feed, and every page of one walk reports the same as_of.',
       },
       {
         name: 'list_escalations',
