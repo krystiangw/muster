@@ -798,6 +798,18 @@ a plan sells can cost. Nothing else does: every other filter is answered from an
 index and stops at the page, and a clock on those would be a clock on the boards
 that are behaving.
 
+A clock bounds one request and says nothing about how many arrive, so the two
+pages behind a read link also took the ceiling the API door already gives the
+same project. That needed two ceilings rather than one, and each of the two came
+from a review of the fix before it. Charging the link's allowance before
+checking the link let anybody holding a revoked one keep the owner locked out of
+their own board; charging it only afterwards left the check itself uncounted,
+and the check is a lookup plus, for anybody carrying a session, a session read
+and a write. So: what one address may ask of these pages, charged first, which
+is what makes a refusal cheap enough to hand out; and what one link may be read,
+charged once it has opened something, which is the owner's and is spent by
+nobody else.
+
 **A stopped search is not an empty answer.** Both are a page with nothing on it,
 and they mean opposite things: one says there is nothing to find, the other says
 nobody looked long enough to know. The API refuses with 503 `search_too_slow`
