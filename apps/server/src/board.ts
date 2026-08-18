@@ -420,7 +420,11 @@ export function applyForColumn(column: BoardColumn): BoardApply {
 export function unsatisfiableBy(column: BoardColumn): string[] {
   if (column.apply) return [];
   const reasons: string[] = [];
-  if (column.match.stale !== undefined) reasons.push('"stale", which only hygiene sets');
+  // Only `stale: true`. A move goes through the ordinary upsert, and every
+  // agent write clears the flag, so a column for fresh work is a column a move
+  // makes true by definition. The built-in "signals" preset has exactly such a
+  // column, and the first version of this rule took it off the board.
+  if (column.match.stale === true) reasons.push('"stale": true, which only hygiene sets');
   if ((column.match.source ?? []).length > 0) {
     reasons.push('"source", which belongs to whatever mirrors the item');
   }
@@ -874,16 +878,6 @@ export function boardWarnings(config: BoardConfig): string[] {
     const statuses = column.match.status ?? [];
     return statuses.length === 0 || statuses.some((status) => TERMINAL_STATUSES.includes(status));
   };
-
-  config.columns.forEach((column) => {
-    const reasons = unsatisfiableBy(column);
-    if (reasons.length === 0) return;
-    warnings.push(
-      `"${column.title}" is a view, not a destination: it asks for ${reasons.join(
-        ', and ',
-      )}, and no move can set that. Cards that already match still appear here; the board simply leaves the column out of the move control. Declare "apply" on it to say what putting a card there should mean.`,
-    );
-  });
 
   config.columns.forEach((column, index) => {
     if ((column.match.labels ?? []).length === 0) return;

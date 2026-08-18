@@ -549,6 +549,29 @@ export function renderBoardSettings(
     .join('\n')}
 <details class="layout">
 <summary>Layout: columns, swimlanes and presets</summary>
+${
+    // Said here rather than above the board. It answers one question, asked
+    // once by whoever writes the layout: why is my column missing from the
+    // move control. As a warning on the board it would nag every visitor about
+    // a column that is working exactly as intended, including in the presets
+    // this project ships.
+    (() => {
+      const views = view.config.columns
+        .map((column) => ({ column, reasons: unsatisfiableBy(column) }))
+        .filter((entry) => entry.reasons.length > 0);
+      if (views.length === 0) return '';
+      return `<p class="why">Views, not destinations: ${views
+        .map(
+          (entry) =>
+            `<b>${escapeHtml(entry.column.title)}</b> asks for ${escapeHtml(
+              entry.reasons.join(', and '),
+            )}`,
+        )
+        .join('; ')}. No move can set that, so the board leaves those columns out of the move
+control and cards reach them by being what the filter describes. Declare "apply" on one to say
+what putting a card there should mean.</p>`;
+    })()
+  }
 <p>A column is a name and a filter over what an item already is: its status, its labels, its owner,
 whether somebody holds it, whether it went stale, where it came from. There is deliberately no way
 to invent a status here. That is what keeps a board with six columns from turning into six values

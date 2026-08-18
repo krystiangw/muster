@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { BOARD_PRESETS } from '../src/board.js';
 import { after, before, describe, it } from 'node:test';
 import { moveItem } from '../src/board.js';
 import { authed, createProject, startHarness, type Harness, type Project } from './helper.js';
@@ -1276,18 +1277,47 @@ describe('a layout that would trap finished work', () => {
         { key: 'done', title: 'Done', match: { status: ['done'] } },
       ],
     });
-    const warnings = saved.json().warnings as string[];
-    assert.equal(warnings.filter((line) => line.includes('view, not a destination')).length, 2);
-    assert.ok(warnings.some((line) => line.includes('priority_min')));
-    assert.ok(warnings.some((line) => line.includes('stale')));
+    // Not a warning above the board: a column that is honestly a view is not a
+    // fault, and nagging about it would nag about the presets this project
+    // ships. The layout section answers it where the question is asked.
+    assert.deepEqual(saved.json().warnings, []);
 
     await post(project, '/items', { slug: 'work', title: 'work', actor: 'a' });
     const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(page.body, /Views, not destinations/);
+    assert.match(page.body, /priority_min/);
     // The card sits in "To do", so the only destination left is the one column
     // a move can satisfy. The two views are offered nowhere.
     assert.ok(page.body.includes('value="done"'), 'a column a move can satisfy is offered');
     assert.ok(!page.body.includes('value="urgent"'), 'and one it cannot is not');
     assert.ok(!page.body.includes('value="rotting"'));
+  });
+
+  it('keeps a column for fresh work as a destination, since a move makes it fresh', async () => {
+    // The first version of the rule read "stale" as unreachable either way and
+    // took the built-in signals preset's own column off the board. A move goes
+    // through the ordinary upsert, and every agent write clears the flag, so
+    // moving a rotting card into "Fresh" is exactly what makes it fresh.
+    const project = await createProject(harness, 'signals');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    // The API takes a layout, not a preset name; the preset is what the browser
+    // form posts. Same columns either way.
+    await put(project, '/board', BOARD_PRESETS.signals!.config);
+
+    await post(project, '/items', { slug: 'mirrored', title: 'mirrored', source: 'scanner', actor: 'a' });
+    await harness.store.items.updateOne(
+      { projectId: project.id, slug: 'mirrored' },
+      { $set: { stale: true, staleSince: new Date(Date.now() - 86_400_000) } },
+    );
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.ok(page.body.includes('value="fresh"'), 'the preset offers its own column');
+    // The preset's own "Going stale" column is honestly a view, and the layout
+    // section says so, but nothing above the board treats it as a fault.
+    assert.ok(!page.body.includes('notice warn'), 'a shipped preset does not warn on arrival');
+
+    const moved = await post(project, '/items/mirrored/move', { column: 'fresh', actor: 'op' });
+    assert.equal(moved.json().item.stale, false);
+    assert.equal(moved.json().landed_in, 'fresh');
   });
 
   it('moves a card to the person a one-owner column names', async () => {
