@@ -189,14 +189,15 @@ async function fileOnTheBoard(question, context) {
 const NOTE_EVERY_MS = 60 * 60_000;
 const noteIsDue = () =>
   state.lastNote === null || Date.parse(now) - Date.parse(state.lastNote) >= NOTE_EVERY_MS;
+// Written at the end of the round rather than when the HTTP checks pass, so a
+// line saying everything is fine cannot be printed above an alert from the same
+// round, and cannot claim the hour on a round that had something to say.
+let hygieneBehind = false;
+let noticesStuck = false;
 
 if (broken.length === 0) {
   const recovered = state.alerted;
   Object.assign(state, { failures: 0, alerted: false, lastOk: now });
-  if (noteIsDue()) {
-    state.lastNote = now;
-    console.log(`ok ${now} ${checks.map((check) => `${check.name} ${check.status}`).join(', ')}`);
-  }
   if (recovered) {
     const delivery = await mail('Muster is answering again', [
       `${base} is back up as of ${now}.`,
@@ -263,6 +264,7 @@ if (broken.length === 0 && apiRead?.body && 'swept_at' in apiRead.body) {
     state.hygieneMisses = 0;
     state.hygieneAlerted = false;
   } else {
+    hygieneBehind = true;
     state.hygieneMisses += 1;
     const since = sweptAt ? `${Math.round(ageMs / 60_000)} min ago` : 'never';
     if (state.hygieneMisses >= 2 && !state.hygieneAlerted) {
@@ -332,6 +334,7 @@ if (broken.length === 0 && apiRead?.body && 'oldest_unannounced_at' in apiRead.b
     state.noticeMisses = 0;
     state.noticeAlerted = false;
   } else {
+    noticesStuck = true;
     state.noticeMisses += 1;
     const waitedMin = Math.round((Date.parse(now) - oldestMs) / 60_000);
     const lastNotice = lastNoticeMs
@@ -360,6 +363,16 @@ if (broken.length === 0 && apiRead?.body && 'oldest_unannounced_at' in apiRead.b
       console.log(`notice miss ${state.noticeMisses}: oldest waited ${waitedMin} min, last notice ${lastNotice}`);
     }
   }
+}
+
+if (broken.length === 0 && !hygieneBehind && !noticesStuck && noteIsDue()) {
+  state.lastNote = now;
+  const swept = apiRead?.body?.swept_at
+    ? `${Math.round((Date.parse(now) - Date.parse(apiRead.body.swept_at)) / 60_000)} min`
+    : 'unknown';
+  console.log(
+    `ok ${now} ${checks.map((check) => `${check.name} ${check.status}`).join(', ')}, swept ${swept} ago`,
+  );
 }
 
 mkdirSync(HOME, { recursive: true });
