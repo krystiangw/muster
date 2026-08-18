@@ -200,7 +200,7 @@ const TOOLS: ToolDefinition[] = [
         q: {
           type: 'string',
           description:
-            'Words to look for in the slug or the title, case insensitive: every word has to appear, in either field, in any order. Past 120 characters or six words it is cut, not refused.',
+            'Words to look for in the slug or the title, case insensitive: every word has to appear, in either field, in any order. Past 120 characters or six words it is cut, not refused. A search that reads for longer than it is allowed is refused with search_too_slow rather than answered with an empty list: narrow it with another word, or with status, owner or label beside it.',
         },
         limit: { type: 'integer', minimum: 1, maximum: 200 },
         order: {

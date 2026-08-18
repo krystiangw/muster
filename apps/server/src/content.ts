@@ -240,7 +240,10 @@ curl -s "$MUSTER/items?limit=200&order=id&cursor=<next_cursor>" -H "authorizatio
 
 Looking for one card rather than all of them, \`q=\` searches the slug and the
 title, case insensitively. It is the same search the board offers a person, so
-the two doors answer alike:
+the two doors answer alike. On a board with a long history a search can run
+longer than it is allowed, and then it is refused with 503 \`search_too_slow\`
+rather than answered with an empty page: an empty page would say there is
+nothing to find, which is not what happened. Narrow it and ask again:
 
 \`\`\`bash
 curl -s "$MUSTER/items?q=withdraw" -H "authorization: Bearer $TOKEN"

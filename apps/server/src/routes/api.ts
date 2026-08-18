@@ -527,7 +527,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
               q: {
                 type: 'string',
                 description:
-                  'Words to look for in the slug or the title, case insensitive: every word has to appear, in either field, in any order. The same search the board offers a person, so both doors answer alike. Anything past 120 characters or six words is cut rather than refused, for the same reason.',
+                  'Words to look for in the slug or the title, case insensitive: every word has to appear, in either field, in any order. The same search the board offers a person, so both doors answer alike. Anything past 120 characters or six words is cut rather than refused, for the same reason. A search that reads for longer than it is allowed is refused with 503 search_too_slow, never answered with an empty page: narrow it with another word, or with status, owner or label beside it.',
               },
               limit: { type: 'integer', minimum: 1, maximum: 200 },
               order: {
