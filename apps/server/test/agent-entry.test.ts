@@ -301,14 +301,31 @@ describe('B. agent entry', () => {
       method: 'GET',
       url: '/.well-known/agent-access.json',
     });
-    const names = new Set(
-      (card.json().endpoints as Array<{ name: string; method: string }>).map(
-        (one) => `${one.method} ${one.name}`,
-      ),
+    // Path and method, without the query string a card entry carries as an
+    // example: `{project}` is a placeholder, not something to encode.
+    const published = new Set(
+      (card.json().endpoints as Array<{ method: string; url: string }>).map((one) => {
+        const path = one.url.replace(/^https?:\/\/[^/]+/, '').split('?')[0]!;
+        return `${one.method} ${path}`;
+      }),
     );
-    for (const call of ['GET next_item', 'POST take_next_item', 'POST upsert_item', 'POST claim_item']) {
-      assert.ok(names.has(call), `${call} is not on the card: ${[...names].join(', ')}`);
+
+    // Derived from the routes rather than from a second hand-kept list, which
+    // would fail the same way the card did: the OpenAPI document is generated
+    // from what is registered, so it is the inventory. Only the working loop
+    // is required to be on the card, because the card is what an agent needs
+    // rather than everything this service answers.
+    const openapi = (await harness.server.inject({ method: 'GET', url: '/openapi.json' })).json();
+    const working = /^\/v1\/\{project\}\/(items|next|escalations|inbox|observe|agents|board)/;
+    const missing: string[] = [];
+    for (const [route, methods] of Object.entries(openapi.paths as Record<string, object>)) {
+      if (!working.test(route)) continue;
+      for (const method of Object.keys(methods)) {
+        const call = `${method.toUpperCase()} ${route}`;
+        if (!published.has(call)) missing.push(call);
+      }
     }
+    assert.deepEqual(missing, [], `on the routes and not on the card: ${missing.join(', ')}`);
   });
 
   it('compresses the public documents, and nothing that holds a credential', async () => {

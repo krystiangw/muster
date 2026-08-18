@@ -762,6 +762,54 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
           'The same choice, taken: the selection and the lease are one write, so a fleet asking at once gets different items instead of all but one losing the claim that follows an offer. Answers with the item already held and "claimed": true.',
       },
       {
+        name: 'read_item',
+        method: 'GET',
+        url: `${base}/v1/{project}/items/{slug}`,
+        notes: 'One card with its timeline, which is what to read before deciding whether to pick it up.',
+      },
+      {
+        name: 'heartbeat_claim',
+        method: 'POST',
+        url: `${base}/v1/{project}/items/{slug}/heartbeat`,
+        request: { agent: '{handle}', ttl_minutes: 60 },
+        notes: 'Work outliving its lease says so. Without this the claim expires and the item goes back in the pool.',
+      },
+      {
+        name: 'release_claim',
+        method: 'POST',
+        url: `${base}/v1/{project}/items/{slug}/release`,
+        request: { agent: '{handle}', note: 'why you are letting go' },
+        notes: 'Safe to call twice and safe after closing: what you asked for is already true.',
+      },
+      {
+        name: 'list_agents',
+        method: 'GET',
+        url: `${base}/v1/{project}/agents`,
+        notes:
+          'Who is registered here, and beside it every handle that has written without registering, which is where a second spelling of your own name shows up.',
+      },
+      {
+        name: 'rename_agent',
+        method: 'POST',
+        url: `${base}/v1/{project}/agents/{handle}/rename`,
+        request: { to: 'the-right-one' },
+        notes:
+          'Moves the work and any live claim onto one name. Two spellings are two agents here, and next_item offers work by the registered one.',
+      },
+      {
+        name: 'acknowledge_answer',
+        method: 'POST',
+        url: `${base}/v1/{project}/escalations/{id}/ack`,
+        request: { agent: '{handle}', note: 'what you did with it' },
+        notes: 'Says the answer was carried out, so the same decision stops coming back on every iteration.',
+      },
+      {
+        name: 'board_presets',
+        method: 'GET',
+        url: `${base}/v1/{project}/board/presets`,
+        notes: 'The layouts this service ships, as a starting point for set_board.',
+      },
+      {
         name: 'observe',
         method: 'POST',
         url: `${base}/v1/{project}/observe`,
