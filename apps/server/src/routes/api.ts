@@ -1146,7 +1146,18 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       async (request) => {
         const { project } = auth(request);
         const outcomes = await sweepProject(store, project);
-        return { swept: Object.fromEntries(outcomes.map((o) => [o.rule, o.affected])) };
+        return {
+          swept: Object.fromEntries(outcomes.map((o) => [o.rule, o.affected])),
+          // Only when a rule took a flag off something, which is rare enough
+          // that reporting it as a zero on every sweep would be noise.
+          ...(outcomes.some((o) => o.unmarked)
+            ? {
+                unmarked: Object.fromEntries(
+                  outcomes.filter((o) => o.unmarked).map((o) => [o.rule, o.unmarked]),
+                ),
+              }
+            : {}),
+        };
       },
     );
 

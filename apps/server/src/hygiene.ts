@@ -24,6 +24,12 @@ export const TIMELINE_KEEP = 50;
 export interface HygieneOutcome {
   rule: 'claim_expiry' | 'stale' | 'require_body' | 'absence_resolve';
   affected: number;
+  /**
+   * Items a rule took a flag *off*, when it has such a case. Separate from
+   * `affected`, because one number covering both directions would report a
+   * pass that unmarked three items as having marked three.
+   */
+  unmarked?: number;
 }
 
 /** Builds the pipeline-update fragment that appends one timeline entry. */
@@ -112,6 +118,33 @@ export async function markStale(
 ): Promise<HygieneOutcome> {
   if (rules.staleAfterHours === null) return { rule: 'stale', affected: 0 };
   const cutoff = hoursAgo(now, rules.staleAfterHours);
+  // First, undo what this rule got wrong before the exemption existed. Hygiene
+  // marks and agents unmark, so a rule that clears its own flag is a departure
+  // worth naming: it is this rule correcting its own past output, on items
+  // where the correction can never come from anywhere else. A heartbeat writes
+  // neither `stale` nor `touchedAt`, and releasing the claim does not clear a
+  // flag either, so without this a card marked once under a live claim carries
+  // it for as long as the item exists.
+  const repaired = await store.items.updateMany(
+    {
+      projectId,
+      stale: true,
+      'claim.expiresAt': { $gt: now },
+    },
+    [
+      {
+        $set: {
+          ...appendTimeline(
+            'somebody holds this, so the stale flag was cleared: it was marked before held work was exempt',
+            now,
+          ),
+          stale: false,
+          staleSince: null,
+        },
+      },
+    ],
+  );
+
   const result = await store.items.updateMany(
     {
       projectId,
@@ -133,7 +166,13 @@ export async function markStale(
       },
     ],
   );
-  return { rule: 'stale', affected: result.modifiedCount };
+  return {
+    rule: 'stale',
+    // Both directions in one number would say "stale: 3" for a pass that
+    // unmarked three, so the repair is counted where it belongs.
+    affected: result.modifiedCount,
+    ...(repaired.modifiedCount > 0 ? { unmarked: repaired.modifiedCount } : {}),
+  };
 }
 
 /**

@@ -91,6 +91,27 @@ describe('stale marking', () => {
     assert.equal(dropped.stale, true, 'and the moment nobody holds it, it is stale');
   });
 
+  it('clears a flag it set on held work before the exemption existed', async () => {
+    // Forward-only would have been half a fix: a heartbeat writes neither
+    // `stale` nor `touchedAt`, and releasing the claim clears no flag either,
+    // so an item marked once under a live claim would carry it for as long as
+    // it exists.
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'held', title: 'held', actor: 'a' });
+    await post(project, '/items/held/claim', { agent: 'a', ttl_minutes: 60 });
+    await harness.store.items.updateOne(
+      { projectId: project.id, slug: 'held' },
+      { $set: { stale: true, staleSince: new Date(Date.now() - 86_400_000) } },
+    );
+
+    await sweepProject(harness.store, await projectDoc(project));
+    const item = await itemDoc(project, 'held');
+    assert.equal(item.stale, false);
+    assert.equal(item.staleSince, null);
+    assert.match(item.timeline.at(-1)!.message, /stale flag was cleared/);
+    assert.equal(item.timeline.at(-1)!.by, 'hygiene');
+  });
+
   it('flags an untouched item without closing it, and never counts as activity', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'forgotten', title: 'forgotten', actor: 'a' });
