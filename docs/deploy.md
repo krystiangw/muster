@@ -208,6 +208,19 @@ else echo 'ok: capability pages are not compressed'
 fi
 ```
 
+Before a release, and after anything that touches how work is accounted for:
+
+```bash
+node tools/soak-local.mjs
+```
+
+Thousands of concurrent operations against a server that exists only for the
+run, checking what a request-by-request test cannot: that the open counter
+matches the collection, that a slug never becomes two items, and that two agents
+never hold one claim. It earned its place on 2026-08-18 by finding the counter
+drifting below the collection, permanently, because nothing raises a counter
+that is too low.
+
 And the other half of the promise, which is released separately from this one:
 
 ```bash
