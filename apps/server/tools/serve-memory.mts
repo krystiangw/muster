@@ -26,13 +26,20 @@ import { loadConfig } from '../src/config.js';
 import { createStore } from '../src/db.js';
 
 /**
- * A free port, found before anything is configured rather than by listening on
- * zero and asking afterwards.
+ * A free port, found rather than asked for.
  *
- * `BASE_URL` is read at build time in one place that matters, the same-site
- * check on the capability forms, so a config built with port zero refuses every
- * form on the instance and hands out read links nobody can open. Finding the
- * number first costs a socket and keeps the whole configuration honest.
+ * `BASE_URL` is read at build time in the one place that decides whether a form
+ * on a capability page came from this site, so a config built around port zero
+ * refuses every form on the instance and hands out read links nobody can open.
+ * The number has to be known before the config is.
+ *
+ * Which leaves a gap between letting the probe go and binding for real, and the
+ * only way to keep it small is to do everything slow first. MongoDB comes up
+ * before this is called, because on a machine that has to download it that is
+ * minutes; what is left afterwards is registering routes. If something takes
+ * the port inside that window, the bind fails loudly and the runner says so,
+ * which is the failure this ordering is chosen to make rare rather than
+ * impossible.
  */
 const freePort = async (): Promise<number> =>
   new Promise((resolve, reject) => {
@@ -44,9 +51,9 @@ const freePort = async (): Promise<number> =>
     });
   });
 
+const mongo = await MongoMemoryServer.create();
 const requested = Number(process.env.PORT ?? 4600);
 const port = requested === 0 ? await freePort() : requested;
-const mongo = await MongoMemoryServer.create();
 const config = loadConfig({
   MONGODB_URI: mongo.getUri(),
   MONGODB_DB: 'memory',
