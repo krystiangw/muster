@@ -625,7 +625,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         // one: no cursor, so nothing past the limit existed on this door, no
         // since, so no incremental sync, and no claimed, which the tool
         // description had been promising all along.
-        const { items, nextCursor, asOf } = await readItems(store, project._id, {
+        const { items, nextCursor, asOf } = await readItems(store, project, {
           status: args.status as ItemStatus | undefined,
           owner: args.owner === undefined ? undefined : str(args.owner),
           label: args.label === undefined ? undefined : str(args.label),

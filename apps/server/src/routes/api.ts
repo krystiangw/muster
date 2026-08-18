@@ -525,17 +525,11 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       async (request) => {
         const { project } = auth(request);
         const query = request.query as Record<string, unknown>;
-        // A lapsed lease is free work the moment it lapses, but the row itself
-        // does not change until hygiene clears it and writes the timeline entry,
-        // so a caller polling `claimed=false&since=` would not see it until the
-        // scheduled pass came round. The throttled sweep runs here for the same
-        // reason it runs on /next and /board: one poll of delay rather than
-        // whatever the interval happens to be.
-        void maybeSweep(store, project).catch(() => undefined);
-        // Paging, ordering and the `since` window live in the service, because
-        // the MCP tool is the same read through another door and the two had
-        // already drifted apart once.
-        const { items, nextCursor, asOf } = await readItems(store, project._id, {
+        // Paging, ordering, the `since` window and the throttled sweep that
+        // makes a lapsed lease visible all live in the service, because the MCP
+        // tool is the same read through another door and the two had already
+        // drifted apart twice.
+        const { items, nextCursor, asOf } = await readItems(store, project, {
           status: query.status as ItemStatus | undefined,
           owner: query.owner as string | undefined,
           label: query.label as string | undefined,
