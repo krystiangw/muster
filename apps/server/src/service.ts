@@ -889,7 +889,11 @@ export async function upsertItem(
   let releasedClaim: string | null = null;
 
   if (!existing) {
-    if (input.mustExist) throw notFound(slug);
+    // A guard says "only if it still reads like this", which is a sentence
+    // about a card that exists. Reaching here means it does not, and the answer
+    // is that rather than whatever the capacity check below would have said to
+    // a write that was never going to create anything.
+    if (input.mustExist || input.expect) throw notFound(slug);
     if (!willBeTerminal && atCapacity()) {
       throw limitReached('open items', project.limits.items);
     }
