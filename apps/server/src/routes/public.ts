@@ -802,9 +802,22 @@ yours.</p>`
 <p class="why" style="margin:8px 0 0">Or the agent does it itself with
 <code>POST /v1/${escapeHtml(project._id)}/claim</code>.</p>
 </details></div>`
-        : `<p class="why">Owned by ${escapeHtml(redactAddress(project.claimedBy ?? ''))}${
+        : // What this address is, said where somebody is looking at it. The mail
+          // that sends people here says the link is a password; the page they
+          // land on said nothing, and the first person to arrive on a phone read
+          // "answer these questions without signing in" as a hole in the
+          // product rather than as the feature it is. A share sheet is one tap
+          // away on that screen.
+          `<p class="why">Owned by ${escapeHtml(redactAddress(project.claimedBy ?? ''))}${
             project.claimedAt ? ` since ${when(project.claimedAt)}` : ''
-          }.</p>`
+          }. ${
+            (project.visibility ?? 'link') === 'owner'
+              ? 'Private: this page opens only for its owner, signed in, and the address alone does nothing.'
+              : `Open by link, which makes this address the key: anybody who has it can answer these
+questions and move these cards without signing in. That is what makes it work from a phone at three
+in the morning, and the reason not to forward it. <a href="/operator">Your projects</a> has the
+switch that closes it.`
+          }</p>`
     }
 
 ${

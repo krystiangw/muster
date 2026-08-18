@@ -330,6 +330,43 @@ describe('an email that cannot be sent', () => {
   });
 });
 
+describe('what the link says about itself', () => {
+  /**
+   * The mail that sends somebody here calls the link a password. The page they
+   * land on used to say nothing at all, and the first person to arrive on a
+   * phone read "answer these questions, no sign in" as a hole rather than as
+   * the feature it is. On that screen a share sheet is one tap away.
+   */
+  it('tells the reader what the address in their hand can do', async () => {
+    const project = await createProject(harness, 'open by link');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    await claimForEmail(project, 'owner@example.com');
+
+    const open = await harness.server.inject({ method: 'GET', url: `/r/${readToken}` });
+    assert.equal(open.statusCode, 200);
+    assert.match(open.body, /Open by link/);
+    assert.match(open.body, /anybody who has it can answer/);
+
+    // And the opposite state says the opposite thing, because "private" is
+    // worth reading too when the whole question is who can open this.
+    await harness.server.inject({
+      method: 'PATCH',
+      url: project.api,
+      headers: authed(project),
+      payload: { visibility: 'owner' },
+    });
+    const session = await signIn(harness, 'owner@example.com');
+    const closed = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}`,
+      headers: { cookie: session.cookie },
+    });
+    assert.equal(closed.statusCode, 200);
+    assert.match(closed.body, /Private: this page opens only for its owner/);
+    assert.doesNotMatch(closed.body, /Open by link/);
+  });
+});
+
 describe('a project narrowed to its owner', () => {
   it('stops opening for the link alone, and still opens for the owner', async () => {
     const project = await createProject(harness, 'private');

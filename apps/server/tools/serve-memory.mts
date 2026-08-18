@@ -18,12 +18,34 @@
  * writes a minute from one address, and against production limits it would be
  * measuring the rate limiter.
  */
+import { createServer } from 'node:net';
+import type { AddressInfo } from 'node:net';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { createStore } from '../src/db.js';
 
-const port = Number(process.env.PORT ?? 4600);
+/**
+ * A free port, found before anything is configured rather than by listening on
+ * zero and asking afterwards.
+ *
+ * `BASE_URL` is read at build time in one place that matters, the same-site
+ * check on the capability forms, so a config built with port zero refuses every
+ * form on the instance and hands out read links nobody can open. Finding the
+ * number first costs a socket and keeps the whole configuration honest.
+ */
+const freePort = async (): Promise<number> =>
+  new Promise((resolve, reject) => {
+    const probe = createServer();
+    probe.on('error', reject);
+    probe.listen(0, '127.0.0.1', () => {
+      const { port: found } = probe.address() as AddressInfo;
+      probe.close(() => resolve(found));
+    });
+  });
+
+const requested = Number(process.env.PORT ?? 4600);
+const port = requested === 0 ? await freePort() : requested;
 const mongo = await MongoMemoryServer.create();
 const config = loadConfig({
   MONGODB_URI: mongo.getUri(),
