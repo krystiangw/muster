@@ -814,4 +814,7 @@ slugs are namespaced and hyphenated. It also buys an eleventh index on the
 collection every write pays for, larger than the `labels` index this repository
 deleted two hours earlier for buying nothing. Worth revisiting on a trigger and
 not before: any single project passing fifty thousand items, or a search bearing
-read passing 300 ms at the ninety ninth percentile in production.
+read passing 300 ms at the ninety ninth percentile in production. The first of
+those is printed by `tools/insights.mts` as "largest board, items stored", with
+a line under it naming this note once it is past. A trigger nobody measures is
+a sentence in a document, and this repository has enough of those.

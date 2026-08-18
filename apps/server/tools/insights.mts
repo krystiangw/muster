@@ -182,7 +182,13 @@ row('  boards never swept', unswept);
 // project. So both ends are asked, the boards with the most open work and the
 // boards claiming the most, and every candidate is then counted exactly.
 const CHECKED = 50;
-const [byWork, byCounter] = await Promise.all([
+// The one number that decides whether the search question gets reopened. The
+// clock on a search bounds what a slow one costs; making the search itself
+// cheap means changing what it matches, which docs/design-notes.md defers until
+// a board is actually large. A trigger nobody measures is not a trigger, so it
+// is measured here, where somebody reads it.
+const REVISIT_SEARCH_AT = 50_000;
+const [byWork, byCounter, largest] = await Promise.all([
   items
     .aggregate<{ _id: string; open: number }>([
       { $match: { status: { $nin: ['done', 'dropped'] } } },
@@ -195,6 +201,16 @@ const [byWork, byCounter] = await Promise.all([
     .find({ 'counts.items': { $gt: 0 } } as never, { projection: { name: 1, counts: 1 } })
     .sort({ 'counts.items': -1 })
     .limit(CHECKED)
+    .toArray(),
+  // Everything a board holds, finished work included. The counter beside it
+  // counts only what is open, which is the number the cap enforces and the
+  // wrong one for this: a search reads what is stored.
+  items
+    .aggregate<{ _id: string; stored: number }>([
+      { $group: { _id: '$projectId', stored: { $sum: 1 } } },
+      { $sort: { stored: -1 } },
+      { $limit: 1 },
+    ])
     .toArray(),
 ]);
 const candidateIds = [...new Set([...byWork.map((entry) => entry._id), ...byCounter.map((p) => p._id)])];
@@ -215,6 +231,11 @@ row('counters checked', candidates.length);
 row('  of those, drifted', drifted.length);
 for (const entry of drifted.slice(0, 5)) {
   console.log(`    ${entry.name.slice(0, 24).padEnd(24)} counter ${entry.counter}, open ${entry.open}`);
+}
+const stored = largest[0]?.stored ?? 0;
+row('largest board, items stored', stored);
+if (stored >= REVISIT_SEARCH_AT) {
+  console.log(`    past ${REVISIT_SEARCH_AT}: reopen the search question in docs/design-notes.md`);
 }
 row(
   'median answer, hours',
