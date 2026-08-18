@@ -114,6 +114,25 @@ describe('the operator view', () => {
     assert.equal(answer.answer, 'Not this week');
   });
 
+  it('tells somebody with no projects yet how a board gets here', async () => {
+    // The first screen after signing in, for somebody who has just been handed
+    // a read link and does not know what to do with it. It was a table with a
+    // header row, no rows, and nothing said.
+    const session = await signIn(harness, 'nobody@example.com');
+    const view = await harness.server.inject({
+      method: 'GET',
+      url: '/operator',
+      headers: { cookie: session.cookie },
+    });
+    assert.match(view.body, /None yet/);
+    assert.match(view.body, /skill\.md/, 'and where the agent that makes one reads its protocol');
+    assert.ok(
+      !/<th>Project<\/th>/.test(view.body.split('Going stale')[0] ?? '') ||
+        view.body.includes('hidden'),
+      'and no empty table above it',
+    );
+  });
+
   it('forgets a cookie that opens nothing, so the navigation stops lying', async () => {
     // The navigation is drawn from the cookie's presence and nothing else, on
     // purpose: no page reads the database to decide one word. The cost is a

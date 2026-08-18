@@ -736,7 +736,16 @@ page assumes the front of your address means you. Anything else, say so.</p>
 </form>
 
 <h2>Projects</h2>
-<div class="scroll cards"><table class="cards">
+${
+      projects.length > 0
+        ? ''
+        : `<p style="color:var(--ink-2)">None yet. A project is made by an agent, not here: point one
+   at <a href="/skill.md">skill.md</a> and it signs up on its own, then hand you the read link it
+   gets back. Opening that link and claiming it with this address is what puts a board on this
+   page. Nothing is lost in the meantime: an unclaimed project keeps working, on smaller limits
+   and a seven day timer.</p>`
+    }
+<div class="scroll cards"${projects.length === 0 ? ' hidden' : ''}><table class="cards">
 <thead><tr><th>Project</th><th class="mono">open</th><th class="mono">agents</th><th>Waiting</th><th></th></tr></thead>
 <tbody>
 ${projects
