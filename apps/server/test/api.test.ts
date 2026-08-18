@@ -1259,6 +1259,12 @@ describe('who is writing, and by what name', () => {
       payload: { message: 'empty on purpose', actor: '' },
     });
     assert.match(blank.json().warnings.join(' '), /Nothing named itself/);
+    assert.equal(
+      blank.json().item.last_actor,
+      'unknown-agent',
+      'and the board carries the sentinel rather than a third spelling of nobody',
+    );
+    assert.equal(blank.json().item.timeline.at(-1).by, 'unknown-agent');
 
     // Punctuation is not a near miss of anybody: every string starts with
     // nothing, so without a guard this suggested whoever registered first.

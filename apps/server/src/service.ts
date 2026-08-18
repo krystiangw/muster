@@ -1308,11 +1308,16 @@ export async function appendNote(
   store: Store,
   project: ProjectDoc,
   slug: string,
-  actor: string,
+  rawActor: string,
   message: string,
   kind: TimelineKind = 'note',
 ): Promise<ItemDoc> {
   const now = new Date();
+  // Here rather than at the door, because there is more than one door and the
+  // item write already does it. A blank author is a third spelling of "nobody
+  // said": the board would carry an empty name beside `unknown-agent`, and a
+  // warning telling somebody the board shows the sentinel would be false.
+  const actor = rawActor || 'unknown-agent';
   const entry: TimelineEntry = { at: now, by: actor, kind, message };
   const item = await store.items.findOneAndUpdate(
     { projectId: project._id, slug: normalizeSlug(slug) },
