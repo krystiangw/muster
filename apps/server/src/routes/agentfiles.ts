@@ -129,9 +129,10 @@ export function registerAgentFiles(app: FastifyInstance, config: Config, store: 
     return mcpCard;
   });
   // Proof that whoever publishes `dev.musterboard/muster` to the MCP registry
-  // owns this domain. Text, not JSON: the registry reads one line. Unset on a
-  // deployment that publishes nothing, and then this answers 404 rather than
-  // serving an empty file that reads as a broken claim.
+  // owns this domain. One line of text, the whole record and not just the key:
+  // `v=MCPv1; k=ed25519; p=<base64>`. Unset on a deployment that publishes
+  // nothing, and then this answers 404 rather than serving an empty file that
+  // reads as a broken claim.
   app.get('/.well-known/mcp-registry-auth', { schema: { hide: true } }, (_request, reply) => {
     if (!config.mcpRegistryAuth) {
       return reply.code(404).send({

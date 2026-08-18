@@ -2793,6 +2793,27 @@ describe('a card that waits on another', () => {
     assert.match(parked.body, /waiting on gate-2/);
   });
 
+  it('counts only the work it could have offered as withheld', async () => {
+    // A card somebody parked as blocked was never a candidate, so counting it
+    // as held back tells an agent there is more work behind the curtain than
+    // there is.
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'gate', title: 't', body: 'b', actor: 'a' });
+    await post(project, '/items', { slug: 'parked', title: 't', body: 'b', status: 'blocked', blocked_by: ['gate'], actor: 'a' });
+    await post(project, '/items', { slug: 'open-and-waiting', title: 't', body: 'b', blocked_by: ['gate'], actor: 'a' });
+    // The blocker itself is the only free card, so it goes to somebody and the
+    // board is left with nothing anybody can take.
+    await post(project, '/items/gate/claim', { agent: 'somebody-else' });
+
+    const offered = await read(project, '/next?agent=nobody-in-particular');
+    assert.equal(offered.json().item, null);
+    assert.match(
+      offered.json().reason,
+      /1 item is waiting on other cards/,
+      'the parked card was never on offer, so it is not counted as held back',
+    );
+  });
+
   it('says which of the three refusals it was, not one sentence for all of them', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'itself', title: 't', body: 'b', actor: 'a' });

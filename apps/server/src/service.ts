@@ -1806,6 +1806,17 @@ function blockedMessage(
 export async function waitingBlockers(
   store: Store,
   projectId: string,
+  /**
+   * Which cards to ask about. The board asks about everything that is not
+   * finished, because a card somebody parked as `blocked` still refuses a
+   * claim and a person goes looking for exactly those. The offer asks about
+   * open cards alone, because those are the only ones it could have handed
+   * out: counting a parked card as "withheld" reports work that was never on
+   * offer, and pays for resolving its blockers to say so.
+   */
+  statuses: readonly ItemStatus[] = ITEM_STATUSES.filter(
+    (status) => !TERMINAL_STATUSES.includes(status),
+  ),
 ): Promise<Map<string, string[]>> {
   // Every one of them, with no cap. A cap here is not a cheaper answer, it is
   // a wrong one: the card it leaves out is offered and leased, and a claim on
@@ -1815,11 +1826,7 @@ export async function waitingBlockers(
   // where `$ne: []` cannot.
   const waiting = (await store.items
     .find(
-      {
-        projectId,
-        status: { $nin: [...TERMINAL_STATUSES] },
-        'blockedBy.0': { $exists: true },
-      },
+      { projectId, status: { $in: [...statuses] }, 'blockedBy.0': { $exists: true } },
       { projection: { slug: 1, blockedBy: 1 } },
     )
     .toArray()) as Array<Pick<ItemDoc, 'slug' | 'blockedBy'>>;
@@ -1840,9 +1847,13 @@ export async function waitingBlockers(
   return unmet;
 }
 
-/** The same answer as a list, for the queries that only need the names. */
+/**
+ * The open cards the offer must skip, as a list. Open only: a card in any
+ * other status was never a candidate, and both callers use the length of this
+ * to tell an agent how much work was held back from it.
+ */
 export async function waitingSlugs(store: Store, projectId: string): Promise<string[]> {
-  return [...(await waitingBlockers(store, projectId)).keys()];
+  return [...(await waitingBlockers(store, projectId, ['open'])).keys()];
 }
 
 export async function claimItem(

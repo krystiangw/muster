@@ -35,11 +35,15 @@ export interface Config {
   contactEmail: string;
   siteVerification: string;
   /**
-   * The Ed25519 public key line the MCP registry reads to believe that
-   * whoever publishes under this domain owns it. Empty on every deployment
-   * that is not publishing, and the route 404s rather than serving a blank
-   * file, because a well-known path that answers with nothing is worse than
-   * one that answers not-found.
+   * The whole proof record the MCP registry reads to believe that whoever
+   * publishes under this domain owns it: `v=MCPv1; k=ed25519; p=<base64>`,
+   * exactly as `mcp-publisher` prints it. Not the key on its own, which is
+   * what the first version of this said and what would have failed
+   * authentication with a file that looked fine.
+   *
+   * Empty on every deployment that is not publishing, and then the route
+   * answers 404: a well-known path serving nothing is worse than one that says
+   * there is nothing there.
    */
   mcpRegistryAuth: string;
   feedbackProject: string;

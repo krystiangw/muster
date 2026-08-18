@@ -317,19 +317,49 @@ names the server `dev.musterboard/muster`, which is a domain namespace and
 deliberately not `io.github.<owner>/muster`: the GitHub form ties the identity
 to an account name, and renaming the account or moving the repository breaks
 the name every client has stored. We own the domain, so the domain is what we
-publish under.
+publish under, and the registry grants the whole `dev.musterboard/*` namespace
+to whoever proves it.
 
-Proving that ownership is the part that has to be interactive, and it is the
-whole point of the exercise:
+Proving it is the part that has to be interactive, and that is the point of it.
+The commands below are the registry's own, checked against its CLI reference
+rather than remembered:
 
-1. Generate an Ed25519 keypair. Keep the private half in `~/.muster/`, chmod
-   600, outside every checkout, like the rest of them.
-2. Set `MCP_REGISTRY_AUTH` on the deployment to the public half and deploy.
-   `https://musterboard.dev/.well-known/mcp-registry-auth` serves it as one
-   line of text, and answers 404 while the variable is unset.
-3. `mcp-publisher login dns --domain musterboard.dev --private-key <key>`, or
-   the HTTP method, which reads the well-known file above.
-4. `mcp-publisher publish --dry-run`, then `mcp-publisher publish`.
+1. Generate an Ed25519 keypair. Keep `key.pem` in `~/.muster/`, chmod 600,
+   outside every checkout, like the rest of them. macOS ships LibreSSL, which
+   cannot do Ed25519 in `genpkey`: use `$(brew --prefix openssl@3)/bin/openssl`.
+
+   ```bash
+   openssl genpkey -algorithm Ed25519 -out ~/.muster/mcp-registry-key.pem
+   chmod 600 ~/.muster/mcp-registry-key.pem
+   ```
+
+2. Build the proof record, which is a whole line and not just the key, and set
+   it as `MCP_REGISTRY_AUTH` on the deployment:
+
+   ```bash
+   PUBLIC_KEY="$(openssl pkey -in ~/.muster/mcp-registry-key.pem -pubout -outform DER | tail -c 32 | base64)"
+   heroku config:set MCP_REGISTRY_AUTH="v=MCPv1; k=ed25519; p=${PUBLIC_KEY}" -a muster-web
+   curl -s https://musterboard.dev/.well-known/mcp-registry-auth
+   ```
+
+   That path answers 404 until the variable is set, on purpose.
+
+3. Log in with the HTTP method, which is the one that reads that file. `login
+   dns` proves the same thing through a TXT record instead and does not look at
+   it at all. The key is passed as hex, not as the PEM:
+
+   ```bash
+   PRIVATE_KEY="$(openssl pkey -in ~/.muster/mcp-registry-key.pem -noout -text | grep -A3 'priv:' | tail -n +2 | tr -d ' :\n')"
+   mcp-publisher login http --domain=musterboard.dev --private-key="${PRIVATE_KEY}"
+   ```
+
+4. Check the document, then publish. `validate` is the dry run; `publish` has
+   no `--dry-run` and goes straight to the registry:
+
+   ```bash
+   mcp-publisher validate server.json
+   mcp-publisher publish
+   ```
 
 Republish on a version change. `version` in `server.json` is the server's, not
 the SDK's; keep it in step with what `/.well-known/mcp.json` reports, because a
