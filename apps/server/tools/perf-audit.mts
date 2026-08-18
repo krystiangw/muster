@@ -331,6 +331,35 @@ await timed('  distinct claim.agent (live only)', async () =>
   3,
 );
 
+// The same four, on a layout that keeps finished work off the board. That
+// board asks its filters for a narrower set, which is a different query shape:
+// the status predicate sits between the project and the field being walked.
+{
+  const hidesClosed = {
+    ...main,
+    board: { rows: 'none', columns: [{ key: 'open', title: 'Open', match: { status: ['open'] } }] },
+  } as ProjectDoc;
+  await timed('the same facets, on a board that hides closed work', async () =>
+    boardFacets(store, hidesClosed), 3);
+  const scoped = {
+    projectId: main._id,
+    status: { $nin: ['done', 'dropped'] },
+  };
+  await timed('  distinct owner, scoped', async () => store.items.distinct('owner', scoped), 3);
+  await timed('  distinct lastActor, scoped', async () => store.items.distinct('lastActor', scoped), 3);
+  await timed('  distinct labels, scoped', async () => store.items.distinct('labels', scoped), 3);
+  const plan = (await store.db.command({
+    explain: { distinct: 'items', key: 'owner', query: scoped },
+    verbosity: 'executionStats',
+  })) as { queryPlanner?: { winningPlan?: unknown }; executionStats?: Record<string, unknown> };
+  console.log('    plan :', JSON.stringify(plan.queryPlanner?.winningPlan).slice(0, 220));
+  console.log('    read :', JSON.stringify({
+    docs: plan.executionStats?.totalDocsExamined,
+    keys: plan.executionStats?.totalKeysExamined,
+    ms: plan.executionStats?.executionTimeMillis,
+  }));
+}
+
 say('\nthe pages a person opens');
 await timed('GET /r/:token (the mail link)', inject(`/r/${main.readToken}`));
 await timed('GET /r/:token/board', inject(`/r/${main.readToken}/board`));

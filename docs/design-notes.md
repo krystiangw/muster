@@ -752,6 +752,21 @@ year of closed items and picking one produced an empty board. They now read the
 work the board itself scans, which is the narrower set on exactly the layouts
 where the difference was visible.
 
+**The narrower question is a different question.** That fix arrived with the
+indexes above and quietly undid them on the boards it applied to: a `distinct`
+over `{projectId, owner}` walks the distinct values, and the same `distinct`
+with a status predicate between the project and the owner fetches every open
+document instead, 80 ms and seventy seven thousand documents against 1 ms and
+eight keys. Naming `status` in the key serves both questions from the same
+index, so the board that shows everything is not paying for the board that does
+not. A review caught this by reading the index against the query rather than
+against the benchmark, which is the failure the benchmark itself could not see:
+the audit measured the shape the code used to issue.
+
+The writes were measured against the same collection: today's index set costs
+about a tenth of a millisecond per write, and the reads it pays for went from
+tens of milliseconds to one or two.
+
 **The first read of a collection pays for reading it.** The pass that drops
 items nobody ever described measured 680 ms as the first thing to touch the
 items after a restart, and 70 ms once the pages were in cache: the same code,

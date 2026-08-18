@@ -350,14 +350,21 @@ export async function ensureIndexes(store: Store): Promise<void> {
       // the distinct values and nothing else; without one it is a scan of every
       // item, on every load of the busiest page a person opens.
       //
+      // `status` is in the key because a board that keeps finished work off
+      // itself asks its filters for the same narrower set, and that predicate
+      // between the project and the field being walked is enough to cost the
+      // walk: 80ms and seventy seven thousand documents fetched, against 1ms
+      // and eight keys with this key. It serves the wider question too, so the
+      // board that shows everything is not paying for the one that does not.
+      //
       // The third list, the labels, deliberately has no index. Labels are an
       // array, so any index over them is multikey, and a multikey index cannot
       // answer a `distinct` without fetching the documents behind the keys: it
       // was measured at 175ms either way on two hundred thousand items, while
       // making every write to an item pay for a second index. An index that
       // costs writes and buys no read is worse than no index.
-      { key: { projectId: 1, owner: 1 }, name: 'owners' },
-      { key: { projectId: 1, lastActor: 1 }, name: 'actors' },
+      { key: { projectId: 1, status: 1, owner: 1 }, name: 'owners' },
+      { key: { projectId: 1, status: 1, lastActor: 1 }, name: 'actors' },
       // Items created and never described, for the pass that drops them.
       // Partial because that is a handful of documents on any board, and an
       // index over the ones that do have a body is the collection again.
