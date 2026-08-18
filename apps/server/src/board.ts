@@ -310,6 +310,22 @@ export async function loadBoard(
     ...boardScope(config, new Date(), options.includeClosed),
   };
 
+  // Every narrowing here is a word somebody typed or an agent sent, and every
+  // one of them is written straight into the filter below. The HTML door
+  // slices strings out of a query string, the MCP door hands over whatever a
+  // model produced, and one of those arriving as `{"$ne": null}` is a query
+  // where a name belongs.
+  for (const [name, value] of [
+    ['owner', options.owner],
+    ['label', options.label],
+    ['agent', options.agent],
+    ['q', options.q],
+  ] as const) {
+    if (value !== undefined && typeof value !== 'string') {
+      throw new ServiceError(400, 'bad_filter', `${name} is a word to narrow by, not a query.`);
+    }
+  }
+
   const narrowed: BoardFilter = {};
   if (options.owner) {
     narrowed.owner = options.owner;

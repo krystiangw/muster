@@ -472,6 +472,53 @@ describe('items', () => {
     assert.match(JSON.stringify(wrongType.json()), /bad_expect/);
   });
 
+  it('refuses a query where a name belongs, at whichever door it arrives', async () => {
+    // MCP arguments are whatever a model produced and nothing validates them
+    // on the way in, so every one that lands in a filter is checked where the
+    // doors meet. Found by firing crafted arguments at a local copy: an
+    // `agent` of {"$ne": null} read every agent's inbox, a `status` of
+    // {"$ne": "nope"} listed everything, and one object inside `present` came
+    // back as a 500 rather than a refusal.
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'work', title: 'work', actor: 'a' });
+
+    const crafted = async (name: string, args: Record<string, unknown>) => {
+      const answer = await harness.server.inject({
+        method: 'POST',
+        url: '/mcp',
+        headers: authed(project),
+        payload: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } },
+      });
+      const result = answer.json().result;
+      assert.equal(result.isError, true, `${name} took it: ${JSON.stringify(result).slice(0, 160)}`);
+      assert.equal(result.structuredContent.status, 400, JSON.stringify(result.structuredContent));
+      return result.structuredContent.code as string;
+    };
+
+    await crafted('list_items', { status: { $ne: 'nope' } });
+    await crafted('list_items', { owner: { $ne: null } });
+    await crafted('inbox', { agent: { $ne: null } });
+    await crafted('next_item', { agent: { $gt: '' } });
+    await crafted('claim_item', { slug: 'work', agent: { $ne: null } });
+    await crafted('observe', { source: 'venue', present: [{ $ne: null }] });
+    await crafted('board', { agent: { $ne: null } });
+
+    // And the ordinary calls still go through, which is the half of this that
+    // a refusal is easy to break.
+    const fine = await harness.server.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: authed(project),
+      payload: {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'list_items', arguments: { status: 'open', limit: 5 } },
+      },
+    });
+    assert.equal(fine.json().result.structuredContent.items.length, 1);
+  });
+
   it('enforces the project item cap', async () => {
     const project = await createProject(harness);
     await harness.store.projects.updateOne(

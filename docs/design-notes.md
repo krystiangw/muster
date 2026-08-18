@@ -998,3 +998,32 @@ work".
 Twenty four errors when the check was widened, all of them in tests and tools,
 none in `src`. That is the argument for widening it: the code that is only ever
 run by a person watching is the code where a wrong shape survives longest.
+
+## A query where a name belongs, 2026-08-18
+
+Exposing the guarded write to agents put an object from an MCP tool call
+straight into the filter of the write, one field after `projectId`. Codex caught
+it within the hour: an `expect` of `{"projectId": {"$ne": null}, "slug":
+"victim"}` would have reached another project's card. The fix was to rebuild the
+guard in the service from its two known fields, because that is where every
+door's arguments meet the query.
+
+Then the obvious question: what else. Firing crafted arguments at a local copy
+of the service answered it in five minutes. `inbox` with `agent: {"$ne": null}`
+read every agent's inbox. `list_items` with `status: {"$ne": "nope"}` listed
+everything. `next_item` with an object handle matched no agent and was handed
+unscoped work. `claim_item` would have stored an object as the holder of a
+lease, which nothing could then release by name. One object inside `observe`'s
+`present` array reached `normalizeSlug` and came back as a 500.
+
+**None of it crossed a project boundary, and that is the only reason this was a
+bug rather than an incident.** The token scopes every filter to one project, so
+the worst of it was reading and narrowing inside a board the caller already
+holds. The lesson is not "MongoDB operators are dangerous", it is that a door
+with no schema needs the reading to be the validation: the HTTP side has AJV and
+refuses these by construction, and MCP arguments are whatever a model produced.
+
+Two layers now. The tool arguments are read through something that refuses a
+non-string instead of substituting one, and the service checks the handful of
+values that land in a filter, so a third door tomorrow starts from the same
+floor rather than from whatever its author remembered.

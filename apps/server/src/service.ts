@@ -445,6 +445,11 @@ export async function readInbox(
   project: ProjectDoc,
   options: { agent?: string; includeActed?: boolean } = {},
 ): Promise<{ answers: EscalationDoc[]; waiting: EscalationDoc[]; handovers: HandoverRequestDoc[] }> {
+  // A handle, not a query: this value is spread into the filter below, and an
+  // `agent` of `{"$ne": null}` read every agent's inbox instead of refusing.
+  if (options.agent !== undefined && typeof options.agent !== 'string') {
+    throw badRequest('bad_agent', 'agent is the handle whose inbox this is.');
+  }
   const forAgent = options.agent ? { agent: options.agent } : {};
   const [answers, waiting, handovers] = await Promise.all([
     store.escalations
@@ -1473,6 +1478,12 @@ export async function claimItem(
   agent: string,
   ttlMinutes?: number,
 ): Promise<ClaimResult> {
+  // The handle is matched against a live claim and then written into one. An
+  // object here reads as an operator on the way in and is stored as the holder
+  // on the way out, which is a lease nobody can release by name.
+  if (typeof agent !== 'string' || agent === '') {
+    throw badRequest('bad_agent', 'agent is the handle taking this item.');
+  }
   const now = new Date();
   const ttl = Math.min(Math.max(ttlMinutes ?? project.rules.claimTtlMinutes, 1), 1440);
   const expiresAt = new Date(now.getTime() + ttl * 60_000);
@@ -1981,6 +1992,23 @@ export async function readItems(
   if (since && Number.isNaN(since.getTime())) {
     throw new ServiceError(400, 'bad_since', 'since must be an ISO timestamp.');
   }
+  // The four narrowings that land in the filter, checked here rather than at a
+  // door: the HTTP schema refuses a non-string, MCP arguments are whatever a
+  // model produced, and a status arriving as `{"$ne": "done"}` was a query
+  // somebody wrote into a filter that is supposed to take a word.
+  if (input.status !== undefined && !ITEM_STATUSES.includes(input.status)) {
+    throw badRequest('bad_status', `Status must be one of ${ITEM_STATUSES.join(', ')}.`);
+  }
+  for (const [name, value] of [
+    ['owner', input.owner],
+    ['label', input.label],
+    ['source', input.source],
+    ['q', input.q],
+  ] as const) {
+    if (value !== undefined && typeof value !== 'string') {
+      throw badRequest('bad_filter', `${name} is a word to narrow by, not a query.`);
+    }
+  }
   const { keyset, asOf: carried } = splitCursor(input.cursor);
   // Stamped before the read, never after: anything written while this query
   // ran must fall inside the next window rather than between them.
@@ -2036,6 +2064,12 @@ export async function nextItem(
   project: ProjectDoc,
   handle: string,
 ): Promise<NextResult> {
+  // The handle goes into two filters below, one of them the lookup that decides
+  // whose scope this offer respects. An object there matched no agent and was
+  // handed unscoped work instead of a refusal.
+  if (handle !== undefined && handle !== null && typeof handle !== 'string') {
+    throw badRequest('bad_agent', 'agent is the handle asking for work.');
+  }
   const now = new Date();
   const agent = handle ? await store.agents.findOne({ projectId: project._id, handle }) : null;
 

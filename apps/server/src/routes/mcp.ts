@@ -74,6 +74,33 @@ function str(value: unknown, fallback = ''): string {
   return typeof value === 'string' ? value : fallback;
 }
 
+/**
+ * A string argument, or a refusal naming it.
+ *
+ * `str` substitutes a default, which is right for a name that has one and
+ * wrong for anything that ends up in a query: an argument arriving as
+ * `{"$ne": null}` became the empty string and the filter quietly widened, or
+ * went through as an object and became an operator. Nothing validates on this
+ * door, because MCP arguments are whatever a model produced, so the reading is
+ * the validation.
+ */
+function text(value: unknown, name: string): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') {
+    throw new ServiceError(400, 'bad_argument', `"${name}" is a string here, and this one is not.`);
+  }
+  return value;
+}
+
+/** Every element a string, or a refusal. Same reason. */
+function texts(value: unknown, name: string): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== 'string')) {
+    throw new ServiceError(400, 'bad_argument', `"${name}" is an array of strings here.`);
+  }
+  return value as string[];
+}
+
 const TOOLS: ToolDefinition[] = [
   {
     name: 'create_project',
@@ -641,8 +668,8 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         const result = await claimItem(
           store,
           project,
-          str(args.slug),
-          str(args.agent) || actor,
+          text(args.slug, 'slug') ?? '',
+          text(args.agent, 'agent') || actor,
           typeof args.ttl_minutes === 'number' ? args.ttl_minutes : undefined,
         );
         return result.ok
@@ -660,7 +687,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
       }
       case 'next_item': {
         void maybeSweep(store, project).catch(() => undefined);
-        const asked = str(args.agent);
+        const asked = text(args.agent, 'agent') ?? '';
         const result = await nextItem(store, project, asked);
         const warnings = asked ? await writeWarnings(store, project, asked) : [];
         return {
@@ -675,17 +702,17 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         // since, so no incremental sync, and no claimed, which the tool
         // description had been promising all along.
         const { items, nextCursor, asOf } = await readItems(store, project, {
-          status: args.status as ItemStatus | undefined,
-          owner: args.owner === undefined ? undefined : str(args.owner),
-          label: args.label === undefined ? undefined : str(args.label),
-          source: args.source === undefined ? undefined : str(args.source),
+          status: text(args.status, 'status') as ItemStatus | undefined,
+          owner: text(args.owner, 'owner'),
+          label: text(args.label, 'label'),
+          source: text(args.source, 'source'),
           stale: typeof args.stale === 'boolean' ? args.stale : undefined,
           claimed: typeof args.claimed === 'boolean' ? args.claimed : undefined,
-          q: args.q === undefined ? undefined : str(args.q),
+          q: text(args.q, 'q'),
           limit: typeof args.limit === 'number' ? args.limit : undefined,
-          order: args.order === undefined ? undefined : str(args.order),
-          cursor: args.cursor === undefined ? undefined : str(args.cursor),
-          since: args.since === undefined ? undefined : str(args.since),
+          order: text(args.order, 'order'),
+          cursor: text(args.cursor, 'cursor'),
+          since: text(args.since, 'since'),
         });
         return {
           items: items.map((item) => itemJson(item)),
@@ -694,8 +721,10 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         };
       }
       case 'observe': {
-        const present = Array.isArray(args.present) ? (args.present as string[]) : [];
-        return { ...(await observe(store, project, str(args.source), present)) };
+        // Every slug a string: one object in this array reached
+        // `normalizeSlug` and came back as a 500 rather than a refusal.
+        const present = texts(args.present, 'present') ?? [];
+        return { ...(await observe(store, project, text(args.source, 'source') ?? '', present)) };
       }
       case 'escalate': {
         const doc = await createEscalation(
@@ -722,8 +751,9 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           ...(typeof args.include_closed === 'boolean'
             ? { includeClosed: args.include_closed }
             : {}),
-          ...(str(args.owner) ? { owner: str(args.owner) } : {}),
-          ...(str(args.agent) ? { agent: str(args.agent) } : {}),
+          // Both narrowings end up in the board's own filter.
+          ...(text(args.owner, 'owner') ? { owner: text(args.owner, 'owner')! } : {}),
+          ...(text(args.agent, 'agent') ? { agent: text(args.agent, 'agent')! } : {}),
         });
         return boardJson(view, args.items !== false);
       }
@@ -766,8 +796,9 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         // list of escalations and split it in memory, which meant an open
         // question fell off the end once a project had fifty answered ones,
         // and an answer already acted on kept coming back for ever.
+        const asking = text(args.agent, 'agent');
         const { answers, waiting, handovers } = await readInbox(store, project, {
-          ...(str(args.agent) ? { agent: str(args.agent) } : {}),
+          ...(asking ? { agent: asking } : {}),
         });
         return {
           answers: answers.map(escalationJson),
