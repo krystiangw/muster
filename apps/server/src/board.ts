@@ -388,11 +388,49 @@ export function applyForColumn(column: BoardColumn): BoardApply {
   if (column.match.notLabels && column.match.notLabels.length > 0) {
     derived.removeLabels = [...column.match.notLabels];
   }
+  // A column for one person's work is a column a move can honour, the same way
+  // a column for one status is. More than one name is a question the move
+  // cannot answer, so it is left to the layout to declare.
+  if (column.match.owner && column.match.owner.length === 1) {
+    derived.owner = column.match.owner[0]!;
+  }
   // "Somebody is on it" and "nobody is on it" are the two things the statuses
   // deliberately do not carry, so a move into such a column is the claim itself.
   if (column.match.claimed === true) derived.claim = true;
   if (column.match.claimed === false) derived.release = true;
   return derived;
+}
+
+/**
+ * What a column asks for that no move can bring about, in words.
+ *
+ * A move does what the column declares and then reports where the card
+ * actually landed, which is honest and arrives too late to help: the control
+ * was already offered and clicked. Four filters name things a move has no way
+ * to set. Staleness belongs to hygiene, `source` to whatever mirrors the item,
+ * `fields` to the system the item was imported from, and `priority_min` names
+ * a range rather than a value, so there is no single number a move could write.
+ *
+ * A card that already satisfies such a filter can of course sit in the column;
+ * it just cannot be *put* there, which makes the column a view rather than a
+ * destination. Multiple statuses or owners are deliberately not on this list:
+ * they are ordinary, and a card whose status is already one of the named ones
+ * lands there perfectly well.
+ */
+export function unsatisfiableBy(column: BoardColumn): string[] {
+  if (column.apply) return [];
+  const reasons: string[] = [];
+  if (column.match.stale !== undefined) reasons.push('"stale", which only hygiene sets');
+  if ((column.match.source ?? []).length > 0) {
+    reasons.push('"source", which belongs to whatever mirrors the item');
+  }
+  if (column.match.priorityMin !== undefined) {
+    reasons.push('"priority_min", which is a range rather than a value');
+  }
+  if (Object.keys(column.match.fields ?? {}).length > 0) {
+    reasons.push('"fields", which came from another system');
+  }
+  return reasons;
 }
 
 export interface MoveResult {
@@ -836,6 +874,16 @@ export function boardWarnings(config: BoardConfig): string[] {
     const statuses = column.match.status ?? [];
     return statuses.length === 0 || statuses.some((status) => TERMINAL_STATUSES.includes(status));
   };
+
+  config.columns.forEach((column) => {
+    const reasons = unsatisfiableBy(column);
+    if (reasons.length === 0) return;
+    warnings.push(
+      `"${column.title}" is a view, not a destination: it asks for ${reasons.join(
+        ', and ',
+      )}, and no move can set that. Cards that already match still appear here; the board simply leaves the column out of the move control. Declare "apply" on it to say what putting a card there should mean.`,
+    );
+  });
 
   config.columns.forEach((column, index) => {
     if ((column.match.labels ?? []).length === 0) return;

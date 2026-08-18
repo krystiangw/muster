@@ -1260,6 +1260,54 @@ describe('a layout that would trap finished work', () => {
     assert.match(page.body, /Finished work keeps the label/);
   });
 
+  it('does not offer a move into a column no move could satisfy, and says why', async () => {
+    // The move control used to offer every column with something to apply,
+    // including ones resting on a filter a move cannot set. Clicking it put
+    // the card somewhere else and explained afterwards, which is a control
+    // that lies at the moment somebody uses it.
+    const project = await createProject(harness, 'views and destinations');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const saved = await put(project, '/board', {
+      rows: 'none',
+      columns: [
+        { key: 'urgent', title: 'Urgent', match: { status: ['open'], priorityMin: 5 } },
+        { key: 'rotting', title: 'Rotting', match: { stale: true } },
+        { key: 'todo', title: 'To do', match: { status: ['open'] } },
+        { key: 'done', title: 'Done', match: { status: ['done'] } },
+      ],
+    });
+    const warnings = saved.json().warnings as string[];
+    assert.equal(warnings.filter((line) => line.includes('view, not a destination')).length, 2);
+    assert.ok(warnings.some((line) => line.includes('priority_min')));
+    assert.ok(warnings.some((line) => line.includes('stale')));
+
+    await post(project, '/items', { slug: 'work', title: 'work', actor: 'a' });
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    // The card sits in "To do", so the only destination left is the one column
+    // a move can satisfy. The two views are offered nowhere.
+    assert.ok(page.body.includes('value="done"'), 'a column a move can satisfy is offered');
+    assert.ok(!page.body.includes('value="urgent"'), 'and one it cannot is not');
+    assert.ok(!page.body.includes('value="rotting"'));
+  });
+
+  it('moves a card to the person a one-owner column names', async () => {
+    // Symmetric with the single status rule: a column for one person's work is
+    // a column a move can honour, and it used to change the status and quietly
+    // leave the owner alone.
+    const project = await createProject(harness, 'mine');
+    await put(project, '/board', {
+      rows: 'none',
+      columns: [
+        { key: 'alex', title: 'Alex', match: { status: ['open'], owner: ['alex'] } },
+        { key: 'todo', title: 'To do', match: { status: ['open'] } },
+      ],
+    });
+    await post(project, '/items', { slug: 'work', title: 'work', actor: 'a' });
+    const moved = await post(project, '/items/work/move', { column: 'alex', actor: 'op' });
+    assert.equal(moved.json().item.owner, 'alex');
+    assert.equal(moved.json().landed_in, 'alex');
+  });
+
   it('warns even when the column names a status, if that status is a finished one', async () => {
     const project = await createProject(harness, 'half careful');
     const saved = await put(project, '/board', {

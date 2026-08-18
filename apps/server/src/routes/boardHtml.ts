@@ -1,5 +1,5 @@
 import type { AgentFacet, BoardFacets, BoardFilter, BoardView } from '../board.js';
-import { BOARD_PRESETS, COLUMN_RENDER_LIMIT, applyForColumn } from '../board.js';
+import { BOARD_PRESETS, COLUMN_RENDER_LIMIT, applyForColumn, unsatisfiableBy } from '../board.js';
 import { boardConfigJson } from '../serialize.js';
 import { chip, escapeHtml, when } from '../html.js';
 import { who } from '../identity.js';
@@ -292,7 +292,14 @@ export function renderBoard(view: BoardView, options: BoardRenderOptions = {}): 
   const now = options.now ?? new Date();
   const targets: MoveTarget[] = options.moveAction
     ? view.config.columns
-        .filter((column) => Object.keys(applyForColumn(column)).length > 0)
+        .filter(
+          (column) =>
+            Object.keys(applyForColumn(column)).length > 0 &&
+            // And nothing it asks for that a move cannot set. Offering those
+            // put a card somewhere else and explained afterwards, which is a
+            // control that lies at the moment somebody uses it.
+            unsatisfiableBy(column).length === 0,
+        )
         .map((column) => ({ key: column.key, title: column.title }))
     : [];
   const lanes = view.rows.length > 0 ? view.rows : [{ key: '', title: '', columns: [] }];
