@@ -43,6 +43,16 @@ describe('the typed SDK', () => {
     const claimed = await client.claim('errors:one');
     assert.equal(claimed.ok, true);
 
+    // The filter the HTTP query had and this client did not, which meant an
+    // SDK caller asking "what is somebody on" had to read everything and sort
+    // it out itself.
+    const held = await client.items({ claimed: true });
+    assert.deepEqual(
+      held.items.map((item) => item.slug),
+      ['errors:one'],
+    );
+    assert.equal((await client.items({ claimed: false })).items.length, 0);
+
     const contested = new Muster({
       project: created.project,
       token: created.token,

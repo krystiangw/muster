@@ -241,7 +241,10 @@ curl -s "$MUSTER/escalations?acknowledged=false" -H "authorization: Bearer $TOKE
 \`\`\`
 
 Hand back the \`as_of\` from your previous read, not your own clock: yours is
-not the one that stamped these rows. Every fifteen seconds is a reasonable
+not the one that stamped these rows. Every page of one walk reports the same
+\`as_of\`, the moment the walk began, so it does not matter which page you keep
+it from: anything written while you were paging arrives on the next poll rather
+than falling between the two. Every fifteen seconds is a reasonable
 cadence and costs four requests a minute against a limit of six hundred, so
 under one percent of your budget; every five seconds is still under two. If you
 poll faster than the work arrives, you are measuring your own patience.

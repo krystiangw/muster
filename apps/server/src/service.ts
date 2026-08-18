@@ -1455,14 +1455,23 @@ export interface ReadItemsResult {
  * page's, freshly stamped, starts the next poll after it, and it is gone.
  *
  * A cursor with no `~` is one issued before this existed and simply gets a new
- * checkpoint, which is what it had all along.
+ * checkpoint, which is what it had all along. One that has a `~` and no
+ * readable date after it is damaged rather than old, and it is refused: going
+ * on would stamp a fresh checkpoint halfway through somebody's walk, which is
+ * the exact loss this exists to prevent.
  */
 function splitCursor(cursor: string | undefined): { keyset?: string; asOf?: Date } {
   if (!cursor) return {};
   const at = cursor.lastIndexOf('~');
   if (at === -1) return { keyset: cursor };
   const carried = new Date(cursor.slice(at + 1));
-  if (Number.isNaN(carried.getTime())) return { keyset: cursor.slice(0, at) };
+  if (Number.isNaN(carried.getTime())) {
+    throw new ServiceError(
+      400,
+      'bad_cursor',
+      'That cursor is damaged: what follows the "~" is not a timestamp. Start the walk again rather than paging on, or this read would step over whatever changed while you were paging.',
+    );
+  }
   return { keyset: cursor.slice(0, at), asOf: carried };
 }
 

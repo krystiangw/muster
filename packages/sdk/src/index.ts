@@ -344,6 +344,8 @@ export class Muster {
       label?: string;
       source?: string;
       stale?: boolean;
+      /** True for items somebody holds right now. An expired claim counts as free. */
+      claimed?: boolean;
       limit?: number;
       /**
        * `urgency` (default) is most urgent first. `id` is a stable order for
@@ -356,7 +358,8 @@ export class Muster {
       /**
        * Only what changed at or after this moment, as an ISO string. Pass back
        * the `as_of` from your previous read: your clock is not the one that
-       * stamped these rows.
+       * stamped these rows. Every page of one walk reports the same `as_of`,
+       * so it does not matter which page you keep it from.
        */
       since?: string;
     } = {},
@@ -367,6 +370,7 @@ export class Muster {
       label: query.label,
       source: query.source,
       stale: query.stale === undefined ? undefined : String(query.stale),
+      claimed: query.claimed === undefined ? undefined : String(query.claimed),
       limit: query.limit === undefined ? undefined : String(query.limit),
       order: query.order,
       cursor: query.cursor,

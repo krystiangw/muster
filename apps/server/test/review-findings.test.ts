@@ -202,6 +202,29 @@ describe('one read, two doors', () => {
     // no later page; keeping the first page's moment is what makes the next
     // poll pick it up instead of stepping over it.
     assert.equal(second.as_of, first.as_of, 'paging does not move the checkpoint');
+
+    // A cursor that carries a checkpoint nobody can read is damaged, not old.
+    // Paging on from it would stamp a fresh one mid-walk, which is the loss
+    // the checkpoint exists to prevent, so it is refused instead.
+    const damaged = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/items?order=id&cursor=${encodeURIComponent('i_abc~nonsense')}`,
+      headers: authed(project),
+    });
+    assert.equal(damaged.statusCode, 400);
+    assert.equal(damaged.json().error, 'bad_cursor');
+
+    // One from before checkpoints existed has no tilde at all, and still works.
+    const legacy = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/items?order=id&limit=2&cursor=${encodeURIComponent(keyset(first.next_cursor!))}`,
+      headers: authed(project),
+    });
+    assert.equal(legacy.statusCode, 200);
+    assert.deepEqual(
+      legacy.json().items.map((item: { slug: string }) => item.slug),
+      second.items.map((item) => item.slug),
+    );
   });
 
   it('carries migrated fields through the MCP door, so its columns are reachable', async () => {
