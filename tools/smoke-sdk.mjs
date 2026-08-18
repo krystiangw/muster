@@ -16,13 +16,18 @@
  *   node tools/smoke-sdk.mjs
  *   node tools/smoke-sdk.mjs --base http://localhost:4600 --version 0.1.0
  *
- * Needs no token: it signs itself up, which is the first call on the list
- * anyway. The project it creates is unclaimed, so the service deletes it on its
- * own timer.
+ * Needs no token the first time: it signs itself up, which is the first call on
+ * the list anyway, and keeps what that returned in ~/.muster/smoke.json so the
+ * next run reuses the same board. That is not tidiness. A tool that signs up on
+ * every run writes a signup event on every run, and that number is the
+ * denominator of the activation and claim rates, so a check that runs on every
+ * deploy would quietly make the product look like it converts nobody. The
+ * board it keeps is unclaimed, so the service deletes it on its own timer, and
+ * the next run notices and signs up again.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -56,13 +61,41 @@ const step = async (name, run) => {
   }
 };
 
-const { client } = await Muster.start({
-  name: 'sdk smoke test',
-  description: 'Created by tools/smoke-sdk.mjs. Unclaimed, so it expires on its own.',
-  actor: 'sdk-smoke',
-  baseUrl: base,
-});
-console.log(`signed up as ${client.project} on ${base}`);
+const STATE = join(homedir(), '.muster', 'smoke.json');
+const saved = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8'))[base] : null;
+
+const signUp = async () => {
+  const { client, created } = await Muster.start({
+    name: 'sdk smoke test',
+    description: 'Created by tools/smoke-sdk.mjs. Unclaimed, so it expires on its own.',
+    actor: 'sdk-smoke',
+    baseUrl: base,
+  });
+  mkdirSync(join(homedir(), '.muster'), { recursive: true });
+  const all = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8')) : {};
+  all[base] = { project: created.project, token: created.token };
+  // In a home directory rather than anywhere near a checkout, for the reason
+  // every other token here lives there: a token file inside a repository is
+  // eventually committed.
+  writeFileSync(STATE, JSON.stringify(all, null, 1), { mode: 0o600 });
+  return { client, how: 'signed up as' };
+};
+
+const reuse = async () => {
+  const client = new Muster({ project: saved.project, token: saved.token, actor: 'sdk-smoke', baseUrl: base });
+  // The board expires on its own once nobody claims it, and the token dies with
+  // it, so a saved one is a guess until it answers.
+  await client.summary();
+  return { client, how: 'reusing' };
+};
+
+const { client, how } = saved
+  ? await reuse().catch(async (error) => {
+      console.log(`the board from last time is gone (${String(error).slice(0, 60)}), signing up again`);
+      return signUp();
+    })
+  : await signUp();
+console.log(`${how} ${client.project} on ${base}`);
 
 await step('summary', async () => {
   const summary = await client.summary();
