@@ -44,6 +44,34 @@ declare module 'fastify' {
 const COMPRESS_MIN_BYTES = 1400;
 
 /**
+ * Whether this client will take gzip, by the header's own rules rather than by
+ * whether the word appears in it.
+ *
+ * `gzip;q=0` is how a client says it cannot read gzip, and it is written with
+ * the word in it, so a substring test hands exactly those clients bytes they
+ * asked not to receive. An explicit entry decides on its own; `*` answers only
+ * for codings the header never mentions.
+ */
+export function acceptsGzip(header: string | undefined): boolean {
+  if (!header) return false;
+  let wildcard: number | null = null;
+  for (const part of header.split(',')) {
+    const [rawName, ...params] = part.trim().split(';');
+    const name = rawName?.trim().toLowerCase();
+    if (!name) continue;
+    const quality = params.reduce((value, param) => {
+      const [key, raw] = param.trim().toLowerCase().split('=');
+      if (key !== 'q') return value;
+      const parsed = Number(raw);
+      return Number.isFinite(parsed) ? parsed : value;
+    }, 1);
+    if (name === 'gzip' || name === 'x-gzip') return quality > 0;
+    if (name === '*') wildcard = quality;
+  }
+  return wildcard !== null && wildcard > 0;
+}
+
+/**
  * Capability links are credentials in a URL. Anything that writes a URL
  * somewhere it will be kept has to drop the token first.
  */
@@ -202,7 +230,7 @@ export async function buildApp(
     // hand a client bytes it cannot read.
     reply.header('vary', 'accept-encoding');
     if (typeof payload !== 'string') return payload;
-    if (!/\bgzip\b/i.test(String(request.headers['accept-encoding'] ?? ''))) return payload;
+    if (!acceptsGzip(request.headers['accept-encoding'] as string | undefined)) return payload;
     if (Buffer.byteLength(payload) < COMPRESS_MIN_BYTES) return payload;
     const zipped = gzipSync(payload);
     reply.header('content-encoding', 'gzip');

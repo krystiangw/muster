@@ -324,10 +324,11 @@ describe('sweep throttle', () => {
     // a throttled sweep of their own, and one of those landing after a
     // backdating write would make this measure the race instead of the field.
     const doc = await projectDoc(project);
-    const stalled = projectJson(
-      { ...doc, sweptAt: new Date(Date.now() - 3_600_000) },
-      harness.config,
-    );
+    // One instant, used by both readings below. Two calls to Date.now() a
+    // microsecond apart made this fail on a slower machine by exactly 1 ms,
+    // which is a test measuring its own execution rather than the field.
+    const anHourAgo = new Date(Date.now() - 3_600_000);
+    const stalled = projectJson({ ...doc, sweptAt: anHourAgo }, harness.config);
     assert.ok(
       Date.now() - new Date(stalled.swept_at as Date).getTime() > 3_000_000,
       'an hour without a sweep reads as an hour, which is what an alert needs',
@@ -338,7 +339,7 @@ describe('sweep throttle', () => {
     // moving and report a sweeper that has not finished anything in days as
     // one that ran a minute ago.
     const claimed = projectJson(
-      { ...doc, lastSweptAt: new Date(), sweptAt: new Date(Date.now() - 3_600_000) },
+      { ...doc, lastSweptAt: new Date(), sweptAt: anHourAgo },
       harness.config,
     );
     assert.equal(

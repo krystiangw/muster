@@ -226,6 +226,25 @@ describe('B. agent entry', () => {
     assert.equal(plain.headers.vary, 'accept-encoding');
     assert.match(plain.body, /^# /);
 
+    // The header's own rules, not the word appearing in it. A client that
+    // writes gzip;q=0 is saying it cannot read gzip, and it writes the word to
+    // say so.
+    for (const [header, wanted] of [
+      ['gzip;q=0', undefined],
+      ['gzip;q=0, br', undefined],
+      ['br', undefined],
+      ['gzip;q=0.5', 'gzip'],
+      ['*', 'gzip'],
+      ['br;q=1.0, gzip;q=0.8', 'gzip'],
+    ] as const) {
+      const answer = await harness.server.inject({
+        method: 'GET',
+        url: '/skill.md',
+        headers: { 'accept-encoding': header },
+      });
+      assert.equal(answer.headers['content-encoding'], wanted, `accept-encoding: ${header}`);
+    }
+
     // The allowlist is the point: a page carrying a capability is never
     // compressed, so the length of the answer says nothing about the token in
     // it. This is the read board, reached with the link itself.
