@@ -92,7 +92,18 @@ export async function expireClaims(
   return { rule: 'claim_expiry', affected: result.modifiedCount };
 }
 
-/** Flags items nobody has touched in a while. Does not close anything. */
+/**
+ * Flags items nobody has touched in a while. Does not close anything.
+ *
+ * An item under a live claim is exempt, and that is not a courtesy. A
+ * heartbeat deliberately does not move `touchedAt`, because it is not a write
+ * of anything: it says "still on it", not "here is what I learned". Without
+ * the exemption, an agent that holds an item longer than the stale window and
+ * heartbeats it correctly the whole time watches the board flag its work as
+ * rotten, which is the board lying about the one thing it is for. The moment
+ * the lease lapses the exemption goes with it, and `touchedAt` is already old,
+ * so the item is marked on the very next sweep.
+ */
 export async function markStale(
   store: Store,
   projectId: string,
@@ -107,6 +118,7 @@ export async function markStale(
       status: { $nin: [...TERMINAL_STATUSES] },
       stale: { $ne: true },
       touchedAt: { $lte: cutoff },
+      $or: [{ claim: null }, { 'claim.expiresAt': { $lte: now } }],
     },
     [
       {

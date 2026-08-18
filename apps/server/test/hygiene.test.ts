@@ -65,6 +65,32 @@ describe('claim expiry', () => {
 });
 
 describe('stale marking', () => {
+  it('leaves alone an item somebody is holding, and flags it the moment they let go', async () => {
+    // A heartbeat deliberately does not move touchedAt: it says "still on it",
+    // not "here is what I learned". So an agent working an item for longer
+    // than the stale window, and heartbeating it correctly the whole time,
+    // used to watch the board call its work rotten.
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'long-haul', title: 'a long job', actor: 'a' });
+    await post(project, '/items/long-haul/claim', { agent: 'a', ttl_minutes: 60 });
+    await backdate(project, 'long-haul', { touchedAt: hoursAgo(100) });
+
+    await sweepProject(harness.store, await projectDoc(project));
+    const held = await itemDoc(project, 'long-haul');
+    assert.equal(held.stale, false, 'somebody is demonstrably on it');
+
+    // The lease lapses, the claim sweep clears it, and the same pass marks it:
+    // touchedAt was old the whole time, so nothing is owed a second window.
+    await harness.store.items.updateOne(
+      { projectId: project.id, slug: 'long-haul' },
+      { $set: { 'claim.expiresAt': new Date(Date.now() - 60_000) } },
+    );
+    await sweepProject(harness.store, await projectDoc(project));
+    const dropped = await itemDoc(project, 'long-haul');
+    assert.equal(dropped.claim, null);
+    assert.equal(dropped.stale, true, 'and the moment nobody holds it, it is stale');
+  });
+
   it('flags an untouched item without closing it, and never counts as activity', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'forgotten', title: 'forgotten', actor: 'a' });
