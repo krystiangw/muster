@@ -168,13 +168,16 @@ curl -sX POST $MUSTER/items/errors:venue-withdraw-stuck/claim \\
 One call does both, which is what a fleet wants:
 
 \`\`\`bash
-curl -s "$MUSTER/next?agent=errors-loop&claim=true" -H "authorization: Bearer $TOKEN"
+curl -sX POST $MUSTER/next -H "authorization: Bearer $TOKEN" \\
+  -H 'content-type: application/json' -d '{"agent":"errors-loop","ttl_minutes":60}'
 \`\`\`
 
-It answers with the item already held by you and \`"claimed": true\`, and if
-somebody took that exact item while you were asking it offers the next one
-instead of refusing. Without it, ten loops asking at the same moment are all
-offered the same item and nine spend a round trip losing the claim that follows.
+It answers with the item already held by you and \`"claimed": true\`. The choice
+and the lease are one write, so ten loops asking at the same moment get ten
+different items; asking with \`GET\` offers the same item to all ten, and nine
+of them spend a round trip losing the claim that follows. It is a POST because
+it writes: a GET that claims is a GET a proxy, a prefetch or a client retry can
+take a second item with.
 
 A claim that gets \`"ok": false\` means somebody else is already on it; the
 holder is in the response. That answer arrives as **HTTP 409**, which is the

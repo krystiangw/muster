@@ -596,7 +596,11 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
       'move',
       'share_project',
     ]);
-    const kind = writes.has(tool.name) ? 'w' : 'r';
+    // Asking what is next is a read; asking for it and taking it writes a
+    // lease and a timeline entry, and charging that against the read budget
+    // published five times the writes an agent is allowed.
+    const kind =
+      writes.has(tool.name) || (tool.name === 'next_item' && args.claim === true) ? 'w' : 'r';
     const verdict = limiter.check(
       `tok:${hashToken(token).slice(0, 16)}:${kind}`,
       kind === 'w' ? config.rateLimits.write : config.rateLimits.read,

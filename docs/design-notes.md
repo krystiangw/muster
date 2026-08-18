@@ -1048,3 +1048,10 @@ board reads wrong.
 
 The plain call is unchanged and still does not claim, which is what makes it
 safe to poll.
+
+**And it is a POST.** The first shape put `claim=true` on the GET, which codex
+called out twice over: a GET that writes is one a proxy, a prefetch or a client
+retry can take a second item with, and the rate limiter classifies by method, so
+claiming through a GET was charged against the read budget, five times the
+writes an agent is allowed. `POST /next` on the HTTP door; on MCP, where there
+is no method to read, the tool is counted as a write when it is asked to claim.

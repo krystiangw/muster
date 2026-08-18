@@ -1061,13 +1061,41 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           summary: 'What this agent should pick up next',
           querystring: {
             type: 'object',
+            properties: { agent: { type: 'string', maxLength: 48 } },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request) => {
+        const { project } = auth(request);
+        const { agent } = request.query as { agent?: string };
+        void maybeSweep(store, project).catch(() => undefined);
+        const result = await nextItem(store, project, agent ?? '');
+        // The earliest moment a mistyped handle can be caught: an agent asking
+        // for work under a name nobody registered is offered everything, since
+        // there is no scope to narrow by, and it never finds out why.
+        const named = agent ? await writeWarnings(store, project, agent) : [];
+        return {
+          item: result.item ? itemJson(result.item, true) : null,
+          reason: result.reason,
+          ...(named.length > 0 ? { warnings: named } : {}),
+        };
+      },
+    );
+
+    scoped.post(
+      '/v1/:project/next',
+      {
+        schema: {
+          tags: ['items'],
+          summary: 'Take what this agent should pick up next',
+          description:
+            'The same choice GET /next makes, taken in the same breath. A POST because it writes: a GET that claims is a GET a proxy, a prefetch or a client retry can take a second item with. The selection and the lease are one update, so a fleet asking at once gets different items instead of nine of them losing the claim that follows an offer.',
+          body: {
+            type: 'object',
+            required: ['agent'],
             properties: {
               agent: { type: 'string', maxLength: 48 },
-              claim: {
-                type: 'boolean',
-                description:
-                  'Take the lease in the same call. Without it, a fleet asking at once is offered the same item and all but one lose the claim that follows.',
-              },
               ttl_minutes: { type: 'integer', minimum: 1, maximum: 1440 },
             },
             additionalProperties: false,
@@ -1076,23 +1104,14 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       },
       async (request) => {
         const { project } = auth(request);
-        const { agent, claim, ttl_minutes: ttl } = request.query as {
-          agent?: string;
-          claim?: boolean;
-          ttl_minutes?: number;
-        };
+        const body = (request.body ?? {}) as { agent?: string; ttl_minutes?: number };
         void maybeSweep(store, project).catch(() => undefined);
-        const result = claim
-          ? await nextItemHeld(store, project, agent ?? '', ttl)
-          : await nextItem(store, project, agent ?? '');
-        // The earliest moment a mistyped handle can be caught: an agent asking
-        // for work under a name nobody registered is offered everything, since
-        // there is no scope to narrow by, and it never finds out why.
-        const named = agent ? await writeWarnings(store, project, agent) : [];
+        const result = await nextItemHeld(store, project, body.agent ?? '', body.ttl_minutes);
+        const named = body.agent ? await writeWarnings(store, project, body.agent) : [];
         return {
           item: result.item ? itemJson(result.item, true) : null,
           reason: result.reason,
-          ...(result.claimed === undefined ? {} : { claimed: result.claimed }),
+          claimed: result.claimed === true,
           ...(named.length > 0 ? { warnings: named } : {}),
         };
       },

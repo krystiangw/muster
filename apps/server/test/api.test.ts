@@ -536,9 +536,10 @@ describe('items', () => {
     const asked = await Promise.all(
       Array.from({ length: 10 }, (_, n) =>
         harness.server.inject({
-          method: 'GET',
-          url: `${project.api}/next?agent=loop-${n}&claim=true`,
+          method: 'POST',
+          url: `${project.api}/next`,
           headers: authed(project),
+          payload: { agent: `loop-${n}` },
         }),
       ),
     );
@@ -561,22 +562,31 @@ describe('items', () => {
       assert.equal(item?.claim?.agent, body.item.claim.agent);
     }
 
-    // Without the flag it stays a look, which is what makes it safe to poll.
+    // GET stays a look, which is what makes it safe to poll and safe for a
+    // proxy or a client to retry. A GET that claims is a GET that takes a
+    // second item on a retry nobody wrote.
     const looked = await harness.server.inject({
       method: 'GET',
       url: `${project.api}/next?agent=looker`,
       headers: authed(project),
     });
     assert.equal(looked.json().claimed, undefined);
-
-    // And claiming needs a name to claim for.
-    const nameless = await harness.server.inject({
+    assert.equal(looked.json().item, null, 'everything is held by the fleet above');
+    const refusedFlag = await harness.server.inject({
       method: 'GET',
-      url: `${project.api}/next?claim=true`,
+      url: `${project.api}/next?agent=looker&claim=true`,
       headers: authed(project),
     });
+    assert.equal(refusedFlag.statusCode, 400, 'and the flag is not a thing on this door');
+
+    // And taking needs a name to take it for.
+    const nameless = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/next`,
+      headers: authed(project),
+      payload: {},
+    });
     assert.equal(nameless.statusCode, 400);
-    assert.equal(nameless.json().error, 'bad_agent');
   });
 
   it('enforces the project item cap', async () => {
@@ -1701,5 +1711,68 @@ describe('who is writing, and by what name', () => {
       payload: { message: 'no name on this one' },
     });
     assert.match(anonymous.json().warnings.join(' '), /Nothing named itself/);
+  });
+});
+
+describe('taking what is next, over MCP', () => {
+  it('claims in the same call and is charged as a write', async () => {
+    // The tool takes a lease and writes a timeline entry, so counting it
+    // against the read budget published five times the writes an agent is
+    // allowed to make.
+    // One bucket per token for writes, whichever door they come through, so the
+    // filing below spends part of the same budget the claims are measured
+    // against. Five: two to file, three to take.
+    const isolated = await startHarness({ LIMIT_WRITES_PER_MINUTE: '5' });
+    try {
+      const project = await createProject(isolated, 'held over mcp');
+      for (let n = 0; n < 2; n += 1) {
+        await isolated.server.inject({
+          method: 'POST',
+          url: `${project.api}/items`,
+          headers: authed(project),
+          payload: { slug: `w-${n}`, title: `w ${n}`, actor: 'filer' },
+        });
+      }
+      const claim = (n: number) =>
+        isolated.server.inject({
+          method: 'POST',
+          url: '/mcp',
+          headers: authed(project),
+          payload: {
+            jsonrpc: '2.0',
+            id: n,
+            method: 'tools/call',
+            params: { name: 'next_item', arguments: { agent: `loop-${n}`, claim: true } },
+          },
+        });
+
+      const first = await claim(1);
+      const held = first.json().result.structuredContent;
+      assert.equal(held.claimed, true, first.body);
+      assert.ok(held.item.claim, 'and it comes back already held');
+
+      // Two filings and this claim make three of five; two more take it to the
+      // ceiling and the next one is refused as the write it is.
+      await claim(2);
+      await claim(3);
+      const spent = await claim(4);
+      assert.match(JSON.stringify(spent.json()), /rate_limited/);
+
+      // A plain look is a read, and reads have their own budget.
+      const looked = await isolated.server.inject({
+        method: 'POST',
+        url: '/mcp',
+        headers: authed(project),
+        payload: {
+          jsonrpc: '2.0',
+          id: 9,
+          method: 'tools/call',
+          params: { name: 'next_item', arguments: { agent: 'looker' } },
+        },
+      });
+      assert.notEqual(looked.json().result.isError, true, looked.body);
+    } finally {
+      await isolated.stop();
+    }
   });
 });
