@@ -239,6 +239,34 @@ const run = async () => {
     );
   }
 
+  // A pipeline written on the work: file a card that names its successor,
+  // finish it, and the successor should be there. Both cards are removed after,
+  // because this tool keeps its project between runs and a board of its own
+  // leftovers is a board nobody can read.
+  await json(`${api}/items`, {
+    method: 'POST',
+    headers: authed,
+    body: JSON.stringify({
+      slug: `${SLUG}-chain`,
+      title: 'The first half of a chain',
+      actor: AGENT,
+      then: { slug: `${SLUG}-chained`, title: 'The second half, filed by the first' },
+    }),
+  });
+  const finished = await json(`${api}/items`, {
+    method: 'POST',
+    headers: authed,
+    body: JSON.stringify({ slug: `${SLUG}-chain`, status: 'done', actor: AGENT }),
+  });
+  check(
+    'finishing a card files the one it names next',
+    finished.body?.chained?.slug === `${SLUG}-chained`,
+    JSON.stringify(finished.body?.chained ?? finished.body?.warnings),
+  );
+  for (const slug of [`${SLUG}-chain`, `${SLUG}-chained`]) {
+    await json(`${api}/items/${encodeURIComponent(slug)}`, { method: 'DELETE', headers: authed });
+  }
+
   const open = await json(`${api}/escalations?status=open`, { headers: authed });
   let escalation = (open.body?.escalations ?? []).find((one) => one.question === QUESTION);
   if (!escalation) {
