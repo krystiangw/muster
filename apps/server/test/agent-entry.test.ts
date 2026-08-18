@@ -168,8 +168,15 @@ describe('B. agent entry', () => {
       // and a card naming one package while the protocol names another is the
       // exact drift this is here to catch.
       const installs = [...skill.body.matchAll(/npm install ([^\n`]+)/g)]
-        .flatMap((match) => match[1]!.trim().split(/\s+/))
-        .filter((token) => !token.startsWith('-'))
+        .flatMap((match) => {
+          // Everything up to the first flag. Dropping flags one by one would
+          // keep the value of a flag that takes one, so a perfectly good
+          // `npm install musterboard --omit dev` would be read as installing
+          // something called dev.
+          const args = match[1]!.trim().split(/\s+/);
+          const firstFlag = args.findIndex((token) => token.startsWith('-'));
+          return firstFlag === -1 ? args : args.slice(0, firstFlag);
+        })
         .map((token) => token.replace(/[.,;]+$/, ''));
       assert.deepEqual(
         [...new Set(installs)],
