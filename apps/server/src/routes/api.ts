@@ -1086,7 +1086,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           tags: ['escalations'],
           summary: 'Answers waiting for this agent',
           description:
-            'Four statuses, four meanings: answered (act on it), resolved (already handled, stop), wont_do (dropped, do not ask again), in_progress (the human is on it, wait). `waiting` carries your own questions that nobody has answered yet, so an agent reading an empty inbox can tell "nothing came back" apart from "I never asked".',
+            'Four statuses, four meanings: answered (act on it), resolved (already handled, stop), wont_do (dropped, do not ask again), in_progress (the human is on it, wait). `waiting` carries your own questions that nobody has answered yet, so an agent reading an empty inbox can tell "nothing came back" apart from "I never asked". `handover_requests` appears when a person holding the read link has asked to be made the owner: answer it by calling POST /share with that address, and never by sending them the project token.',
           querystring: {
             type: 'object',
             properties: {
@@ -1237,24 +1237,35 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       },
     );
 
-    scoped.get('/v1/:project/keys', { schema: { tags: ['keys'], summary: 'List keys' } }, async (request) => {
-      const { project } = requireAdmin(request);
-      const keys = await listApiKeys(store, project._id);
-      return {
-        keys: keys.map((key) => ({
-          id: key._id,
-          name: key.name,
-          role: key.role,
-          created_at: key.createdAt,
-          last_used_at: key.lastUsedAt,
-          revoked_at: key.revokedAt,
-          // The whole reason the OAuth endpoint was changed was that nobody
-          // could tell sixty two live admin keys apart. A list that does not
-          // say which of them dies in an hour has the same problem.
-          expires_at: (key as { expiresAt?: Date | null }).expiresAt ?? null,
-        })),
-      };
-    });
+    scoped.get(
+      '/v1/:project/keys',
+      {
+        schema: {
+          tags: ['keys'],
+          summary: 'List keys',
+          description:
+            'Never the tokens themselves, only what each one is and when it was last used. `expires_at` is null for the ordinary project token and set for anything with a life of its own, such as an access token from the OAuth endpoint.',
+        },
+      },
+      async (request) => {
+        const { project } = requireAdmin(request);
+        const keys = await listApiKeys(store, project._id);
+        return {
+          keys: keys.map((key) => ({
+            id: key._id,
+            name: key.name,
+            role: key.role,
+            created_at: key.createdAt,
+            last_used_at: key.lastUsedAt,
+            revoked_at: key.revokedAt,
+            // The whole reason the OAuth endpoint was changed was that nobody
+            // could tell sixty two live admin keys apart. A list that does not
+            // say which of them dies in an hour has the same problem.
+            expires_at: (key as { expiresAt?: Date | null }).expiresAt ?? null,
+          })),
+        };
+      },
+    );
 
     scoped.delete(
       '/v1/:project/keys/:id',
@@ -1333,7 +1344,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           tags: ['projects'],
           summary: 'Offer this board to a human',
           description:
-            'Puts an offer in that person’s operator view, where one click accepts it and makes them the owner. Nothing reaches their queue until they accept, so this cannot post a board into somebody’s inbox. If they have never used Muster, they get the read link and the ordinary email claim instead.',
+            'Puts an offer in that person’s operator view, where one click accepts it and makes them the owner. Nothing reaches their queue until they accept, so this cannot post a board into somebody’s inbox. If they have never used Muster, they get the read link and the ordinary email claim instead. Needs an admin token: offering the board to an address and accepting it is how a project changes hands, and ownership has no way back, so a worker key must not be able to start it.',
           body: {
             type: 'object',
             required: ['email'],

@@ -262,7 +262,7 @@ const TOOLS: ToolDefinition[] = [
     name: 'share_project',
     title: 'Hand this board to a human',
     description:
-      'Offers the project to an operator by email. It appears in their view where one click makes them the owner, which also lifts the limits and stops the project expiring.',
+      'Offers the project to an operator by email. It appears in their view where one click makes them the owner, which also lifts the limits and stops the project expiring. Needs an admin token, because this is how a project changes hands and ownership has no way back. Use it to answer a handover_requests entry from the inbox tool, and never send anybody the project token.',
     inputSchema: {
       type: 'object',
       required: ['email'],

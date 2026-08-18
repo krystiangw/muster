@@ -66,6 +66,28 @@ describe('A. discovery', () => {
     assert.match(protocol.body, /blocked` means waiting on somebody who is not an agent/);
   });
 
+  it('says which calls need an admin token, in the document an agent reads', async () => {
+    // Tonight's change made /share admin only, for the same reason /claim is:
+    // it is how a project changes hands. An agent holding a worker key that
+    // reads "offer this board to a human", calls it and gets a 403 has been
+    // told nothing by the document that sent it there.
+    const openapi = (
+      await harness.server.inject({ method: 'GET', url: '/openapi.json' })
+    ).json() as { paths: Record<string, Record<string, { description?: string }>> };
+    assert.match(openapi.paths['/v1/{project}/share']!.post!.description!, /admin token/);
+    assert.match(openapi.paths['/v1/{project}/claim']!.post!.description!, /admin|person/);
+
+    const tools = (
+      await harness.server.inject({
+        method: 'POST',
+        url: '/mcp',
+        payload: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+      })
+    ).json().result.tools as Array<{ name: string; description: string }>;
+    const share = tools.find((tool) => tool.name === 'share_project')!;
+    assert.match(share.description, /admin token/);
+  });
+
   it('publishes llms.txt with the entry points in it', async () => {
     const response = await harness.server.inject({ method: 'GET', url: '/llms.txt' });
     assert.equal(response.statusCode, 200);
