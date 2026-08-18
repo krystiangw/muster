@@ -2016,10 +2016,13 @@ export async function answerEscalation(
       $set: {
         status,
         answer,
-        answeredAt: now,
         updatedAt: now,
+        // Only when something changed. A client retrying an identical answer
+        // after a timeout is not a new decision, and this date is read as
+        // recency: the history a person sees is ordered by it, so a retry of
+        // last week's answer would climb over this morning's.
         ...(changed
-          ? { acknowledgedAt: null, acknowledgedBy: null, acknowledgedNote: null }
+          ? { answeredAt: now, acknowledgedAt: null, acknowledgedBy: null, acknowledgedNote: null }
           : {}),
       },
     },

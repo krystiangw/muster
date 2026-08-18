@@ -1525,6 +1525,52 @@ describe('a layout that would trap finished work', () => {
     });
     assert.match(back.body, /Answered\./, 'the confirmation names it');
     assert.match(back.body, /at last/, 'and the answer is in the history');
+
+    // And it still says so after the history has moved on without it. Fifty
+    // decisions later this question is nowhere near the recent list, and the
+    // confirmation is exactly what somebody needs on the question that was
+    // hardest to find.
+    for (let index = 0; index < 51; index += 1) {
+      const later = await createEscalation(
+        harness.store,
+        doc,
+        { agent: 'a', question: `after ${index}` },
+        'http',
+      );
+      await answerEscalation(harness.store, doc._id, later._id, 'resolved', 'later', 'http');
+    }
+    const much = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}?answered=${old._id}`,
+    });
+    assert.match(much.body, /Answered\./, 'the confirmation is not drawn from a slice');
+  });
+
+  it('does not let a retry of an old answer look like a new one', async () => {
+    // The history a person reads is ordered by when a question was answered,
+    // so a client retrying last week's answer after a timeout would climb over
+    // this morning's decisions if the retry moved that date.
+    const { createEscalation, answerEscalation } = await import('../src/service.js');
+    const project = await createProject(harness, 'retries');
+    const doc = (await harness.store.projects.findOne({ _id: project.id }))!;
+    const question = await createEscalation(
+      harness.store,
+      doc,
+      { agent: 'a', question: 'decided once?' },
+      'http',
+    );
+
+    await answerEscalation(harness.store, doc._id, question._id, 'answered', 'yes', 'http');
+    const first = (await harness.store.escalations.findOne({ _id: question._id }))!.answeredAt;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    await answerEscalation(harness.store, doc._id, question._id, 'answered', 'yes', 'http');
+    const after = (await harness.store.escalations.findOne({ _id: question._id }))!.answeredAt;
+    assert.equal(after!.getTime(), first!.getTime(), 'the same answer twice is one decision');
+
+    // A different answer is a decision, and moves it.
+    await answerEscalation(harness.store, doc._id, question._id, 'answered', 'no', 'http');
+    const changed = (await harness.store.escalations.findOne({ _id: question._id }))!.answeredAt;
+    assert.ok(changed!.getTime() > first!.getTime());
   });
 
   it('says when it is showing some of the questions rather than all', async () => {

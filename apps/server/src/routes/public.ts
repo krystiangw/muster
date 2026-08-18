@@ -706,8 +706,20 @@ address. Claiming is free and raises the limits:</p>
     // now what the query asks for. This page used to show newest first:
     // somebody with time for one question answered the least important one, and
     // the two pages of the same product disagreed about what mattered.
+    // Asked for by name rather than looked for in the list above. The list is
+    // capped, and the confirmation is exactly what a person needs on the
+    // question that was hardest to find: deriving it from a slice means the
+    // page can decide, on a busy board, that the thing it just did did not
+    // happen. Still read from the stored question and never from the URL, which
+    // only names which one.
     const answeredId = one((request.query as { answered?: string }).answered);
-    const justAnswered = answered.find((doc) => doc._id === answeredId) ?? null;
+    const justAnswered = answeredId
+      ? ((await store.escalations.findOne({
+          projectId: project._id,
+          _id: answeredId,
+          status: { $ne: 'open' },
+        })) as EscalationDoc | null)
+      : null;
     // Who is reading, when they happen to be signed in. Only the unclaimed
     // banner uses it, and only to offer the one thing a person without the
     // token can do: ask for the board.
