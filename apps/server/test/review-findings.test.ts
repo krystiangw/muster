@@ -1415,4 +1415,59 @@ describe('what the verification pass found in the fixes', () => {
       await open.stop();
     }
   });
+
+  /**
+   * Found by the soak rather than by reading: four hundred rounds of concurrent
+   * work left the open counter one below the collection, permanently, because
+   * nothing repairs a counter that is too low.
+   *
+   * The interleaving is not exotic. Two agents write the same new slug, one
+   * with a status; the second one looks, sees nothing, and by the time its
+   * write lands the first has created the item. Applying the status then moves
+   * a document nobody read: no guard, so nobody owns the transition, and no
+   * accounting, because the counter is moved either by the guarded branch or by
+   * the creation, and that write is neither.
+   *
+   * Simulated exactly rather than hammered, so this fails for the reason it
+   * names instead of when the machine is busy.
+   */
+  it('does not move a status it never read, and does not lose the slot', async () => {
+    const { createProject: createDirect, upsertItem } = await import('../src/service.js');
+    const { project } = await createDirect(harness.store, harness.config, { name: 'raced' }, 'http');
+
+    const asItWas = harness.store.items.findOne.bind(harness.store.items);
+    let raced = false;
+    // The item appears between the look and the write, which is the whole of
+    // the race. One call only: the create below goes through this same path.
+    (harness.store.items as { findOne: typeof asItWas }).findOne = (async (...args: unknown[]) => {
+      const found = await (asItWas as (...rest: unknown[]) => Promise<unknown>)(...args);
+      if (!raced && found === null) {
+        raced = true;
+        await upsertItem(harness.store, project, { slug: 'contested', title: 'first', actor: 'a' });
+      }
+      return found;
+    }) as typeof asItWas;
+
+    try {
+      const late = await upsertItem(harness.store, project, {
+        slug: 'contested',
+        title: 'second',
+        status: 'done',
+        actor: 'b',
+      });
+      assert.equal(raced, true, 'the race this test is about did not happen');
+      assert.equal(late.created, false, 'the other writer created it');
+      assert.equal(late.item.status, 'open', 'and their status stands, unmoved by a write that never saw it');
+    } finally {
+      (harness.store.items as { findOne: typeof asItWas }).findOne = asItWas;
+    }
+
+    const doc = await harness.store.projects.findOne({ _id: project._id });
+    const open = await harness.store.items.countDocuments({
+      projectId: project._id,
+      status: { $nin: ['done', 'dropped'] },
+    });
+    assert.equal(open, 1);
+    assert.equal(doc!.counts.items, open, 'the counter says what the collection says');
+  });
 });

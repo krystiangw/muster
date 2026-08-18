@@ -991,13 +991,21 @@ export async function upsertItem(
 
   const status = applyStatus ? input.status : undefined;
   if (!existing) {
-    if (status !== undefined) {
-      set.status = status;
-      set.closedAt = TERMINAL_STATUSES.includes(status) ? now : null;
-    } else {
-      setOnInsert.status = 'open';
-      setOnInsert.closedAt = null;
-    }
+    // On insert, never on update, and that is the whole of it. This branch was
+    // reached because the slug did not exist when we looked, and the write can
+    // still land on a document somebody created in between. Through `$set` the
+    // status would then be applied to a document we never read: no guard, so
+    // nobody owns the transition, and no accounting, because the counter is
+    // moved either by the guarded branch above or by the creation below and
+    // this is neither. Both directions were reachable. A request that meant to
+    // create a done item, landing on an open one, closed it and left the
+    // counter high; one that meant to create an open item, landing on a done
+    // one, opened it and left the counter low, which nothing ever repairs.
+    //
+    // Losing the race means the other writer's status stands, which is the rule
+    // the guarded branch already follows when it loses.
+    setOnInsert.status = status ?? 'open';
+    setOnInsert.closedAt = status !== undefined && TERMINAL_STATUSES.includes(status) ? now : null;
   }
   // For an item that already exists, the status is never written here. The
   // guarded transition above already applied it, and repeating it unguarded
