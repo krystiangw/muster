@@ -3,6 +3,7 @@ import { BOARD_PRESETS } from '../src/board.js';
 import { after, before, describe, it } from 'node:test';
 import { moveItem } from '../src/board.js';
 import { authed, createProject, startHarness, type Harness, type Project } from './helper.js';
+import { boardApplyJson } from '../src/serialize.js';
 
 /**
  * Columns are a view, not a state. These tests exist to keep it that way: a
@@ -1321,6 +1322,39 @@ describe('a layout that would trap finished work', () => {
     assert.equal(moved.json().applied.touch, true, 'the move says what it did');
     assert.equal(moved.json().item.stale, false);
     assert.equal(moved.json().landed_in, 'fresh');
+  });
+
+  it('documents every key a move can apply, on the page that tells you to write one', async () => {
+    // The layout section explains what a filter can say and, when a column is a
+    // view, tells its author to declare an "apply" instead. It documented no
+    // part of that key, so the advice ended at a word the page never defined.
+    // The list comes from the serializer rather than from a copy here: a new
+    // key has to round-trip to survive a save, so this fails until it is both
+    // saved and explained.
+    const project = await createProject(harness, 'apply reference');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const keys = Object.keys(
+      boardApplyJson({
+        status: 'open',
+        addLabels: ['a'],
+        removeLabels: ['b'],
+        owner: 'someone',
+        priority: 1,
+        claim: true,
+        release: false,
+        touch: true,
+      }),
+    );
+    assert.ok(keys.length >= 8, 'the serializer still names every key');
+
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    // Only the part about moves. Half these words are also filter keys, and a
+    // check that reads the whole page would pass on the wrong table.
+    const section = page.body.split('What a move does')[1] ?? '';
+    assert.ok(section.length > 0, 'the section exists');
+    for (const key of keys) {
+      assert.ok(section.includes(`>${key}<`), `the move reference explains "${key}"`);
+    }
   });
 
   it('refuses a column that says it will not touch, because every move does', async () => {

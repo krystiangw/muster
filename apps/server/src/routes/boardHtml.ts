@@ -616,6 +616,26 @@ ${Object.entries(BOARD_PRESETS)
 </tbody></table></div>
 <p>An item lands in the <b>first</b> column that matches, so order the columns the way you read them.
 Anything that matches nothing is reported above the board rather than hidden.</p>
+
+<h3>What a move does</h3>
+<p>By default, the column's own filter read back at it: the one status it asks for, the first label
+it requires, every label it excludes, the one owner it names, a claim where it asks for held items
+and a release where it asks for free ones. Declaring <code>apply</code> replaces that reading
+entirely, so spell out everything the move should do, not only the part the filter got wrong.</p>
+<div class="scroll"><table>
+<thead><tr><th>Key</th><th>What moving a card here does</th></tr></thead>
+<tbody>
+<tr><td class="mono">status</td><td>Sets the status. The same four; a column cannot invent one.</td></tr>
+<tr><td class="mono">add_labels</td><td>Labels put on. Applied in the database, so a move never overwrites a label somebody else set meanwhile.</td></tr>
+<tr><td class="mono">remove_labels</td><td>Labels taken off, the same way.</td></tr>
+<tr><td class="mono">owner</td><td>Sets the owner. <code>null</code> leaves it to nobody.</td></tr>
+<tr><td class="mono">priority</td><td>Sets the priority, -10 to 10.</td></tr>
+<tr><td class="mono">claim</td><td><code>true</code> takes the lease in the mover's name, and the move is refused if somebody else is holding the card.</td></tr>
+<tr><td class="mono">release</td><td><code>true</code> hands the lease back. One column cannot do both.</td></tr>
+<tr><td class="mono">touch</td><td>Only <code>true</code>, for a column whose filter is just freshness: the move is itself the write that clears the flag.</td></tr>
+</tbody></table></div>
+<p>A column with nothing to apply is a view. The board leaves it out of the move control, and a move
+sent straight to the API is refused rather than quietly doing nothing.</p>
 <p class="mono" style="color:var(--muted)">Same thing over the API:
 PUT ${escapeHtml(project._id ? `/v1/${project._id}/board` : '/v1/{project}/board')}</p>
 </details>`;
