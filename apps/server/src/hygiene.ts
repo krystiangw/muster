@@ -363,6 +363,18 @@ export async function correctOvercount(store: Store, projectId: string): Promise
   // survives a minute of quiet is a leak, and one that does not was somebody
   // mid-write.
   const seen = before.countsCheck;
+  const forget = async (): Promise<void> => {
+    if (seen) await store.projects.updateOne({ _id: projectId }, { $unset: { countsCheck: '' } });
+  };
+
+  // Nothing to fix is the ordinary case, and it costs nothing: no observation
+  // is kept for a project whose counters already agree with its work, and one
+  // left over from a discrepancy that resolved itself is dropped here.
+  if (before.counts.items <= openItems && before.counts.escalations <= openEscalations) {
+    await forget();
+    return false;
+  }
+
   const settled =
     seen != null &&
     seen.items === openItems &&
@@ -388,6 +400,7 @@ export async function correctOvercount(store: Store, projectId: string): Promise
     );
     return false;
   }
+  await forget();
 
   const repairs = await Promise.all([
     before.counts.items > openItems
