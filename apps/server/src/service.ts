@@ -797,13 +797,18 @@ export async function renameAgent(
       { _id: leaving._id },
       { $set: { handle: to, aliases, lastSeenAt: now } },
     );
-  } else {
+  } else if (project.counts.agents < project.limits.agents) {
     // Neither name was ever registered, which is the case this exists for:
     // work filed under two spellings nobody declared. The surviving one gets
     // the registration, because a consolidated handle that is still only a
     // string on an item is a handle the next writer can misspell again, and
     // because the alias has to live somewhere for an old timeline entry to be
     // readable at all.
+    //
+    // Under the same cap and the same expiry as any other registration: a plan
+    // is a plan whichever door adds the row, and an agent with no `expiresAt`
+    // on a demo project outlives the project it belongs to, because the TTL
+    // index passes over documents that do not carry the field.
     await store.agents.insertOne({
       _id: newId('a'),
       projectId: project._id,
@@ -814,9 +819,15 @@ export async function renameAgent(
       lastSeenAt: now,
       aliases,
       meta: {},
+      expiresAt: project.expiresAt,
     } as never);
     await store.projects.updateOne({ _id: project._id }, { $inc: { 'counts.agents': 1 } });
   }
+  // At the cap and neither name registered: the work still moves onto one
+  // handle, which is what was asked for. What it does not get is a row nobody
+  // has room for, and the alias goes with it: the timeline still says what it
+  // said, and there is nowhere to write down what the old name became.
+
 
   return {
     from,
