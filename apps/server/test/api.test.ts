@@ -589,6 +589,86 @@ describe('items', () => {
     assert.equal(nameless.statusCode, 400);
   });
 
+  it('files what comes next when an item finishes, once', async () => {
+    // A pipeline written on the work rather than in an orchestrator nobody
+    // here runs. Idempotent because the successor is a slug like everything
+    // else: finishing the same item twice files one card.
+    const project = await createProject(harness);
+    await post(project, '/items', {
+      slug: 'errors:withdraw',
+      title: 'Withdraws stuck',
+      actor: 'errors-loop',
+      then: { slug: 'ops:bridge', title: 'Bridge it, or wait?', priority: 5, owner: 'alex' },
+    });
+
+    // Nothing is filed while it is open.
+    assert.equal(await harness.store.items.countDocuments({ projectId: project.id }), 1);
+
+    const finished = await post(project, '/items', {
+      slug: 'errors:withdraw',
+      status: 'done',
+      actor: 'errors-loop',
+    });
+    assert.equal(finished.statusCode, 200);
+    assert.equal(finished.json().chained.slug, 'ops:bridge', finished.body);
+    const next = await harness.store.items.findOne({ projectId: project.id, slug: 'ops:bridge' });
+    assert.equal(next?.title, 'Bridge it, or wait?');
+    assert.equal(next?.priority, 5);
+    assert.equal(next?.owner, 'alex');
+    assert.match(next!.timeline.at(-1)!.message, /filed by "errors:withdraw", which finished/);
+    const done = await harness.store.items.findOne({ projectId: project.id, slug: 'errors:withdraw' });
+    assert.match(done!.timeline.at(-1)!.message, /so "ops:bridge" is filed/);
+
+    // Written to again while already done: the crossing happened once, so
+    // nothing is filed again and nothing is reopened.
+    const again = await post(project, '/items', {
+      slug: 'errors:withdraw',
+      status: 'done',
+      body: 'and a closing remark',
+      actor: 'errors-loop',
+    });
+    assert.equal(again.json().chained, undefined);
+    assert.equal(await harness.store.items.countDocuments({ projectId: project.id }), 2);
+    assert.equal(
+      (await harness.store.items.findOne({ projectId: project.id, slug: 'ops:bridge' }))?.status,
+      'open',
+      'and the successor is left where it was',
+    );
+
+    // A card cannot name itself: that is a loop with one step in it.
+    const selfish = await post(project, '/items', {
+      slug: 'errors:loop',
+      title: 'x',
+      actor: 'a',
+      then: { slug: 'errors:loop' },
+    });
+    assert.equal(selfish.statusCode, 400);
+    assert.equal(selfish.json().error, 'bad_then');
+  });
+
+  it('chains through a board move as well, because a move is a write', async () => {
+    // The move applies a status through the same write every other door uses,
+    // which is the only reason this needs no second implementation.
+    const project = await createProject(harness);
+    await post(project, '/items', {
+      slug: 'first',
+      title: 'first',
+      actor: 'a',
+      then: { slug: 'second', title: 'second' },
+    });
+    const moved = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items/first/move`,
+      headers: authed(project),
+      payload: { column: 'done', agent: 'a' },
+    });
+    assert.equal(moved.statusCode, 200, moved.body);
+    assert.ok(
+      await harness.store.items.findOne({ projectId: project.id, slug: 'second' }),
+      'the card it files next is on the board',
+    );
+  });
+
   it('enforces the project item cap', async () => {
     const project = await createProject(harness);
     await harness.store.projects.updateOne(

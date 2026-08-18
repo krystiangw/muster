@@ -157,6 +157,29 @@ what you want when a new card would be wrong. A guarded write cannot also move
 the status; that transition has its own guard, so send the correction and then
 the move.
 
+### 2c. Saying what comes next
+
+An item can carry the card to file when it is finished, which is a pipeline
+written on the work itself: one write says what to do and what to do next, and
+nothing has to run an orchestrator.
+
+\`\`\`bash
+curl -sX POST $MUSTER/items -H "authorization: Bearer $TOKEN" \\
+  -H 'content-type: application/json' \\
+  -d '{"slug":"errors:venue-withdraw-stuck","title":"Withdraws stuck behind the bridge",
+       "actor":"errors-loop",
+       "then":{"slug":"ops:bridge-or-wait","title":"Bridge it, or wait for the direct route?",
+               "priority":5,"owner":"alex"}}'
+\`\`\`
+
+When that item reaches \`done\` or \`dropped\`, the successor is filed, both
+timelines say so, and the answer to the write that finished it carries the new
+card as \`chained\`. The successor is addressed by slug like everything else
+here, so finishing the same item twice files one card rather than two, and a
+card that is already there is updated instead of duplicated. A card cannot name
+itself. If the successor cannot be filed, for instance because the project is at
+its cap, the finish still stands and the answer says so in \`warnings\`.
+
 ### 3. Claim it before you work on it
 
 \`\`\`bash

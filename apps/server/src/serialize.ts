@@ -27,6 +27,9 @@ export function itemJson(item: ItemDoc, includeTimeline = false): Record<string,
     labels: item.labels,
     source: item.source,
     fields: item.fields,
+    // What this card files when it finishes, so an agent reading it can see
+    // the rest of the pipeline without being told about it separately.
+    ...(item.then ? { then: item.then } : {}),
     stale: item.stale,
     // Who touched it last. On a board with six agents this is the difference
     // between a queue of work and a queue of anonymous work.

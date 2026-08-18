@@ -596,6 +596,21 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
                 },
                 additionalProperties: false,
               },
+              then: {
+                type: 'object',
+                description:
+                  'The card to file when this one is finished, addressed by slug like everything else here, so finishing twice files one card. A pipeline written on the work: one write says what to do and what to do next, and no orchestrator has to exist.',
+                required: ['slug'],
+                properties: {
+                  slug: { type: 'string', minLength: 1, maxLength: 96 },
+                  title: { type: 'string', maxLength: 300 },
+                  body: { type: 'string', maxLength: 20000 },
+                  priority: { type: 'integer', minimum: -10, maximum: 10 },
+                  labels: { type: 'array', items: { type: 'string', maxLength: 48 }, maxItems: 20 },
+                  owner: { type: ['string', 'null'], maxLength: 48 },
+                },
+                additionalProperties: false,
+              },
               must_exist: {
                 type: 'boolean',
                 description:
@@ -642,6 +657,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           // the door this product is for could not: the mechanism was in the
           // domain and reachable from one side only.
           expect: body.expect as UpsertItemInput['expect'],
+          then: body.then as UpsertItemInput['then'],
           mustExist: body.must_exist as boolean | undefined,
           actor,
         });
@@ -660,7 +676,15 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         void maybeSweep(store, project).catch(() => undefined);
         return reply
           .code(result.created ? 201 : 200)
-          .send({ item: itemJson(result.item), created: result.created, warnings });
+          .send({
+            item: itemJson(result.item),
+            created: result.created,
+            // Reported in the same answer that finished the item: an agent
+            // that had to read the board back to learn what its own write set
+            // in motion is an agent doing a round trip for a fact we hold.
+            ...(result.chained ? { chained: itemJson(result.chained) } : {}),
+            warnings,
+          });
       },
     );
 

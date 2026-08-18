@@ -9,6 +9,7 @@ import {
   ITEM_STATUSES,
   PRIORITY_RANK,
   TERMINAL_STATUSES,
+  type ItemSuccessor,
   type AgentDoc,
   type ApiKeyDoc,
   type EscalationDoc,
@@ -89,6 +90,37 @@ export function normalizeUpsertInput(input: UpsertItemInput): UpsertItemInput {
   // the scoping and reach another project's card. The HTTP door refuses the
   // extra keys by schema and MCP arguments are whatever a model produced, so
   // the guard is rebuilt here, where both doors pass through.
+  let then: UpsertItemInput['then'];
+  if (input.then !== undefined && input.then !== null) {
+    const raw = input.then as unknown as Record<string, unknown>;
+    if (typeof raw !== 'object' || Array.isArray(raw)) {
+      throw badRequest('bad_then', 'then is the card to file when this one is done.');
+    }
+    const next = normalizeSlug(typeof raw.slug === 'string' ? raw.slug : '');
+    if (!next) {
+      throw badRequest('bad_then', 'then needs the slug of the card to file.');
+    }
+    if (next === normalizeSlug(input.slug)) {
+      throw badRequest(
+        'bad_then',
+        'A card cannot file itself when it finishes: that is a loop with one step in it.',
+      );
+    }
+    then = {
+      slug: next,
+      ...(typeof raw.title === 'string' ? { title: raw.title.slice(0, 300) } : {}),
+      ...(typeof raw.body === 'string' ? { body: raw.body.slice(0, 20_000) } : {}),
+      ...(typeof raw.priority === 'number' ? { priority: raw.priority } : {}),
+      ...(Array.isArray(raw.labels) && raw.labels.every((label) => typeof label === 'string')
+        ? { labels: raw.labels as string[] }
+        : {}),
+      ...(typeof raw.owner === 'string' || raw.owner === null ? { owner: raw.owner as string | null } : {}),
+    };
+    if (then.priority !== undefined && (!Number.isInteger(then.priority) || then.priority < -10 || then.priority > 10)) {
+      throw badRequest('bad_then', 'then.priority is an integer between -10 and 10.');
+    }
+  }
+
   let expect: UpsertItemInput['expect'];
   if (input.expect !== undefined) {
     if (typeof input.expect !== 'object' || input.expect === null || Array.isArray(input.expect)) {
@@ -118,6 +150,7 @@ export function normalizeUpsertInput(input: UpsertItemInput): UpsertItemInput {
   }
   return {
     ...input,
+    then: input.then === null ? null : then,
     expect,
     title: clamp(input.title, 300),
     body: clamp(input.body, 20_000),
@@ -1060,12 +1093,24 @@ export interface UpsertItemInput {
    * note still lands on the timeline, which is the part that is true.
    */
   guest?: boolean;
+  /**
+   * The card to file when this one is finished.
+   *
+   * A pipeline written on the work itself: the item that reaches a terminal
+   * status files the next one and says so in both timelines. Idempotent by
+   * construction, because the successor is addressed by slug like everything
+   * else here, so finishing an item twice writes the same card twice rather
+   * than two cards.
+   */
+  then?: ItemSuccessor | null;
 }
 
 export interface UpsertItemResult {
   item: ItemDoc;
   created: boolean;
   warnings: string[];
+  /** The card this one filed on finishing, when it carried a successor. */
+  chained?: ItemDoc | null;
 }
 
 export async function upsertItem(
@@ -1255,6 +1300,7 @@ export async function upsertItem(
   assign('labels', input.labels, []);
   assign('fields', input.fields, {});
   assign('source', input.source, null);
+  assign('then', input.then, null);
 
   if (input.title !== undefined) {
     if (input.insertOnly) setOnInsert.titleKey = titleKey(input.title);
@@ -1428,7 +1474,68 @@ export async function upsertItem(
   }
 
   void touchAgent(store, project._id, input.actor);
-  return { item, created, warnings };
+
+  // The successor, filed by the item that finished. After the write and only on
+  // the crossing: an item that was already done and is written to again files
+  // nothing, or every note on a closed card would file the next one afresh.
+  const chained =
+    isTerminal && !wasTerminal && item.then?.slug
+      ? await fileSuccessor(store, project, item, input.actor)
+      : null;
+  if (chained) warnings.push(...chained.warnings);
+
+  return { item, created, warnings, ...(chained ? { chained: chained.item } : {}) };
+}
+
+/**
+ * File what comes after, and say so on both cards.
+ *
+ * The pipeline lives on the work rather than in an orchestrator: one write
+ * says what to do and what to do next, and the board runs it. Addressed by
+ * slug like everything else here, so a card that finishes twice files the same
+ * successor twice, which is one card.
+ *
+ * A failure here is not a failure of the write that finished: the item is
+ * closed, the caller is told what happened in a warning, and the successor can
+ * be filed by hand. Losing the close because the next card could not be
+ * created would be the wrong half to keep.
+ */
+async function fileSuccessor(
+  store: Store,
+  project: ProjectDoc,
+  finished: ItemDoc,
+  actor: string,
+): Promise<{ item: ItemDoc | null; warnings: string[] }> {
+  const next = finished.then!;
+  try {
+    const { item } = await upsertItem(store, project, {
+      slug: next.slug,
+      ...(next.title === undefined ? {} : { title: next.title }),
+      ...(next.body === undefined ? {} : { body: next.body }),
+      ...(next.priority === undefined ? {} : { priority: next.priority }),
+      ...(next.labels === undefined ? {} : { labels: next.labels }),
+      ...(next.owner === undefined ? {} : { owner: next.owner }),
+      actor,
+      note: `filed by "${finished.slug}", which finished`,
+    });
+    await appendNote(
+      store,
+      project,
+      finished.slug,
+      actor,
+      `finished, so "${next.slug}" is filed`,
+      'note',
+    ).catch(() => undefined);
+    return { item, warnings: [] };
+  } catch (error) {
+    const said = error instanceof ServiceError ? error.message : 'the write did not go through';
+    return {
+      item: null,
+      warnings: [
+        `"${finished.slug}" is finished, but the card it files next, "${next.slug}", was not created: ${said}`,
+      ],
+    };
+  }
 }
 
 export async function appendNote(

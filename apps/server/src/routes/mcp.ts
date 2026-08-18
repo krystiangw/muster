@@ -21,6 +21,7 @@ import {
   readItems,
   nextItem,
   nextItemHeld,
+  type UpsertItemInput,
   observe,
   registerAgent,
   shareProject,
@@ -170,6 +171,20 @@ const TOOLS: ToolDefinition[] = [
             'Write only if the item still says this. Between reading a card and writing it there is room for exactly the change this is trying not to lose; a mismatch refuses with changed_underneath and writes nothing. Not with status, which has its own guard.',
           properties: { title: { type: 'string' }, body: { type: 'string' } },
           additionalProperties: false,
+        },
+        then: {
+          type: 'object',
+          description:
+            'The card to file when this one is finished, addressed by slug, so finishing twice files one card. A pipeline written on the work itself: one write says what to do and what to do next.',
+          required: ['slug'],
+          properties: {
+            slug: { type: 'string' },
+            title: { type: 'string' },
+            body: { type: 'string' },
+            priority: { type: 'integer', minimum: -10, maximum: 10 },
+            labels: { type: 'array', items: { type: 'string' } },
+            owner: { type: 'string' },
+          },
         },
         must_exist: {
           type: 'boolean',
@@ -661,6 +676,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           // as it arrived, and rebuilt from its two known fields in the
           // service, which is where every door's arguments meet the filter.
           expect: args.expect as { title?: string; body?: string } | undefined,
+          then: args.then as UpsertItemInput['then'],
           mustExist: args.must_exist === true,
           actor,
         });
@@ -669,6 +685,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         return {
           item: itemJson(result.item),
           created: result.created,
+          ...(result.chained ? { chained: itemJson(result.chained) } : {}),
           // The same remarks the other door makes. This one used to carry only
           // what the write itself noticed, so an agent working over MCP was
           // never told its handle was unregistered or its write outside its

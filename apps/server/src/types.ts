@@ -90,6 +90,16 @@ export interface Absence {
   since: Date | null;
 }
 
+/** The card an item files when it reaches a terminal status. */
+export interface ItemSuccessor {
+  slug: string;
+  title?: string;
+  body?: string;
+  priority?: number;
+  labels?: string[];
+  owner?: string | null;
+}
+
 export interface ItemDoc {
   _id: string;
   projectId: string;
@@ -116,6 +126,14 @@ export interface ItemDoc {
   lastActor: string | null;
   timeline: TimelineEntry[];
   timelineCount: number;
+  /**
+   * What to file when this one is finished.
+   *
+   * A pipeline written on the work itself rather than in an orchestrator
+   * nobody here runs: the item that finishes files the next one, under a slug,
+   * so re-finishing it writes the same card instead of a second copy.
+   */
+  then?: ItemSuccessor | null;
   absence: Absence;
   stale: boolean;
   staleSince: Date | null;

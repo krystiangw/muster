@@ -1076,3 +1076,36 @@ browser's behaviour and not something a page can change without script.
 **And the address stays the one to share.** A form sends every field it has, so
 narrowing by one wrote `?owner=&agent=errors-loop&label=&q=` into the bar. The
 empties are dropped once, in the route, before the page is drawn.
+
+## What the competition had that we did not, 2026-08-18
+
+An audit of quentintou/agent-board, asked for by the operator. It is a
+single-developer OpenClaw appliance: six commits in one day six months ago, JSON
+files on disk, MCP over stdio only, no signup, no claims, no leases, no
+discovery documents. We are not competing with it. Three of its ideas are worth
+having anyway, and one of them is worth having tonight:
+
+**A card can say what to file when it is finished.** Their `nextTask` spawns a
+successor on completion, and it is the same idea as ours only because we already
+address everything by slug: theirs duplicates the pipeline every time a template
+is re-run, ours writes the same card twice, which is one card. One write now
+says what to do and what to do next, and no orchestrator has to exist for a
+four-agent pipeline to run. The chain fires on the crossing into a terminal
+status, not on every write to a closed card, and it fires through a board move
+as well because a move applies its status through the same write.
+
+**Their refusals name the objects that caused them,** in a form an agent can
+act on: "Blocked by unresolved dependencies: "Crawl & Technical Audit"
+(task_ab12, status: doing)". Worth copying wherever ours still say only what
+went wrong.
+
+**One mutation reports its own side effects.** Their move answers with what it
+retried and what it chained, so the agent does not read the board back to learn
+what its own write set in motion. Ours now answers with `chained` for the same
+reason.
+
+Filed rather than built: blocking dependencies between items, which collides
+with what `blocked` currently means here and deserves the operator's opinion;
+and an attempt counter that reopens failed work and escalates when the attempts
+run out, which is hygiene deciding to reopen somebody's card and is therefore
+not mine to switch on unasked.
