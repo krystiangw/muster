@@ -970,6 +970,46 @@ describe('a read link can ask for a project and never take one', () => {
  * a browser does, to every form the pages actually render, and it finds the next
  * such pair without anybody having to think of it.
  */
+describe('a form that says two things', () => {
+  it('is refused rather than half applied', async () => {
+    // A form-encoded body repeating a field parses into an array, and every
+    // handler behind these pages was written for the string a browser sends:
+    // one `slug` twice answered 500, and the ones that survived did so by
+    // joining two values with a comma and acting on the result. No form this
+    // service renders repeats a field.
+    const project = await createProject(harness, 'two things');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    await post(project, '/items', { slug: 'work', title: 'work', actor: 'a' });
+
+    for (const [where, payload] of [
+      ['/board/note', 'slug=work&slug=other&message=hi'],
+      ['/board/move', 'slug=work&column=doing&column=blocked'],
+      ['/board/priority', 'slug=work&priority=5&priority=-3'],
+    ] as const) {
+      const refused = await harness.server.inject({
+        method: 'POST',
+        url: `/r/${readToken}${where}`,
+        payload,
+        headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'text/html' },
+      });
+      assert.equal(refused.statusCode, 400, where);
+      assert.match(refused.body, /said two things/, where);
+    }
+
+    // Nothing was written by any of them, and the ordinary form still is.
+    const untouched = await harness.store.items.findOne({ projectId: project.id, slug: 'work' });
+    assert.equal(untouched?.timelineCount ?? 0, 1, 'the filing entry and nothing else');
+
+    const fine = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/note`,
+      payload: 'slug=work&message=a+real+note',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    assert.equal(fine.statusCode, 303);
+  });
+});
+
 describe('every link these pages render', () => {
   /**
    * A link that goes nowhere is invisible to a test that only asserts it is

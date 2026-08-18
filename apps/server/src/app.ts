@@ -255,6 +255,37 @@ export async function buildApp(
   });
 
   await server.register(formbody);
+
+  /**
+   * One value per field, or a refusal.
+   *
+   * A form-encoded body repeating a field parses into an array, and every
+   * handler behind these pages was written for the string a browser sends: one
+   * `slug` twice answered 500, and the ones that survived did so by joining two
+   * values with a comma and acting on the result. No form this service renders
+   * has a repeated field, so this is somebody hand-writing a request, and the
+   * honest answer to "which one did you mean" is to ask.
+   *
+   * Form bodies only. A JSON array is an ordinary value on the API door, where
+   * the schemas say which fields take one.
+   */
+  server.addHook('preValidation', async (request, reply) => {
+    const type = String(request.headers['content-type'] ?? '');
+    if (!type.startsWith('application/x-www-form-urlencoded')) return;
+    const body = request.body;
+    if (typeof body !== 'object' || body === null) return;
+    const twice = Object.entries(body as Record<string, unknown>).find(([, value]) =>
+      Array.isArray(value),
+    );
+    if (!twice) return;
+    const wantsHtml = (request.headers.accept ?? '').includes('text/html');
+    const said = `The field "${twice[0].slice(0, 40).replace(/[<>&"]/g, '')}" arrived more than once, so this request says two different things. Nothing was changed.`;
+    return wantsHtml
+      ? reply.code(400).type('text/html; charset=utf-8').send(
+          page(request, { title: 'That form said two things' }, `<h1>That form said two things</h1><p>${said}</p>`),
+        )
+      : reply.code(400).send({ error: 'repeated_field', message: said });
+  });
   await server.register(swagger, {
     openapi: {
       openapi: '3.1.0',
