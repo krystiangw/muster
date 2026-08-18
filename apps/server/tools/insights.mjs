@@ -64,6 +64,7 @@ const [
   unswept,
   oldestSweep,
   refusedRows,
+  answerDoorRows,
 ] = await Promise.all([
   count(events, { kind: 'discover' }),
   count(events, { kind: 'signup' }),
@@ -97,6 +98,7 @@ const [
     .limit(1)
     .toArray(),
   events.aggregate([{ $match: { kind: 'refused' } }, { $group: { _id: '$detail', n: { $sum: 1 } } }, { $sort: { n: -1 } }]).toArray(),
+  events.aggregate([{ $match: { kind: 'answer' } }, { $group: { _id: '$door', n: { $sum: 1 } } }, { $sort: { n: -1 } }]).toArray(),
 ]);
 
 const hours = answered
@@ -234,6 +236,18 @@ if (hours.length > 0) console.log(`  ${'  over the last'.padEnd(28)} ${String(ho
 // this check at all. `cross-site` and `origin` climbing together is somebody
 // probing the forms; either one climbing while the boards are quiet is this
 // service refusing pages it served itself, which is what it did for a night.
+// The mail sends people to the capability link, the operator page is where
+// somebody who signed in ends up, and an agent's own operator can answer over
+// the API. A door that is used and a door that is refused look identical from
+// anywhere else, and the refused one is the one that gets removed for being
+// unused. Both browser doors count as `browser`; which page it was is not worth
+// a second field, since the question this settles is whether people answer from
+// a browser at all.
+if (answerDoorRows.length > 0) {
+  console.log('\nHow the answers arrived');
+  for (const { _id, n } of answerDoorRows) row(_id ?? 'unknown', n);
+}
+
 console.log('\nForms refused as somebody else\'s page');
 row('all of them', refusedRows.reduce((total, { n }) => total + n, 0));
 for (const { _id, n } of refusedRows) row(`  ${_id ?? 'unknown'}`, n);

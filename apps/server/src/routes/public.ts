@@ -1289,7 +1289,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     if (!ESCALATION_STATUSES.includes(status)) {
       throw new ServiceError(400, 'bad_status', 'Unknown answer type.');
     }
-    await answerEscalation(store, project._id, id, status, (form.answer ?? '').slice(0, 8000));
+    await answerEscalation(store, project._id, id, status, (form.answer ?? '').slice(0, 8000), 'browser');
     // Named in the redirect so the page can confirm it. Four buttons that look
     // alike and a silent reload is how somebody ends up answering twice.
     return reply.redirect(`/r/${readToken}?answered=${encodeURIComponent(id)}`, 303);

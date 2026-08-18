@@ -770,8 +770,7 @@ curl -sX DELETE ${escapeHtml(config.baseUrl)}/v1/${escapeHtml(project._id)}/keys
     if (!ESCALATION_STATUSES.includes(status)) {
       throw new ServiceError(400, 'bad_status', 'Unknown answer type.');
     }
-    await answerEscalation(store, project._id, id, status, (form.answer ?? '').slice(0, 8000));
-    record(store, 'answer', { door: 'browser', projectId: project._id });
+    await answerEscalation(store, project._id, id, status, (form.answer ?? '').slice(0, 8000), 'browser');
     return reply.redirect('/operator', 303);
   });
 }

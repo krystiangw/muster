@@ -252,6 +252,15 @@ export interface Insights {
    */
   handoverRequests: number;
   doors: Record<string, number>;
+  /**
+   * Which door a human answered a question through.
+   *
+   * The mail sends people to the capability link, the operator page is where
+   * somebody who signed in ends up, and an agent's own operator can answer over
+   * the API. Counted because a door that is used and a door that is refused
+   * look identical from here otherwise, and the refused one gets removed.
+   */
+  answerDoors: Record<string, number>;
   /** Page views by page, people only. The half of the funnel agents cannot show. */
   pages: Record<string, number>;
   /** Views in the last seven days, so a trend is visible without a chart. */
@@ -322,6 +331,7 @@ export async function insights(store: Store): Promise<Insights> {
     answered,
     hygieneClosed,
     refusedRows,
+    answerDoorRows,
     busiest,
   ] = await Promise.all([
     store.events.countDocuments({ kind: 'discover' }),
@@ -400,6 +410,13 @@ export async function insights(store: Store): Promise<Insights> {
         { $sort: { count: -1 } },
       ])
       .toArray(),
+    store.events
+      .aggregate<{ _id: string; count: number }>([
+        { $match: { kind: 'answer' } },
+        { $group: { _id: '$door', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+      ])
+      .toArray(),
     store.projects
       .find({}, { projection: { name: 1, counts: 1 } })
       .sort({ 'counts.items': -1 })
@@ -422,6 +439,7 @@ export async function insights(store: Store): Promise<Insights> {
     },
     handoverRequests: asked[0]?.n ?? 0,
     doors: Object.fromEntries(doorRows.map((row) => [row._id, row.count])),
+    answerDoors: Object.fromEntries(answerDoorRows.map((row) => [row._id, row.count])),
     pages: Object.fromEntries(pageRows.map((row) => [row._id, row.count])),
     pagesLastWeek: viewsLastWeek,
     live: {

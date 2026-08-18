@@ -1,5 +1,6 @@
 import type { Config } from './config.js';
 import type { Store } from './db.js';
+import { record, type EventDoor } from './events.js';
 import { charge, maybeSweep, resolveAbsent, spend } from './hygiene.js';
 import { hashToken, isValidHandle, newId, newOtpCode, newToken, normalizeHandle, normalizeSlug } from './ids.js';
 import {
@@ -1928,6 +1929,7 @@ export async function answerEscalation(
   id: string,
   status: EscalationStatus,
   answer: string,
+  door: EventDoor,
 ): Promise<EscalationDoc> {
   const now = new Date();
   const before = await store.escalations.findOne({ projectId, _id: id });
@@ -1985,6 +1987,16 @@ export async function answerEscalation(
       isOpen ? charge('escalations') : spend('escalations'),
     );
   }
+  // Counted here rather than at the three routes that call this, because it was
+  // counted at one of them: answers through the capability link and through the
+  // API left no trace, so the log said every human decision arrived on the
+  // operator's page. That page is not where the mail sends them. A split like
+  // that is how a door that works gets removed for being unused.
+  //
+  // Only when the decision changed something. A client retrying an identical
+  // answer after a timeout is one decision, and the guarded update above
+  // already treats it as one.
+  if (changed) record(store, 'answer', { door, projectId });
   return doc as EscalationDoc;
 }
 

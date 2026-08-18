@@ -1046,7 +1046,14 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         const { project } = requireAdmin(request);
         const { id } = request.params as { id: string };
         const body = request.body as { status: EscalationStatus; answer?: string };
-        const doc = await answerEscalation(store, project._id, id, body.status, body.answer ?? '');
+        const doc = await answerEscalation(
+          store,
+          project._id,
+          id,
+          body.status,
+          body.answer ?? '',
+          'http',
+        );
         return { escalation: escalationJson(doc) };
       },
     );

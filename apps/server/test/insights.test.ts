@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { runMigrations } from '../src/db.js';
 import { flushEvents, insights } from '../src/events.js';
+import { hashToken } from '../src/ids.js';
 import { authed, createProject, signIn, startHarness, type Harness, type Project } from './helper.js';
 
 /**
@@ -381,5 +382,101 @@ describe('counting the people, not the agents', () => {
     // And our own page still is not one of them.
     const ours = await refused({ origin: 'null', 'sec-fetch-site': 'same-origin' });
     assert.notEqual(ours.statusCode, 403);
+  });
+
+  /**
+   * Three doors answer questions, and for a while exactly one of them counted.
+   * The mail sends people to the capability link, so a log that saw only the
+   * operator's page would have said the door the mail points at is unused.
+   */
+  it('says which door a human answered through, and counts one decision once', async () => {
+    const project = await createProject(harness, 'doors');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const before = (await insights(harness.store)).answerDoors;
+
+    const ask = async (question: string): Promise<string> => {
+      const filed = await harness.server.inject({
+        method: 'POST',
+        url: `${project.api}/escalations`,
+        headers: authed(project),
+        payload: { agent: 'agent', question },
+      });
+      return filed.json().escalation.id as string;
+    };
+
+    const overHttp = await ask('over the api?');
+    const answerOverHttp = async () =>
+      harness.server.inject({
+        method: 'PATCH',
+        url: `${project.api}/escalations/${overHttp}`,
+        headers: authed(project),
+        payload: { status: 'answered', answer: 'yes' },
+      });
+    assert.equal((await answerOverHttp()).statusCode, 200);
+
+    // The capability link, posted the way a browser posts it.
+    const overLink = await ask('through the link?');
+    const throughTheLink = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/escalations/${overLink}`,
+      payload: 'status=answered&answer=yes',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        origin: 'null',
+        'sec-fetch-site': 'same-origin',
+      },
+    });
+    assert.equal(throughTheLink.statusCode, 303);
+
+    // And the operator's own page, which needs the project to be theirs.
+    const session = await signIn(harness, 'owner@example.com');
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/claim`,
+      headers: authed(project),
+      payload: { email: 'owner@example.com' },
+    });
+    const pending = await harness.store.claimCodes.findOne({
+      projectId: project.id,
+      email: 'owner@example.com',
+    });
+    await harness.store.claimCodes.updateOne(
+      { _id: pending!._id },
+      { $set: { codeHash: hashToken('123456') } },
+    );
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/claim/verify`,
+      headers: authed(project),
+      payload: { email: 'owner@example.com', code: '123456' },
+    });
+
+    const overOperator = await ask('on the operator page?');
+    const onThatPage = await harness.server.inject({
+      method: 'POST',
+      url: `/operator/escalations/${overOperator}`,
+      payload: session.form({ status: 'answered', answer: 'yes' }),
+      headers: session.headers,
+    });
+    assert.equal(onThatPage.statusCode, 303);
+
+    await flushEvents();
+    const after = (await insights(harness.store)).answerDoors;
+    assert.equal((after.http ?? 0) - (before.http ?? 0), 1);
+    assert.equal(
+      (after.browser ?? 0) - (before.browser ?? 0),
+      2,
+      'both browser doors, not only the operator page',
+    );
+
+    // A client retrying an identical answer after a timeout is one decision,
+    // and the accounting treats it as one everywhere else already.
+    assert.equal((await answerOverHttp()).statusCode, 200);
+    await flushEvents();
+    assert.equal(
+      ((await insights(harness.store)).answerDoors.http ?? 0) - (before.http ?? 0),
+      1,
+      'the same answer sent twice is one decision',
+    );
   });
 });
