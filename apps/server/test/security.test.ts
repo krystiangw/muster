@@ -749,3 +749,109 @@ describe('a read link can ask for a project and never take one', () => {
     assert.equal(await harness.store.handovers.countDocuments({ projectId: project.id }), 0);
   });
 });
+
+/**
+ * The check that the case by case tests cannot make: not "does this refusal
+ * refuse the right things", but "can a person submit the forms we serve".
+ *
+ * The 403 that started this was two correct headers cancelling out, and it was
+ * invisible to a suite that posted the way curl does. So this one posts the way
+ * a browser does, to every form the pages actually render, and it finds the next
+ * such pair without anybody having to think of it.
+ */
+describe('every form these pages render', () => {
+  interface Rendered {
+    page: string;
+    action: string;
+    hidden: Record<string, string>;
+  }
+
+  // The pages escape what they interpolate, so an action or a token has to come
+  // back through the same door it went out of.
+  const plain = (value: string): string =>
+    value
+      .replace(/&amp;/g, '&')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'");
+
+  const formsOn = (page: string, html: string): Rendered[] => {
+    const found: Rendered[] = [];
+    for (const form of html.matchAll(/<form\b([^>]*)>([\s\S]*?)<\/form>/g)) {
+      const attributes = form[1]!;
+      const method = /method="([^"]*)"/.exec(attributes)?.[1]?.toLowerCase() ?? 'get';
+      if (method !== 'post') continue;
+      const action = /action="([^"]*)"/.exec(attributes)?.[1];
+      assert.ok(action, `a form on ${page} posts nowhere`);
+      const hidden: Record<string, string> = {};
+      for (const field of form[2]!.matchAll(/<input\b[^>]*type="hidden"[^>]*>/g)) {
+        const name = /name="([^"]*)"/.exec(field[0])?.[1];
+        const value = /value="([^"]*)"/.exec(field[0])?.[1] ?? '';
+        if (name) hidden[plain(name)] = plain(value);
+      }
+      found.push({ page, action: plain(action), hidden });
+    }
+    return found;
+  };
+
+  it('goes through when a browser posts it back', async () => {
+    const project = await createProject(harness);
+    const readToken = project.readUrl.split('/r/')[1]!;
+    await post(project, '/items', { slug: 'work', title: 'work', actor: 'agent' });
+    await post(project, '/escalations', { question: 'Ship it?', agent: 'agent', item_slug: 'work' });
+
+    const session = await signIn(harness, 'owner@example.com');
+    await harness.store.projects.updateOne(
+      { _id: project.id },
+      { $set: { claimedBy: 'owner@example.com' } },
+    );
+
+    // Signed in and not, because the two states render different forms: a
+    // stranger is offered the project, its owner is offered the handover.
+    const pages: Array<[string, Record<string, string>]> = [
+      [`/r/${readToken}`, {}],
+      [`/r/${readToken}/board`, {}],
+      [`/r/${readToken}`, { cookie: session.cookie }],
+      ['/operator', { cookie: session.cookie }],
+    ];
+
+    const forms: Rendered[] = [];
+    for (const [url, headers] of pages) {
+      const page = await harness.server.inject({ method: 'GET', url, headers });
+      assert.equal(page.statusCode, 200, url);
+      forms.push(...formsOn(url, page.body));
+    }
+    assert.ok(forms.length >= 16, `only ${forms.length} forms to submit, so this proves little`);
+
+    // Logging out is the one form that takes the session every other operator
+    // form needs, so it goes last rather than being skipped.
+    const ordered = [...forms].sort(
+      (left, right) =>
+        Number(left.action.endsWith('/logout')) - Number(right.action.endsWith('/logout')),
+    );
+
+    for (const form of ordered) {
+      const answer = await harness.server.inject({
+        method: 'POST',
+        url: form.action,
+        payload: new URLSearchParams(form.hidden).toString(),
+        headers: {
+          'content-type': 'application/x-www-form-urlencoded',
+          cookie: session.cookie,
+          // Exactly what Chrome sent the night this broke: the referrer policy
+          // blanks the Origin, and Sec-Fetch-Site is the proof that is left.
+          origin: 'null',
+          'sec-fetch-site': 'same-origin',
+        },
+      });
+      // Missing fields are the form's business and answer 400; being refused as
+      // somebody else's page is this service's business, and is the bug.
+      assert.notEqual(
+        answer.statusCode,
+        403,
+        `${form.action} was refused, and it is rendered on ${form.page}`,
+      );
+    }
+  });
+});
