@@ -2,6 +2,7 @@ import type { FastifyRequest } from 'fastify';
 import formbody from '@fastify/formbody';
 import swagger from '@fastify/swagger';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
+import { gzipSync } from 'node:zlib';
 import type { Config } from './config.js';
 import type { Store } from './db.js';
 import { createMailer, type Mailer } from './email.js';
@@ -20,6 +21,27 @@ export interface App {
   server: FastifyInstance;
   limiter: RateLimiter;
 }
+
+/**
+ * Which responses may be compressed, decided by the route rather than by a
+ * content type.
+ *
+ * The landing page is 49 kB of markup and 11 kB gzipped, and the protocol
+ * documents an agent reads before it signs up are three quarters air. All of
+ * them are public text with nothing secret in them, which is the whole point of
+ * an allowlist: a read link, an operator page and every API answer carry a
+ * capability or a CSRF token, and a compressed response leaks a little about
+ * its own contents through its length. Nothing that holds a credential is
+ * compressed here, so that question never has to be argued.
+ */
+declare module 'fastify' {
+  interface FastifyReply {
+    compressible?: boolean;
+  }
+}
+
+/** One packet. Below it, the encoding header costs more than the saving. */
+const COMPRESS_MIN_BYTES = 1400;
 
 /**
  * Capability links are credentials in a URL. Anything that writes a URL
@@ -168,7 +190,25 @@ export async function buildApp(
     },
   });
 
-  server.get('/openapi.json', { schema: { hide: true } }, async () => server.swagger());
+  server.get('/openapi.json', { schema: { hide: true } }, async (_request, reply) => {
+    reply.compressible = true;
+    return server.swagger();
+  });
+
+  server.addHook('onSend', async (request, reply, payload) => {
+    if (reply.compressible !== true) return payload;
+    // Set whether or not this particular request took the compressed branch:
+    // a cache that keeps one and serves it to the other is the classic way to
+    // hand a client bytes it cannot read.
+    reply.header('vary', 'accept-encoding');
+    if (typeof payload !== 'string') return payload;
+    if (!/\bgzip\b/i.test(String(request.headers['accept-encoding'] ?? ''))) return payload;
+    if (Buffer.byteLength(payload) < COMPRESS_MIN_BYTES) return payload;
+    const zipped = gzipSync(payload);
+    reply.header('content-encoding', 'gzip');
+    reply.header('content-length', zipped.length);
+    return zipped;
+  });
 
   registerAgentFiles(server, config, store);
   registerOAuth(server, { store, config, limiter });

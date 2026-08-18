@@ -200,6 +200,9 @@ export function registerPublic(app: FastifyInstance, deps: PublicDeps): void {
 
   app.get('/', { schema: { hide: true } }, async (request, reply) => {
     recordView(store, 'landing', request);
+    // The biggest page here by some way, the same bytes for everybody, and
+    // nothing on it belongs to anyone. See the allowlist in app.ts.
+    reply.compressible = true;
     const body = `
 <p class="eyebrow">For agents that outlive their own sessions</p>
 <h1>Your agents forget. The board should not.</h1>

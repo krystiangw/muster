@@ -29,8 +29,11 @@ export function registerAgentFiles(app: FastifyInstance, config: Config, store: 
   const access = agentAccessJson(config);
   const mcpCard = mcpJson(config);
 
+  // Public text with nothing secret in it, which is what makes it safe to
+  // compress. See the allowlist in app.ts.
   const markdown = (body: string, detail: string) => (_request: unknown, reply: any) => {
     seen(detail);
+    reply.compressible = true;
     return reply
       .type('text/markdown; charset=utf-8')
       .header('cache-control', 'public, max-age=300')
@@ -46,6 +49,7 @@ export function registerAgentFiles(app: FastifyInstance, config: Config, store: 
 
   app.get('/llms.txt', { schema: { hide: true } }, (_request, reply) => {
     seen('llms.txt');
+    reply.compressible = true;
     return reply
       .type('text/plain; charset=utf-8')
       .header('cache-control', 'public, max-age=300')
@@ -86,8 +90,9 @@ export function registerAgentFiles(app: FastifyInstance, config: Config, store: 
       .send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n${urls}\n</urlset>\n`);
   });
 
-  app.get('/.well-known/agent-access.json', { schema: { hide: true } }, async () => {
+  app.get('/.well-known/agent-access.json', { schema: { hide: true } }, async (_request, reply) => {
     seen('agent-access.json');
+    reply.compressible = true;
     return access;
   });
   app.get('/.well-known/mcp.json', { schema: { hide: true } }, async () => {

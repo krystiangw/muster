@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
-import { startHarness, type Harness } from './helper.js';
+import { createProject, startHarness, type Harness } from './helper.js';
 
 /**
  * The Let Agents In scorecard, as tests.
@@ -207,6 +207,37 @@ describe('B. agent entry', () => {
       payload: { slug: 'via-oauth', title: 'written with an oauth token', actor: 'some-agent' },
     });
     assert.equal(used.statusCode, 201);
+  });
+
+  it('compresses the public documents, and nothing that holds a credential', async () => {
+    const zipped = await harness.server.inject({
+      method: 'GET',
+      url: '/skill.md',
+      headers: { 'accept-encoding': 'gzip' },
+    });
+    assert.equal(zipped.headers['content-encoding'], 'gzip');
+    assert.equal(zipped.headers.vary, 'accept-encoding');
+    assert.ok(zipped.rawPayload.length < 12_000, 'and it is actually smaller');
+
+    // A client that does not ask for it still gets readable text, and the Vary
+    // header is there either way so a cache cannot serve one to the other.
+    const plain = await harness.server.inject({ method: 'GET', url: '/skill.md' });
+    assert.equal(plain.headers['content-encoding'], undefined);
+    assert.equal(plain.headers.vary, 'accept-encoding');
+    assert.match(plain.body, /^# /);
+
+    // The allowlist is the point: a page carrying a capability is never
+    // compressed, so the length of the answer says nothing about the token in
+    // it. This is the read board, reached with the link itself.
+    const project = await createProject(harness);
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const board = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board`,
+      headers: { 'accept-encoding': 'gzip' },
+    });
+    assert.equal(board.statusCode, 200);
+    assert.equal(board.headers['content-encoding'], undefined);
   });
 
   it('answers an MCP handshake differently from a generic POST', async () => {
