@@ -1061,14 +1061,34 @@ describe('moving an item into a column', () => {
     assert.match(after!.timeline.at(-1)!.message, /urgency set to -3/, 'and it says who changed it');
     assert.equal(after!.timeline.at(-1)!.by, 'operator');
 
-    // Nonsense is refused rather than stored.
-    const nonsense = await harness.server.inject({
-      method: 'POST',
-      url: `/r/${readToken}/board/priority`,
-      payload: 'slug=call-the-venue&priority=99',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    // Nonsense is refused rather than stored, and a typo is not a decision:
+    // parseInt would read "2.9" as 2 and "5junk" as 5.
+    for (const bad of ['99', '2.9', '5junk', '', 'urgent']) {
+      const nonsense = await harness.server.inject({
+        method: 'POST',
+        url: `/r/${readToken}/board/priority`,
+        payload: `slug=call-the-venue&priority=${encodeURIComponent(bad)}`,
+        headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      });
+      assert.equal(nonsense.statusCode, 400, `priority=${bad}`);
+    }
+    const untouched = await harness.store.items.findOne({
+      projectId: project.id,
+      slug: 'call-the-venue',
     });
-    assert.equal(nonsense.statusCode, 400);
+    assert.equal(untouched?.priority, -3, 'and none of them changed it');
+
+    // An item an agent filed off the four points keeps its own number, and the
+    // control shows it rather than the first option, which pressing "set"
+    // beside would have silently applied.
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'from-a-loop', title: 'filed at seven', priority: 7, actor: 'a' },
+    });
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(page.body, /<option value="7" selected>\+7<\/option>/);
 
     // Filing without one is ordinary work, the same as an agent filing without
     // one, so the two doors agree on the same silence.

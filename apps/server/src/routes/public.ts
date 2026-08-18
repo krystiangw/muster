@@ -172,6 +172,17 @@ function noSuchProject(): string {
  * form carries an owner because somebody is changing it, and treating that as
  * the narrowing would drop the person onto a different board every time.
  */
+/**
+ * A whole number, or nothing.
+ *
+ * `parseInt` reads "2.9" as 2 and "5junk" as 5, which turns a typo into a
+ * decision nobody made. The whole string has to be the number.
+ */
+function wholeNumber(value: string | undefined): number | null {
+  if (value === undefined || !/^-?\d{1,3}$/.test(value.trim())) return null;
+  return Number.parseInt(value.trim(), 10);
+}
+
 /** As much of a note as goes into a timeline entry, at both doors. */
 const NOTE_MAX_CHARS = 2_000;
 
@@ -1585,8 +1596,8 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     const body = (one(form.body) ?? '').trim().slice(0, 4000);
     // Absent or nonsense reads as ordinary work, which is what an agent filing
     // without a priority gets, so the two doors agree on the same silence.
-    const asked = Number.parseInt(one(form.priority) ?? '', 10);
-    const priority = Number.isInteger(asked) ? Math.max(-10, Math.min(10, asked)) : 0;
+    const asked = wholeNumber(one(form.priority));
+    const priority = asked === null ? 0 : Math.max(-10, Math.min(10, asked));
 
     // Two steps, and each one answers a different question. The lookup handles
     // the ordinary case, a name already in use, and picks the next one along.
@@ -1655,8 +1666,8 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     }
     if (!form.slug) throw new ServiceError(400, 'bad_request', 'Which item?');
 
-    const priority = Number.parseInt(one(form.priority) ?? '', 10);
-    if (!Number.isInteger(priority) || priority < -10 || priority > 10) {
+    const priority = wholeNumber(one(form.priority));
+    if (priority === null || priority < -10 || priority > 10) {
       throw new ServiceError(400, 'bad_priority', 'Priority is a whole number from -10 to 10.');
     }
     await upsertItem(store, project, {

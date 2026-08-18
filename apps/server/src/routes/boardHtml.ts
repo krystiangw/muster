@@ -242,6 +242,31 @@ const PRIORITIES: Array<{ value: number; title: string }> = [
   { value: -3, title: 'when there is time (-3)' },
 ];
 
+/**
+ * The four points, plus wherever this item actually is.
+ *
+ * An agent files at any number on the scale, so a card at +7 met a list that
+ * did not contain it: the browser then shows the first option, and a person who
+ * touches nothing but presses the button beside it has just moved that item
+ * from +7 to +5 without being told. A value that is not one of the four is
+ * offered as itself, in its own place in the order.
+ */
+function priorityOptions(current: number): string {
+  const levels = PRIORITIES.some((level) => level.value === current)
+    ? PRIORITIES
+    : [...PRIORITIES, { value: current, title: `${current > 0 ? '+' : ''}${current}` }].sort(
+        (a, b) => b.value - a.value,
+      );
+  return levels
+    .map(
+      (level) =>
+        `<option value="${level.value}"${level.value === current ? ' selected' : ''}>${escapeHtml(
+          level.title,
+        )}</option>`,
+    )
+    .join('');
+}
+
 function editForms(item: ItemDoc, facets: BoardFacets, action: string, keep: BoardFilter): string {
   const id = escapeHtml(item._id);
   const labels = item.labels ?? [];
@@ -271,12 +296,7 @@ function editForms(item: ItemDoc, facets: BoardFacets, action: string, keep: Boa
     <input type="hidden" name="slug" value="${escapeHtml(item.slug)}">${keptFilter(keep)}
     <label for="pri-${id}">Urgency
       <select id="pri-${id}" name="priority">
-        ${PRIORITIES.map(
-          (level) =>
-            `<option value="${level.value}"${
-              (item.priority ?? 0) === level.value ? ' selected' : ''
-            }>${escapeHtml(level.title)}</option>`,
-        ).join('')}
+        ${priorityOptions(item.priority ?? 0)}
       </select>
     </label>
     <button type="submit">set</button>
@@ -547,12 +567,7 @@ export function renderNewItem(action: string, requireBodyAfterHours: number | nu
       <input id="new-title" name="title" maxlength="200" required placeholder="What needs doing">
       <label for="new-priority">Urgency</label>
       <select id="new-priority" name="priority">
-        ${PRIORITIES.map(
-          (level) =>
-            `<option value="${level.value}"${level.value === 0 ? ' selected' : ''}>${escapeHtml(
-              level.title,
-            )}</option>`,
-        ).join('')}
+        ${priorityOptions(0)}
       </select>
       <label for="new-body">Description</label>
       <textarea id="new-body" name="body" rows="4" maxlength="4000"
