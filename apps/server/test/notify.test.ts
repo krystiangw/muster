@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { escalationMail, type EscalationNotice } from '../src/email.js';
+import {
+  boardOfferMail,
+  escalationMail,
+  type BoardOffer,
+  type EscalationNotice,
+} from '../src/email.js';
 import { runMigrations } from '../src/db.js';
 import { authed, createProject, startHarness, type Harness, type Project } from './helper.js';
 
@@ -42,6 +47,7 @@ async function withMailer(
       mailer: {
         sendClaimCode: async () => 'sent',
         sendOperatorCode: async () => 'sent',
+        sendBoardOffer: async () => 'sent',
         sendEscalation: async (to, notice) => {
           if (outcome === 'throws') throw new Error('the provider said no');
           sent.push({ to, notice });
@@ -442,5 +448,75 @@ describe('the mail an escalation sends', () => {
       assert.equal(read.json().notice_sent_at, null, 'the provider refused, so nothing left');
       assert.ok(read.json().oldest_unannounced_at, 'and the question is still waiting');
     }, 'throws');
+  });
+});
+
+describe('the board an agent set up for somebody', () => {
+  it('writes to them once, with the link and what taking it does', async () => {
+    // Before this, an agent could name its operator and the offer sat in a
+    // view that person had never opened: the only thing that reached them was
+    // the agent telling them over some channel we cannot see.
+    const offers: Array<{ to: string; offer: BoardOffer }> = [];
+    const harness = await startHarness(
+      {},
+      {
+        mailer: {
+          sendClaimCode: async () => 'sent',
+          sendOperatorCode: async () => 'sent',
+          sendEscalation: async () => 'sent',
+          sendBoardOffer: async (to, offer) => {
+            offers.push({ to, offer });
+            return 'sent';
+          },
+        },
+      },
+    );
+    try {
+      const created = await harness.server.inject({
+        method: 'POST',
+        url: '/p',
+        payload: {
+          name: 'arbitrage fleet',
+          owner_email: 'human@example.com',
+          owner_note: 'board for the arbitrage loops',
+          agent: 'errors-loop',
+        },
+      });
+      assert.equal(created.statusCode, 201);
+      assert.equal(offers.length, 1, 'one message, and only one');
+
+      const { to, offer } = offers[0]!;
+      assert.equal(to, 'human@example.com');
+      assert.equal(offer.agent, 'errors-loop');
+      assert.match(offer.readUrl, /\/r\/r_/);
+      const { subject, lines } = boardOfferMail(offer);
+      const text = lines.join('\n');
+      assert.match(subject, /arbitrage fleet/);
+      assert.match(text, /board for the arbitrage loops/, 'why, in the agent’s words');
+      assert.match(text, /Ignore this and nothing happens/, 'and how to do nothing about it');
+      assert.doesNotMatch(text, /mk_/, 'never the token');
+
+      // The offer is recorded as well, so the one click is waiting for them
+      // whichever way they arrive.
+      const project = (await harness.store.projects.findOne({ name: 'arbitrage fleet' }))!;
+      const share = await harness.store.shares.findOne({ projectId: project._id });
+      assert.equal(share?.email, 'human@example.com');
+      assert.equal(project.claimedBy, null, 'naming somebody is not deciding for them');
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it('says nothing to anybody when the agent named no one', async () => {
+    await withMailer(async (harness, _sent) => {
+      const created = await harness.server.inject({
+        method: 'POST',
+        url: '/p',
+        payload: { name: 'quiet' },
+      });
+      assert.equal(created.statusCode, 201);
+      const project = (await harness.store.projects.findOne({ name: 'quiet' }))!;
+      assert.equal(await harness.store.shares.countDocuments({ projectId: project._id }), 0);
+    });
   });
 });

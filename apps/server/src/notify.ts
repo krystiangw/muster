@@ -55,6 +55,22 @@ export interface Notifier {
    * repairing the hole does not turn into a nag.
    */
   sweepMissed(): Promise<number>;
+  /**
+   * Tells a person that an agent set a board up for them.
+   *
+   * The second thing that pushes, and the exception to the paragraph at the
+   * top of this file is deliberate: an offer used to sit in a view its
+   * recipient had never opened, so the only way they heard about it was the
+   * agent telling them over some channel this service cannot see. A board
+   * built for somebody who is never told about it is a board that expires.
+   *
+   * Still not a digest and still not per item: one message, when an agent
+   * names an address, and nothing after it.
+   */
+  boardOffered(
+    project: ProjectDoc,
+    offer: { email: string; offeredBy?: string | undefined; note?: string | undefined },
+  ): Promise<void>;
 }
 
 export function createNotifier(deps: {
@@ -157,6 +173,28 @@ export function createNotifier(deps: {
           )
           .catch(() => undefined);
         log(`escalation notice for ${project._id} failed: ${(error as Error).message}`);
+      }
+    },
+
+    async boardOffered(project, offer) {
+      try {
+        const delivery = await mailer.sendBoardOffer(offer.email, {
+          projectName: project.name,
+          agent: (offer.offeredBy ?? 'An agent').slice(0, 48),
+          note: (offer.note ?? '').slice(0, 500),
+          readUrl: `${config.baseUrl}/r/${project.readToken}`,
+          expiresInDays: config.demoTtlDays,
+        });
+        if (delivery !== 'sent') {
+          log(`board offer for ${project._id} was ${delivery}, not sent`);
+        }
+      } catch (error) {
+        // Never fails the call that caused it. The offer is recorded either
+        // way, and it is waiting in the operator view of anybody who already
+        // uses this service; the message is what makes it reach the people who
+        // do not, and a provider having a bad minute is not a reason to refuse
+        // an agent's write.
+        log(`board offer for ${project._id} failed: ${(error as Error).message}`);
       }
     },
 

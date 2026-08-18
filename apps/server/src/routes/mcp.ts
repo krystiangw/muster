@@ -145,15 +145,26 @@ const TOOLS: ToolDefinition[] = [
           type: 'string',
           description: 'What this board is for, so an operator running several can tell them apart',
         },
+        owner_email: {
+          type: 'string',
+          description:
+            'The person this board answers to. They are written to once, with the link and what taking it does, and nothing after that. Use it when you are setting a board up for somebody rather than for yourself: an unclaimed board expires, and a person nobody told about theirs finds out when it is gone.',
+        },
+        owner_note: {
+          type: 'string',
+          description: 'Why you set it up, in your words. It goes in that message.',
+        },
+        agent: { type: 'string', description: 'Your handle, so the message says who set it up.' },
       },
     },
     requiresProject: false,
-    // A second call with the same name is a second project: nothing about the name addresses anything.
+    // A second call with the same name is a second project: nothing about the name
+    // addresses anything. Open world because owner_email mails a person.
     annotations: {
       readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: false,
-      openWorldHint: false,
+      openWorldHint: true,
     },
   },
   {
@@ -704,6 +715,31 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         },
         'mcp',
       );
+      // Same behaviour as POST /p, from the same two calls, because a door
+      // that offers a board and a door that does not is how the two surfaces
+      // drift. Rate limited on the address: the caller is already capped at
+      // five projects an hour and the inbox being protected is not ours.
+      const offered = text(args.owner_email, 'owner_email')?.trim();
+      if (offered) {
+        const mail = limiter.check(`offer:${offered.toLowerCase()}`, config.rateLimits.claimEmail);
+        if (!mail.ok) {
+          throw new ServiceError(
+            429,
+            'rate_limited',
+            `That address has been written to enough for now. Retry in ${mail.retryAfterSeconds}s. The project exists either way: hand them ${config.baseUrl}/r/${project.readToken} yourself.`,
+          );
+        }
+        await shareProject(store, project, {
+          email: offered,
+          note: text(args.owner_note, 'owner_note') ?? '',
+          offeredBy: text(args.agent, 'agent') ?? '',
+        });
+        await notifier.boardOffered(project, {
+          email: offered,
+          note: text(args.owner_note, 'owner_note') ?? '',
+          offeredBy: text(args.agent, 'agent') ?? '',
+        });
+      }
       return {
         project: project._id,
         name: project.name,
@@ -959,6 +995,13 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           offeredBy: actor,
         });
         if (alreadyOwned) return { ok: true, already_owned: true };
+        // The step that reaches a human. Without it the offer waited in a view
+        // this person may never have opened.
+        await notifier.boardOffered(project, {
+          email,
+          note: str(args.note),
+          offeredBy: actor,
+        });
 
         // The same answer for every address, for the reason the HTTP endpoint
         // gives: whether somebody is already a user is not this caller's

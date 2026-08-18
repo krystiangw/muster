@@ -55,6 +55,8 @@ const { server, limiter } = await buildApp(config, store, {
     sendClaimCode: (to, code, projectName) =>
       delivered(`claim code for ${projectName} to ${to} is ${code}`),
     sendEscalation: (to, notice) => delivered(`question for ${to}: ${notice.question}`),
+    sendBoardOffer: (to, offer) =>
+      delivered(`board "${offer.projectName}" offered to ${to} at ${offer.readUrl}`),
   },
 });
 await server.listen({ port: PORT, host: '127.0.0.1' });

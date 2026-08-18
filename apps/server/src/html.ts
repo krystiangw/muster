@@ -265,6 +265,16 @@ button.ghost, .btn.ghost { background:transparent; color:var(--accent); }
 .col .card .move button:hover { border-color:var(--accent); color:var(--accent); }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
   clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+/* Anything holding one is positioned, and this is not tidiness.
+   An absolutely positioned child whose ancestors are all static takes the page
+   as its containing block, so it is laid out at its static position but
+   measured against the document rather than against the box it appears to be
+   in. Each card in a column carries an off-screen label for its move control,
+   and a column scrolls inside itself: the labels of the cards scrolled out of
+   sight were therefore sitting at document coordinates far below the page,
+   which the browser dutifully added to the scrollable area. What a person saw
+   was a screen and a half of nothing under the footer. */
+.col .card, .filters { position:relative; }
 /* The card preview. :target, not a dialog: the URL opens it, "#" closes it, and
    it works with scripting off like everything else here. It also means a
    preview is a link somebody can send. */

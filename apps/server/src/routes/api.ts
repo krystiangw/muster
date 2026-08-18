@@ -173,6 +173,22 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
               description:
                 'What this board is for. An operator running several needs to tell them apart, and the next agent needs to know what belongs here.',
             },
+            owner_email: {
+              type: 'string',
+              maxLength: 200,
+              description:
+                'The person this board answers to. They are written to once, with the link and what taking it does, and nothing after that. Use it when you are setting a board up for somebody rather than for yourself: an unclaimed board expires, and a person who is never told about theirs is a person who finds out when it is gone.',
+            },
+            owner_note: {
+              type: 'string',
+              maxLength: 500,
+              description: 'Why you set it up, in your words. It goes in that message.',
+            },
+            agent: {
+              type: 'string',
+              maxLength: 48,
+              description: 'Your handle, so the message says who set it up.',
+            },
           },
           additionalProperties: false,
         },
@@ -185,8 +201,37 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       );
       if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds);
 
-      const body = (request.body ?? {}) as { name?: string; description?: string };
+      const body = (request.body ?? {}) as {
+        name?: string;
+        description?: string;
+        owner_email?: string;
+        owner_note?: string;
+        agent?: string;
+      };
       const { project, adminToken } = await createProject(store, config, body, 'http');
+      // Named before the token is even used once. The offer is recorded the
+      // same way the share endpoint records one, so the person has the same
+      // one click waiting for them however they arrive, and the message is
+      // what gets them there at all.
+      //
+      // Rate limited on the address rather than on the caller: the caller is
+      // already capped at five projects an hour, and the thing worth protecting
+      // is a stranger's inbox, not our own throughput.
+      const offered = body.owner_email?.trim();
+      if (offered) {
+        const mail = limiter.check(`offer:${offered.toLowerCase()}`, config.rateLimits.claimEmail);
+        if (!mail.ok) return tooMany(reply, mail.retryAfterSeconds);
+        await shareProject(store, project, {
+          email: offered,
+          note: body.owner_note,
+          offeredBy: body.agent,
+        });
+        await notifier.boardOffered(project, {
+          email: offered,
+          note: body.owner_note,
+          offeredBy: body.agent,
+        });
+      }
       return reply.code(201).send({
         project: project._id,
         name: project.name,
@@ -1636,6 +1681,17 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           note: body.note,
           offeredBy: body.agent,
         });
+        if (!alreadyOwned) {
+          // The half that was missing. Recording the offer put it in a view
+          // this person may never have opened, and the endpoint answered "send
+          // them that link", which left the one step that reaches a human to
+          // a channel this service cannot see.
+          await notifier.boardOffered(project, {
+            email: body.email,
+            note: body.note,
+            offeredBy: body.agent,
+          });
+        }
         if (alreadyOwned) {
           return reply.send({
             ok: true,

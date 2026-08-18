@@ -38,10 +38,56 @@ export interface EscalationNotice {
   needsSignIn: boolean;
 }
 
+/** What a board an agent set up for somebody says to that somebody. */
+export interface BoardOffer {
+  projectName: string;
+  /** The agent that named this address, as it named itself. */
+  agent: string;
+  /** Why, in the agent's words. Empty when it did not say. */
+  note: string;
+  /** The page the board lives on, where taking it is one click. */
+  readUrl: string;
+  /** How many days an unclaimed board has before it deletes itself. */
+  expiresInDays: number;
+}
+
 export interface Mailer {
   sendClaimCode(to: string, code: string, projectName: string): Promise<Delivery>;
   sendOperatorCode(to: string, code: string): Promise<Delivery>;
   sendEscalation(to: string, notice: EscalationNotice): Promise<Delivery>;
+  sendBoardOffer(to: string, offer: BoardOffer): Promise<Delivery>;
+}
+
+/**
+ * The message that reaches a person an agent set a board up for.
+ *
+ * Until this existed, an agent could name its operator and the offer sat in a
+ * view that person had never opened: the only way they heard about it was the
+ * agent telling them itself, over some channel we cannot see. This is the one
+ * message this service sends to an address that never asked for anything, so
+ * it is written to be dismissible in one line and to say who is responsible
+ * for it arriving.
+ */
+export function boardOfferMail(offer: BoardOffer): { subject: string; lines: string[] } {
+  const note = offer.note.trim();
+  return {
+    subject: `An agent set up a Muster board for you: ${offer.projectName}`,
+    lines: [
+      `${offer.agent} created a board called "${offer.projectName}" and named this address as`,
+      'the person it answers to.',
+      ...(note === '' ? [] : ['', `It said: ${note}`]),
+      '',
+      'The board is here, and taking it is one click on that page:',
+      offer.readUrl,
+      '',
+      'Taking it removes the expiry, raises the limits and gives you a view of every',
+      'board you own, with the questions the agents are waiting on you for.',
+      '',
+      `Ignore this and nothing happens: an unclaimed board deletes itself, with all of`,
+      `its data, ${offer.expiresInDays} days after it was created. You are not subscribed to anything,`,
+      'and nothing was created in your name.',
+    ],
+  };
 }
 
 /**
@@ -199,6 +245,10 @@ export function createMailer(config: Config, log: (msg: string) => void): Mailer
     },
     async sendEscalation(to, notice) {
       const { subject, lines } = escalationMail(notice);
+      return send(to, subject, lines);
+    },
+    async sendBoardOffer(to, offer) {
+      const { subject, lines } = boardOfferMail(offer);
       return send(to, subject, lines);
     },
     async sendClaimCode(to, code, projectName) {

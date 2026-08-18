@@ -688,6 +688,7 @@ describe('the operator view', () => {
         mailer: {
           sendOperatorCode: () => deliver(),
           sendClaimCode: async () => 'sent',
+          sendBoardOffer: async () => 'sent',
             sendEscalation: async () => 'sent',
         },
       },
@@ -796,5 +797,66 @@ describe('the operator view', () => {
     // The per project column counts the project rather than the slice, which is
     // the same mistake one table along.
     assert.match(page.body, />105</);
+  });
+});
+
+describe('a project made by somebody who is signed in', () => {
+  it('belongs to them already, with no code to type', async () => {
+    // The form used to hand a signed-in operator a board that expires in a
+    // week and ask them to prove, with a code sent to their address, that they
+    // are the person the browser was already holding a session for.
+    const session = await signIn(harness, 'owner@example.com');
+    const created = await harness.server.inject({
+      method: 'POST',
+      url: '/signup',
+      payload: 'name=made-while-signed-in',
+      headers: session.headers,
+    });
+    assert.equal(created.statusCode, 200);
+    assert.match(created.body, /It is yours/);
+    assert.doesNotMatch(created.body, /deleted in \d+ days/, 'it is nobody’s expiry now');
+
+    const project = (await harness.store.projects.findOne({ name: 'made-while-signed-in' }))!;
+    assert.equal(project.claimedBy, 'owner@example.com');
+    assert.equal(project.expiresAt, null);
+    assert.equal(project.tier, 'free');
+
+    // And it is where they will look for it.
+    const view = await harness.server.inject({
+      method: 'GET',
+      url: '/operator',
+      headers: { cookie: session.cookie },
+    });
+    assert.match(view.body, /made-while-signed-in/);
+  });
+
+  it('is nobody’s when the form was posted from another site', async () => {
+    // Ownership is the one thing a signed-in browser holds that a stranger's
+    // form must not be able to spend. The project is still created, because
+    // anybody may create one; it just is not theirs.
+    const session = await signIn(harness, 'target@example.com');
+    const created = await harness.server.inject({
+      method: 'POST',
+      url: '/signup',
+      payload: 'name=planted',
+      headers: { ...session.headers, 'sec-fetch-site': 'cross-site' },
+    });
+    assert.equal(created.statusCode, 200);
+
+    const project = (await harness.store.projects.findOne({ name: 'planted' }))!;
+    assert.equal(project.claimedBy, null);
+  });
+
+  it('is nobody’s when nobody is signed in', async () => {
+    const created = await harness.server.inject({
+      method: 'POST',
+      url: '/signup',
+      payload: 'name=anonymous',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    assert.equal(created.statusCode, 200);
+    assert.match(created.body, /deleted in \d+ days/);
+    const project = (await harness.store.projects.findOne({ name: 'anonymous' }))!;
+    assert.equal(project.claimedBy, null);
   });
 });

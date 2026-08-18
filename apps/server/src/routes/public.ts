@@ -38,6 +38,7 @@ import {
   normalizeSearch,
   appendNote,
   authenticate,
+  claimProjectWithEmail,
   createProject,
   requestHandover,
   startEmailClaim,
@@ -758,6 +759,25 @@ curl -sX POST ${escapeHtml(base)}/p -H 'content-type: application/json' -d '{"na
       { name: form.name },
       'browser',
     );
+
+    /**
+     * A person who is signed in owns what they just made.
+     *
+     * Before this, the form handed a signed-in operator a board that expires in
+     * a week and asked them to claim it by email, which is a code sent to the
+     * address the browser is already holding a session for. The service knew
+     * who they were and made them prove it anyway.
+     *
+     * Only from our own page. Ownership is the one thing a signed-in browser
+     * has that a stranger's form post must not be able to spend: cross site,
+     * the project is still created and is still nobody's, exactly as it was.
+     */
+    const session = fromOurPage(request, ourOrigin).ok ? await readSession(store, request) : null;
+    if (session) {
+      await claimProjectWithEmail(store, project, session.email, config);
+      record(store, 'claim', { door: 'browser', projectId: project._id });
+    }
+
     const body = `
 <h1>Project created</h1>
 <div class="notice"><b>Copy the token now.</b> It is shown once and stored only as a hash.</div>
@@ -773,12 +793,19 @@ curl -sX POST ${escapeHtml(base)}/p -H 'content-type: application/json' -d '{"na
 <p>Put one line in your agent's instructions:</p>
 <pre><code>Coordination board: ${escapeHtml(base)}/skill.md
 Project: ${escapeHtml(project._id)}  Token: (in .env as MUSTER_TOKEN)</code></pre>
-<h2>Keep it</h2>
+${
+      session
+        ? `<h2>It is yours</h2>
+<p>You were signed in, so this board is already claimed by
+<b>${escapeHtml(session.email)}</b>: no expiry, ${config.tiers.free.items} open items, and it is
+in <a href="/operator">your projects</a> with everything else you own.</p>`
+        : `<h2>Keep it</h2>
 <p>This project is deleted in ${config.demoTtlDays} days unless somebody claims it with an email
 address. Claiming is free and raises the limits:</p>
 <pre><code>curl -sX POST ${escapeHtml(base)}/v1/${escapeHtml(project._id)}/claim \\
   -H "authorization: Bearer ${escapeHtml(adminToken)}" \\
-  -H 'content-type: application/json' -d '{"email":"you@example.com"}'</code></pre>
+  -H 'content-type: application/json' -d '{"email":"you@example.com"}'</code></pre>`
+    }
 `;
     return reply
       .type('text/html; charset=utf-8')
