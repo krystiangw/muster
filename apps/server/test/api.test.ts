@@ -344,6 +344,23 @@ describe('items', () => {
     const second = await post(project, '/items', { slug: 'two', title: 'two', actor: 'a' });
     assert.equal(second.statusCode, 409);
     assert.equal(second.json().error, 'limit_reached');
+
+    // The same cap met by moving finished work back into an open column. It
+    // used to answer 429, which this service publishes as "read retry-after
+    // and come back": a cap that only clears when somebody finishes work sends
+    // no retry-after and never clears on its own, so an agent handling 429 the
+    // documented way would retry it until its loop gave up.
+    await post(project, '/items', { slug: 'one', title: 'one', status: 'done', actor: 'a' });
+    await post(project, '/items', { slug: 'filler', title: 'filler', actor: 'a' });
+    const reopened = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items/one/move`,
+      headers: authed(project),
+      payload: { column: 'todo', agent: 'a' },
+    });
+    assert.equal(reopened.statusCode, 409, reopened.body);
+    assert.equal(reopened.json().error, 'limit_reached');
+    assert.equal(reopened.headers['retry-after'], undefined, 'and it is not a wait');
   });
 });
 

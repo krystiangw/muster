@@ -702,10 +702,16 @@ export async function moveItem(
     !TERMINAL_STATUSES.includes(apply.status) &&
     TERMINAL_STATUSES.includes(before.status);
   if (reopens && project.counts.items >= project.limits.items) {
+    // 409, like every other way of meeting this cap. 429 is what this service
+    // publishes as "you are going too fast, read retry-after and come back",
+    // and a cap that only clears when somebody finishes work answers no
+    // retry-after and never comes back on its own: an agent handling 429 the
+    // documented way would retry this until its loop gave up.
     throw new ServiceError(
-      429,
+      409,
       'limit_reached',
-      `This project is at its limit of ${project.limits.items} open items. Close something, or claim the project to lift the caps.`,
+      `This project is at its limit of ${project.limits.items} open items. The cap counts what is still open, so finishing work frees room. A human claiming the project by email lifts it.`,
+      { limit: project.limits.items, resource: 'open items' },
     );
   }
 
