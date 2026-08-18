@@ -92,7 +92,13 @@ function whoChips(item: ItemDoc, claimed: boolean, agents?: Map<string, string>)
   return parts.join(' ');
 }
 
-function card(item: ItemDoc, now: Date, move: string, agents?: Map<string, string>): string {
+function card(
+  item: ItemDoc,
+  now: Date,
+  move: string,
+  open: string,
+  agents?: Map<string, string>,
+): string {
   const claimed = item.claim !== null && new Date(item.claim.expiresAt) > now;
   const classes = ['card', item.stale ? 'is-stale' : '', claimed ? 'is-claimed' : '']
     .filter(Boolean)
@@ -100,7 +106,7 @@ function card(item: ItemDoc, now: Date, move: string, agents?: Map<string, strin
   // The title is the one thing a column is too narrow for, so it is clamped to
   // two lines here and shown whole in the preview the card links to.
   return `<article class="${classes}">
-  <a class="peek" href="#${escapeHtml(item._id)}">
+  <a class="peek" href="${escapeHtml(open)}">
     <span class="slug">${escapeHtml(item.slug)}</span>
     <span class="t">${escapeHtml(item.title || '(no title)')}</span>
   </a>
@@ -152,14 +158,18 @@ function preview(
   agents: Map<string, string> | undefined,
   edit: string,
   asked: string,
+  close: string,
 ): string {
   const claimed = item.claim !== null && new Date(item.claim.expiresAt) > now;
-  return `<div class="peeked" id="${escapeHtml(item._id)}">
-  <a class="scrim" href="#" aria-label="Close"></a>
+  // `open` beside `:target`, because the two mechanisms answer to different
+  // things: the fragment is what a browser does for free, and the class is what
+  // a page rendered with `?card=` can promise without one.
+  return `<div class="peeked${close === '#' ? '' : ' open'}" id="${escapeHtml(item._id)}">
+  <a class="scrim" href="${escapeHtml(close)}" aria-label="Close"></a>
   <div class="sheet">
     <div class="sheet-top">
       <span class="slug">${escapeHtml(item.slug)}</span>
-      <a class="close" href="#">close</a>
+      <a class="close" href="${escapeHtml(close)}">close</a>
     </div>
     <h3>${escapeHtml(item.title || '(no title)')}</h3>
     <div class="meta">
@@ -421,6 +431,17 @@ export interface BoardRenderOptions {
    * find, which is the one thing a stopped search did not establish.
    */
   searchStopped?: string;
+  /**
+   * The board's own URL, which turns the sheets from fragments into addresses.
+   *
+   * A card sheet used to be a `#id` target, which the server never sees. That
+   * was fine until the board started reloading itself once a minute: a person
+   * halfway through a note lost it to a refresh nobody asked for, and no
+   * server can hold a page still for a state it is not told about.
+   */
+  boardUrl?: string;
+  /** The slug whose sheet is open, when the board is addressed. */
+  openCard?: string;
 }
 
 /** Every narrowing in force, in words, for the line above the board. */
@@ -435,6 +456,19 @@ function narrowedTo(view: BoardView): string[] {
 
 export function renderBoard(view: BoardView, options: BoardRenderOptions = {}): string {
   const now = options.now ?? new Date();
+  // Where a sheet lives. With a board URL it is an address: the server knows
+  // which card is open, which is what lets it hold the page still while
+  // somebody types into it, and what keeps the page from carrying a form for
+  // every card on the board. Without one, the fragment does what it always did,
+  // which is what the demonstration on the front page runs on.
+  const addressed = typeof options.boardUrl === 'string';
+  const sheetUrl = (item: ItemDoc) =>
+    addressed
+      ? `${narrowedUrl(options.boardUrl!, view.filter, { card: item.slug })}#${item._id}`
+      : `#${item._id}`;
+  const closeUrl = addressed
+    ? narrowedUrl(options.boardUrl!, view.filter, { card: undefined })
+    : '#';
   const targets: MoveTarget[] = options.moveAction
     ? view.config.columns
         .filter(
@@ -510,6 +544,7 @@ ${lane.columns
                   options.moveAction
                     ? moveForm(item, cell.key, targets, options.moveAction, view.filter)
                     : '',
+                  sheetUrl(item),
                   options.agents,
                 ),
               )
@@ -540,6 +575,10 @@ ${
       : ''
   }
 ${shown
+  // One sheet, not one per card. Every card used to carry its whole preview,
+  // its four forms and an answer form for each question on it, so a board of a
+  // hundred done items shipped a hundred of them to open one.
+  .filter((item) => !addressed || item.slug === options.openCard)
   .map((item) =>
     preview(
       item,
@@ -557,6 +596,7 @@ ${shown
             .map((question) => questionForm(question, options.answerAction!, view.filter))
             .join('\n')
         : '',
+      closeUrl,
     ),
   )
   .join('\n')}`;
@@ -577,14 +617,26 @@ ${shown
  * The description is optional and says what happens when it is left out,
  * because on most boards the hygiene rule drops an item nobody described.
  */
-export function renderNewItem(action: string, requireBodyAfterHours: number | null): string {
-  return `<p class="addcard"><a href="#new-item">Add an item</a></p>
-<div class="peeked" id="new-item">
-  <a class="scrim" href="#" aria-label="Close"></a>
+export function renderNewItem(
+  action: string,
+  requireBodyAfterHours: number | null,
+  keep: BoardFilter = {},
+  open = false,
+): string {
+  // Addressed like a card sheet, and for the same reason: this is the longest
+  // thing anybody types on this page, and a board that reloads itself under a
+  // half written description is a board that eats it.
+  const openUrl = narrowedUrl(action, keep, { new: '1' });
+  const closeUrl = narrowedUrl(action, keep, { new: undefined });
+  return `<p class="addcard"><a href="${escapeHtml(openUrl)}#new-item">Add an item</a></p>
+${
+    open
+      ? `<div class="peeked open" id="new-item">
+  <a class="scrim" href="${escapeHtml(closeUrl)}" aria-label="Close"></a>
   <div class="sheet">
     <div class="sheet-top">
       <span class="slug">new item</span>
-      <a class="close" href="#">close</a>
+      <a class="close" href="${escapeHtml(closeUrl)}">close</a>
     </div>
     <h3>Add an item</h3>
     <form class="newitem" method="post" action="${escapeHtml(action)}/new">
@@ -605,7 +657,9 @@ export function renderNewItem(action: string, requireBodyAfterHours: number | nu
       <button type="submit">add</button>
     </form>
   </div>
-</div>`;
+</div>`
+      : ''
+  }`;
 }
 
 /**
@@ -631,11 +685,16 @@ const FILTER_INLINE = 8;
 function narrowedUrl(
   action: string,
   filter: BoardFilter,
-  change: Partial<Record<'owner' | 'agent' | 'label' | 'q', string | undefined>>,
+  change: Partial<Record<'owner' | 'agent' | 'label' | 'q' | 'card' | 'new', string | undefined>>,
 ): string {
   const next: Record<string, string | undefined> = { ...filter, ...change };
   const params = new URLSearchParams();
-  for (const key of ['owner', 'agent', 'label', 'q'] as const) {
+  // Which sheet is open is not part of the narrowing and is never in `filter`:
+  // `card` and `new` only ever arrive in `change`, so a filter chip built from
+  // the current view closes the sheet, and a link that opens one keeps the
+  // narrowing. They are two parameters rather than two values of one, because
+  // `new` is a slug a card can really have.
+  for (const key of ['owner', 'agent', 'label', 'q', 'card', 'new'] as const) {
     const value = next[key];
     if (value) params.set(key, value);
   }

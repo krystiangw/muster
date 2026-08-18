@@ -1176,7 +1176,14 @@ ${
       q?: string;
       answered?: string;
       merged?: string;
+      card?: string;
+      new?: string;
     };
+    // Which sheet is open, which this page has to know rather than guess: a
+    // fragment never reaches a server, and a board that reloads itself has to
+    // stop doing that while somebody is typing into one.
+    const openCard = one(query.card)?.slice(0, 200) ?? '';
+    const openNew = one(query.new) === '1';
     const narrowing = {
       ...(query.owner ? { owner: query.owner.slice(0, 48) } : {}),
       ...(query.agent ? { agent: query.agent.slice(0, 48) } : {}),
@@ -1327,6 +1334,18 @@ ${
       ? `Answered. ${answeredHere.agent} picks it up on its next iteration, and the card will say when it did.`
       : (movedNotice ?? doneNotice));
 
+    // A sheet the page did not draw holds nothing, so it does not hold the
+    // refresh either: `?card=` naming something this narrowing filtered out is
+    // an ordinary board that would otherwise quietly stop keeping itself true.
+    const sheetOpen =
+      openNew ||
+      (openCard !== '' &&
+        view.rows.some((row) =>
+          row.columns.some((cell) =>
+            cell.items.slice(0, COLUMN_RENDER_LIMIT).some((item) => item.slug === openCard),
+          ),
+        ));
+
     const boardUrl = `/r/${escapeHtml(readToken)}/board`;
     const body = `
 <h1>${escapeHtml(project.name)}</h1>
@@ -1338,8 +1357,10 @@ ${project.description ? `<p class="lead">${escapeHtml(project.description)}</p>`
       : 'questions and timeline'
   }</a></p>
 
-${renderNewItem(boardUrl, project.rules.requireBodyAfterHours ?? null)}
+${renderNewItem(boardUrl, project.rules.requireBodyAfterHours ?? null, view.filter, openNew)}
 ${renderBoard(view, {
+  boardUrl,
+  openCard,
   moveAction: `${boardUrl}/move`,
   questions,
   answerAction: `/r/${escapeHtml(readToken)}`,
@@ -1369,7 +1390,10 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
             description: project.description,
             wide: true,
             signedIn: hasSessionCookie(request),
-            refreshSeconds: BOARD_REFRESH_SECONDS,
+            // Every minute, except while a sheet is open. A reload throws away
+            // whatever is half typed in it, and the note somebody was writing
+            // is the one thing on this page that nothing else can recover.
+            ...(sheetOpen ? {} : { refreshSeconds: BOARD_REFRESH_SECONDS }),
           },
           body,
         ),

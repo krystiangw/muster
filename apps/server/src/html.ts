@@ -251,7 +251,10 @@ button.ghost { background:transparent; color:var(--accent); }
    it works with scripting off like everything else here. It also means a
    preview is a link somebody can send. */
 .peeked { display:none; }
-.peeked:target { display:block; position:fixed; inset:0; z-index:50; }
+/* Two ways in, one look: the fragment, which a browser opens for free, and the
+   class, which is what a page rendered for one open card can promise without
+   one. */
+.peeked:target, .peeked.open { display:block; position:fixed; inset:0; z-index:50; }
 .peeked .scrim { position:absolute; inset:0; background:color-mix(in srgb,var(--scrim) 55%,transparent);
   border:0; }
 .peeked .sheet { position:relative; margin:6vh auto; max-width:min(680px,92vw); max-height:88vh;

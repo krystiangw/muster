@@ -933,3 +933,30 @@ into being told the truth is asking the wrong question.
 and urgency all went behind the read link, and the warning on the page still
 described the shorter list it was written for. A link whose warning is a version
 behind is a link somebody shares on the wrong reading of it.
+
+## A sheet the server knows about, 2026-08-18
+
+The reload is not a switch, and the note somebody is typing still gets thrown
+away by it. Both halves of that were true at once: the board is written to by
+agents while a person reads it, so it has to keep itself true; and the one thing
+on the page that nothing else can recover is the sentence half typed into a card.
+
+The card sheets were `:target` fragments, which is the cheapest disclosure a
+browser gives you and the one thing a server never sees. No amount of care in the
+route could hold a page still for a state nobody told it about.
+
+**So the sheet became an address.** `?card=<slug>` opens one, `?new=1` opens the
+filing form, both keep whatever the board was narrowed to, and closing is a link
+back to the same board without them. The route reads which sheet is open, and
+skips the refresh meta while one is. It is two parameters rather than two values
+of one, because `new` is a slug a card can really have.
+
+**It costs a round trip to open a card and saves one on every card that is not
+open.** The board used to ship a preview, four forms and an answer form for every
+card it drew: on a project with a hundred done items, a hundred sheets to open
+one. Now it draws the one that was asked for. The demonstration on the front page
+still runs on fragments, because it has no server behind it and nothing to lose.
+
+**A sheet the page did not draw does not hold the refresh either.** A `?card=`
+naming something the current narrowing filtered out is an ordinary board, and
+letting it stop the clock would be a link that quietly makes the page stale.

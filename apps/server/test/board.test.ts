@@ -885,9 +885,22 @@ describe('moving an item into a column', () => {
       'and neither wrote over the other',
     );
 
-    // And the form is on the page that files it.
-    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    // And the form is on the page that files it, behind the link that opens
+    // it: the sheet is an address now, so the board can stop reloading itself
+    // under whoever is typing into one.
+    const closed = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.ok(
+      !closed.body.includes(`action="/r/${readToken}/board/new"`),
+      'not until it is asked for',
+    );
+    assert.match(closed.body, /http-equiv="refresh"/, 'and the board keeps itself true meanwhile');
+
+    const page = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?new=1`,
+    });
     assert.match(page.body, new RegExp(`action="/r/${readToken}/board/new"`));
+    assert.ok(!page.body.includes('http-equiv="refresh"'), 'and holds still while it is open');
   });
 
   it('carries a question on the card it was asked about, answerable there', async () => {
@@ -914,7 +927,10 @@ describe('moving an item into a column', () => {
     const id = asked.json().escalation.id;
     const readToken = project.readUrl.split('/r/')[1]!;
 
-    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    const page = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?card=bridge`,
+    });
     assert.match(page.body, /Do we pay the bridge fee\?/, 'the question is on the card');
     assert.match(page.body, new RegExp(`action="/r/${readToken}/escalations/${id}"`));
 
@@ -947,7 +963,10 @@ describe('moving an item into a column', () => {
     // Answered, so the card stops asking. The question stays in the timeline,
     // where it belongs: what was asked and what was decided is the history of
     // the work, and only the form goes away.
-    const after = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    const after = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?card=bridge`,
+    });
     assert.ok(
       !after.body.includes(`action="/r/${readToken}/escalations/${id}"`),
       'the form is gone',
@@ -978,7 +997,10 @@ describe('moving an item into a column', () => {
     }
 
     const readToken = project.readUrl.split('/r/')[1]!;
-    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    const page = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?card=shared`,
+    });
     assert.match(page.body, /Do we pay the fee\?/);
     assert.match(page.body, /Do we tell the venue first\?/);
   });
@@ -1185,7 +1207,10 @@ describe('moving an item into a column', () => {
 
     // The form is on the card, and it is folded shut: an edit replaces part of
     // the record, and a note adds to it.
-    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    const page = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?card=card`,
+    });
     assert.match(page.body, new RegExp(`action="/r/${readToken}/board/edit"`));
     assert.match(page.body, /<summary>Edit the words<\/summary>/);
   });
@@ -1282,7 +1307,10 @@ describe('moving an item into a column', () => {
       headers: authed(project),
       payload: { slug: 'from-a-loop', title: 'filed at seven', priority: 7, actor: 'a' },
     });
-    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    const page = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?card=from-a-loop`,
+    });
     assert.match(page.body, /<option value="7" selected>\+7<\/option>/);
 
     // Filing without one is ordinary work, the same as an agent filing without
@@ -1326,7 +1354,10 @@ describe('moving an item into a column', () => {
     assert.match(last.message, /the venue replied/);
 
     // And it is on the page the agents and the person both read.
-    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    const page = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?card=card`,
+    });
     assert.match(page.body, /the venue replied, it is their bridge/);
 
     // An empty note is a slip of the hand, not an instruction to file a blank
@@ -1874,14 +1905,28 @@ describe('the card preview', () => {
     });
 
     const readToken = project.readUrl.split('/r/')[1]!;
-    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    const closed = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
     const item = await harness.store.items.findOne({
       projectId: project.id,
       slug: 'errors:withdraw-stuck',
     });
 
-    assert.match(page.body, new RegExp(`<a class="peek" href="#${item!._id}"`));
-    assert.match(page.body, new RegExp(`<div class="peeked" id="${item!._id}"`));
+    // The card links to the sheet by address, and the sheet itself is only
+    // drawn for the card that was asked for: a board of a hundred done items
+    // used to ship a hundred previews to open one.
+    assert.match(
+      closed.body,
+      new RegExp(
+        `<a class="peek" href="/r/${readToken}/board\\?card=errors%3Awithdraw-stuck#${item!._id}"`,
+      ),
+    );
+    assert.ok(!closed.body.includes('class="peeked'), 'and no sheet until one is asked for');
+
+    const page = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?card=${encodeURIComponent('errors:withdraw-stuck')}`,
+    });
+    assert.match(page.body, new RegExp(`<div class="peeked open" id="${item!._id}"`));
     assert.match(page.body, /three tickets from the same user and one from support/);
     assert.match(page.body, /a 230px column has no room for/);
     assert.match(page.body, /queued behind a maintenance window/, 'and the recent timeline');
