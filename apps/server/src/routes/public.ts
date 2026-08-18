@@ -811,12 +811,14 @@ yours.</p>`
           `<p class="why">Owned by ${escapeHtml(redactAddress(project.claimedBy ?? ''))}${
             project.claimedAt ? ` since ${when(project.claimedAt)}` : ''
           }. ${
+            // One line, and this is a judgement rather than brevity for its own
+            // sake: on a phone the longer version pushed the question somebody
+            // came here to answer below the fold. The reasoning belongs in the
+            // mail, which has room for it; the page needs the fact.
             (project.visibility ?? 'link') === 'owner'
-              ? 'Private: this page opens only for its owner, signed in, and the address alone does nothing.'
-              : `Open by link, which makes this address the key: anybody who has it can answer these
-questions and move these cards without signing in. That is what makes it work from a phone at three
-in the morning, and the reason not to forward it. <a href="/operator">Your projects</a> has the
-switch that closes it.`
+              ? 'Private: this page opens only for its owner, signed in.'
+              : `Open by link: anybody who has this address can answer here without signing in.
+<a href="/operator">Your projects</a> has the switch that closes it.`
           }</p>`
     }
 

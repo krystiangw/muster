@@ -345,7 +345,7 @@ describe('what the link says about itself', () => {
     const open = await harness.server.inject({ method: 'GET', url: `/r/${readToken}` });
     assert.equal(open.statusCode, 200);
     assert.match(open.body, /Open by link/);
-    assert.match(open.body, /anybody who has it can answer/);
+    assert.match(open.body, /anybody who has this address can answer here without signing in/);
 
     // And the opposite state says the opposite thing, because "private" is
     // worth reading too when the whole question is who can open this.
