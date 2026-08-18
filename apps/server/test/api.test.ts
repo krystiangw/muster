@@ -1025,6 +1025,29 @@ describe('a parameter this door does not have', () => {
       const fine = await harness.server.inject({ method: 'GET', url, headers: authed(project) });
       assert.equal(fine.statusCode, 200, url);
     }
+
+    // A route that declares no querystring accepts none. It was the one door
+    // left where a parameter still disappeared quietly.
+    const queryless = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/agents?offset=999`,
+      headers: authed(project),
+    });
+    assert.equal(queryless.statusCode, 400);
+    assert.match(queryless.json().message, /takes none at all/);
+    assert.ok(
+      !queryless.json().message.includes('next_cursor'),
+      'and does not point at a parameter it does not have either',
+    );
+
+    // The hint is only offered where following it would work.
+    const elsewhere = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/next?agent=x&sort=recent`,
+      headers: authed(project),
+    });
+    assert.equal(elsewhere.statusCode, 400);
+    assert.ok(!elsewhere.json().message.includes('The ordering is order'));
   });
 
   it('leaves the pages a browser reads alone', async () => {

@@ -120,23 +120,23 @@ export function clientIp(request: FastifyRequest): string {
  * one that was. A list of accepted parameters answers "what is allowed"; this
  * answers "what did you mean", which is the question somebody actually has.
  */
-const INSTEAD: Record<string, string> = {
-  offset: 'Pages here are cursors: read next_cursor from the answer and pass it back as cursor.',
-  skip: 'Pages here are cursors: read next_cursor from the answer and pass it back as cursor.',
-  page: 'Pages here are cursors: read next_cursor from the answer and pass it back as cursor.',
-  per_page: 'The page size is limit.',
-  page_size: 'The page size is limit.',
-  count: 'The page size is limit.',
-  size: 'The page size is limit.',
-  sort: 'The ordering is order, and it takes urgency, recent or id.',
-  sort_by: 'The ordering is order, and it takes urgency, recent or id.',
-  order_by: 'The ordering is order, and it takes urgency, recent or id.',
-  search: 'The search is q, over the slug and the title.',
-  query: 'The search is q, over the slug and the title.',
-  text: 'The search is q, over the slug and the title.',
-  from: 'The change window is since, and it takes the as_of from your previous read.',
-  after: 'The change window is since, and it takes the as_of from your previous read.',
-  updated_since: 'The change window is since, and it takes the as_of from your previous read.',
+const INSTEAD: Record<string, { use: string; say: string }> = {
+  offset: { use: 'cursor', say: 'Pages here are cursors: read next_cursor from the answer and pass it back as cursor.' },
+  skip: { use: 'cursor', say: 'Pages here are cursors: read next_cursor from the answer and pass it back as cursor.' },
+  page: { use: 'cursor', say: 'Pages here are cursors: read next_cursor from the answer and pass it back as cursor.' },
+  per_page: { use: 'limit', say: 'The page size is limit.' },
+  page_size: { use: 'limit', say: 'The page size is limit.' },
+  count: { use: 'limit', say: 'The page size is limit.' },
+  size: { use: 'limit', say: 'The page size is limit.' },
+  sort: { use: 'order', say: 'The ordering is order, and it takes urgency, recent or id.' },
+  sort_by: { use: 'order', say: 'The ordering is order, and it takes urgency, recent or id.' },
+  order_by: { use: 'order', say: 'The ordering is order, and it takes urgency, recent or id.' },
+  search: { use: 'q', say: 'The search is q, over the slug and the title.' },
+  query: { use: 'q', say: 'The search is q, over the slug and the title.' },
+  text: { use: 'q', say: 'The search is q, over the slug and the title.' },
+  from: { use: 'since', say: 'The change window is since, and it takes the as_of from your previous read.' },
+  after: { use: 'since', say: 'The change window is since, and it takes the as_of from your previous read.' },
+  updated_since: { use: 'since', say: 'The change window is since, and it takes the as_of from your previous read.' },
 };
 
 export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
@@ -340,22 +340,32 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           schema?: { querystring?: { properties?: Record<string, unknown> } };
         }
       ).schema?.querystring?.properties;
-      if (!declared) return;
-      const known = Object.keys(declared);
+      // A route that declares no querystring accepts none, and says so, rather
+      // than being the one door left where a parameter disappears quietly.
+      const known = declared ? Object.keys(declared) : [];
       const unknown = Object.keys((request.query ?? {}) as Record<string, unknown>).filter(
         (name) => !known.includes(name),
       );
       if (unknown.length === 0) return;
+      // Only what this endpoint could actually take. Telling somebody to use
+      // `order` on a door that has no `order` is a second 400 dressed up as
+      // help.
+      const hints = [
+        ...new Set(
+          unknown
+            .map((name) => INSTEAD[name])
+            .filter((hint): hint is { use: string; say: string } => !!hint && known.includes(hint.use))
+            .map((hint) => hint.say),
+        ),
+      ];
       throw new ServiceError(
         400,
         'unknown_parameter',
         `This endpoint has no ${unknown.map((name) => `"${name}"`).join(', ')}${
           unknown.length === 1 ? ' parameter' : ' parameters'
         }, and ignoring what you sent would answer 200 to a question nobody asked.${
-          unknown.map((name) => INSTEAD[name]).filter(Boolean).length > 0
-            ? ` ${unknown.map((name) => INSTEAD[name]).filter(Boolean).join(' ')}`
-            : ''
-        } What this one takes: ${known.join(', ')}.`,
+          hints.length > 0 ? ` ${hints.join(' ')}` : ''
+        } ${known.length > 0 ? `What this one takes: ${known.join(', ')}.` : 'This one takes none at all.'}`,
         { unknown, accepted: known },
       );
     });
