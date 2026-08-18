@@ -213,12 +213,19 @@ function writePending(store: Store): void {
 }
 
 export async function flushEvents(timeoutMs = 2_000): Promise<void> {
-  // The buffers first, then what is already on its way: a test that asserts
-  // what was recorded, and a shutdown, both mean everything, not everything
-  // that happened to have left already.
-  for (const store of [...pending.keys()]) writePending(store);
+  // The buffers, then what is already on its way, and then the buffers again:
+  // a test that asserts what was recorded, and a shutdown, both mean
+  // everything.
+  //
+  // Drained inside the loop rather than once at the top, because one of these
+  // writes can start another: the activation guard reads the project and then
+  // records, so a record buffered while this was waiting would have been left
+  // sitting in the map with the loop already finished, and on a shutdown the
+  // store closes under it.
   const deadline = Date.now() + timeoutMs;
-  for (let round = 0; round < 5 && inFlight.size > 0; round += 1) {
+  for (let round = 0; round < 5; round += 1) {
+    for (const store of [...pending.keys()]) writePending(store);
+    if (inFlight.size === 0) return;
     const left = deadline - Date.now();
     if (left <= 0) return;
     await Promise.race([
@@ -226,6 +233,13 @@ export async function flushEvents(timeoutMs = 2_000): Promise<void> {
       new Promise((resolve) => setTimeout(resolve, left).unref?.()),
     ]);
   }
+  // Whatever the last round started, one more time: the loop above stops on
+  // its own count, and the point of the call is that nothing is left behind.
+  for (const store of [...pending.keys()]) writePending(store);
+  await Promise.race([
+    Promise.allSettled([...inFlight]),
+    new Promise((resolve) => setTimeout(resolve, Math.max(0, deadline - Date.now())).unref?.()),
+  ]);
 }
 
 /**
