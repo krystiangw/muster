@@ -1776,6 +1776,28 @@ describe('a board many agents write to', () => {
     );
   });
 
+  it('shows the filter it is filtering by, even past the fold', async () => {
+    // A board with more labels than the row holds folds the rest away. The one
+    // in force cannot be in there: a filter bar that does not show what it is
+    // filtering by is a page disagreeing with itself.
+    const project = await createProject(harness);
+    const labels = ['aa', 'bb', 'cc', 'dd', 'ee', 'ff', 'gg', 'hh', 'zz-last'];
+    for (const label of labels) {
+      await post(project, '/items', { slug: `item-${label}`, title: label, labels: [label], actor: 'a' });
+    }
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    const page = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?label=zz-last`,
+    });
+    const row = /<span class="filter-key">Label<\/span>([\s\S]*?)<\/div>/.exec(page.body)![1]!;
+    const fold = row.indexOf('<details');
+    const chosen = row.indexOf('>zz-last</a>');
+    assert.ok(chosen >= 0, 'the chosen label is in the row');
+    assert.ok(fold === -1 || chosen < fold, 'and not behind the fold');
+  });
+
   it('stops offering an agent whose only trace is a lapsed claim', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'passed-on', title: 'passed on', actor: 'first-loop' });

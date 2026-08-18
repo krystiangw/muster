@@ -718,8 +718,17 @@ function filterRow(
       narrowedUrl(action, filter, { [key]: on ? undefined : entry.value }),
     )}"${on ? ' aria-current="true"' : ''}>${escapeHtml(entry.value)}</a>`;
   };
-  const shown = values.slice(0, FILTER_INLINE);
-  const rest = values.slice(FILTER_INLINE);
+  // What is on is always in the row. On a board with thirty labels the chosen
+  // one could sort past the fold, and a filter bar that does not show what it
+  // is filtering by is a page disagreeing with itself.
+  const ordered = current
+    ? [
+        ...values.filter((entry) => entry.value === current),
+        ...values.filter((entry) => entry.value !== current),
+      ]
+    : values;
+  const shown = ordered.slice(0, FILTER_INLINE);
+  const rest = ordered.slice(FILTER_INLINE);
   return `<div class="filter-row">
   <span class="filter-key">${escapeHtml(title)}</span>
   <a class="chip-link${current ? '' : ' on'}" href="${escapeHtml(
