@@ -226,10 +226,13 @@ export function registerOAuth(app: FastifyInstance, deps: OAuthDeps): void {
       // arrived a second before it produces a token that authentication
       // rejects on sight. Better to say the project is gone than to answer 200
       // with something already dead.
-      const secondsLeft = expiresAt
-        ? Math.round((expiresAt.getTime() - Date.now()) / 1000)
-        : TOKEN_TTL_MS / 1000;
-      if (secondsLeft < 1) return reply.code(400).send(gone);
+      //
+      // In milliseconds, and floored on the way out. Rounding seconds called
+      // 600 ms a whole one and handed back a token that could expire before
+      // the client had finished reading the reply.
+      const msLeft = expiresAt ? expiresAt.getTime() - Date.now() : TOKEN_TTL_MS;
+      if (msLeft < 1000) return reply.code(400).send(gone);
+      const secondsLeft = Math.floor(msLeft / 1000);
 
       return reply.send({
         access_token: token,
