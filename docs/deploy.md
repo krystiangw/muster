@@ -310,7 +310,15 @@ rm ~/Library/LaunchAgents/com.alex.muster-walkthrough.plist
 
 Each run keeps the project it made and reuses it the next day, so this does not
 leave a trail of boards behind. Purge it by hand if the shape of a signup ever
-changes: `node apps/server/tools/purge-projects.mjs --ids <id> --yes`.
+changes, and give the tool the database it is meant to purge, or it exits
+having touched nothing:
+
+```bash
+MONGODB_URI="$(heroku config:get MONGODB_URI -a muster-web)" \
+  node apps/server/tools/purge-projects.mjs --ids <id>        # dry run first
+MONGODB_URI="$(heroku config:get MONGODB_URI -a muster-web)" \
+  node apps/server/tools/purge-projects.mjs --ids <id> --yes
+```
 
 ## 5b. Before a second dyno
 

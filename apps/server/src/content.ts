@@ -994,12 +994,24 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
   };
 }
 
+/**
+ * What this server is, in one line, wherever a catalogue asks for one line.
+ *
+ * Three places asked and three answers were written, which is how a product
+ * ends up described differently in every directory that lists it. The registry
+ * caps this at a hundred characters, so that is the ceiling for all of them,
+ * and a test holds `server.json` to the same string: the file is published by
+ * hand from a laptop, and a sentence that only lives there is a sentence that
+ * drifts.
+ */
+export const SERVER_SUMMARY =
+  'Shared operational memory for long-lived agents: who owns what, what rotted, what needs a human.';
+
 export function mcpJson(config: Config): Record<string, unknown> {
   const base = config.baseUrl;
   return {
     name: 'muster',
-    description:
-      'Shared operational memory for long-lived agents: items with stable slugs, claims with TTL, timelines, and escalations to a human.',
+    description: SERVER_SUMMARY,
     version: '0.1.0',
     transport: 'streamable-http',
     url: `${base}/mcp`,
@@ -1042,8 +1054,7 @@ export function aiCatalogJson(config: Config): Record<string, unknown> {
       {
         identifier: `urn:air:${host}:tools:mcp`,
         displayName: 'Muster MCP server',
-        description:
-          'Shared operational memory for a fleet of agents: items with stable slugs, leases with a TTL, timelines and questions for a human. Sign up without a person in the loop.',
+        description: SERVER_SUMMARY,
         type: 'application/mcp-server-card+json',
         url: `${base}/.well-known/mcp.json`,
         tags: ['agents', 'coordination', 'task-board', 'operational-memory'],

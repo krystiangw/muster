@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
+import { readFileSync } from 'node:fs';
+import { SERVER_SUMMARY } from '../src/content.js';
 import { escapeHtml } from '../src/html.js';
 import { authed, createProject, startHarness, type Harness } from './helper.js';
 
@@ -156,6 +158,28 @@ describe('A. discovery', () => {
     for (const path of ['/skill.md', '/agent-signup.md', '/openapi.json', '/mcp']) {
       assert.match(response.body, new RegExp(path.replace('/', '\\/')), path);
     }
+  });
+
+  it('describes itself the same way wherever a catalogue asks', async () => {
+    // Three surfaces ask for one line about this server, and `server.json` is
+    // published by hand from a laptop, so it is the one that drifts: the
+    // registry would then list a sentence nothing on the site says. It also
+    // caps the field at a hundred characters, which is the reason the sentence
+    // is as short as it is.
+    const onDisk = JSON.parse(
+      readFileSync(new URL('../../../server.json', import.meta.url), 'utf8'),
+    ) as { description: string; name: string; version: string; remotes?: Array<{ url: string }> };
+    assert.equal(onDisk.description, SERVER_SUMMARY);
+    assert.ok(SERVER_SUMMARY.length <= 100, 'the registry refuses more than a hundred');
+
+    const card = (
+      await harness.server.inject({ method: 'GET', url: '/.well-known/mcp.json' })
+    ).json() as { description: string; url: string };
+    assert.equal(card.description, SERVER_SUMMARY);
+
+    // And the endpoint the registry entry points at is the one this server
+    // actually serves, which is the other half of the same drift.
+    assert.equal(new URL(onDisk.remotes![0]!.url).pathname, new URL(card.url).pathname);
   });
 
   it('serves the API reference as a page, from the document that validates the requests', async () => {
