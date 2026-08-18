@@ -218,6 +218,11 @@ ${timeline
  * a board already knows are one keystroke away, and somebody new can still be
  * named without an administrator adding them first.
  *
+ * The words themselves are behind a fold, because correcting a title is rarer
+ * than adding to it and a form that rewrites what an agent wrote should not be
+ * the first thing a hand lands on. A note is added to the record; an edit
+ * replaces part of it, and the difference is worth one click.
+ *
  * And a note, because until this existed a person could move a card, assign it
  * and tag it, and could not say why. The whole product is a board agents and
  * people share; a share where one side may only rearrange what the other side
@@ -301,6 +306,17 @@ function editForms(item: ItemDoc, facets: BoardFacets, action: string, keep: Boa
     </label>
     <button type="submit">set</button>
   </form>
+  <details class="rewrite">
+    <summary>Edit the words</summary>
+    <form method="post" action="${escapeHtml(action)}/edit">
+      <input type="hidden" name="slug" value="${escapeHtml(item.slug)}">${keptFilter(keep)}
+      <label for="title-${id}">Title</label>
+      <input id="title-${id}" name="title" maxlength="200" value="${escapeHtml(item.title ?? '')}">
+      <label for="body-${id}">Description</label>
+      <textarea id="body-${id}" name="body" rows="4" maxlength="4000">${escapeHtml(item.body ?? '')}</textarea>
+      <button type="submit">save</button>
+    </form>
+  </details>
   <form class="note" method="post" action="${escapeHtml(action)}/note">
     <input type="hidden" name="slug" value="${escapeHtml(item.slug)}">${keptFilter(keep)}
     <label for="note-${id}">Add a note</label>

@@ -1016,6 +1016,49 @@ describe('moving an item into a column', () => {
     assert.match(location, /q=card/);
   });
 
+  it('lets a person correct the words on a card, and never blank the title by accident', async () => {
+    const project = await createProject(harness, 'wording');
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'card', title: 'teh bridge', body: 'first draft', actor: 'errors-loop' },
+    });
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    const edited = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/edit`,
+      payload: 'slug=card&title=The+bridge&body=second+draft%2C+with+the+numbers',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    assert.equal(edited.statusCode, 303);
+    const item = await harness.store.items.findOne({ projectId: project.id, slug: 'card' });
+    assert.equal(item?.title, 'The bridge');
+    assert.equal(item?.body, 'second draft, with the numbers');
+    assert.match(item!.timeline.at(-1)!.message, /edited from the board/, 'the record says so');
+    assert.equal(item!.timeline.at(-1)!.by, 'operator');
+
+    // A blank title is a stray select-all, not an instruction to leave a card
+    // nobody can read. A blank description is rarer and is taken literally.
+    const blanked = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/edit`,
+      payload: 'slug=card&title=&body=',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    assert.equal(blanked.statusCode, 303);
+    const after = await harness.store.items.findOne({ projectId: project.id, slug: 'card' });
+    assert.equal(after?.title, 'The bridge', 'the title survives');
+    assert.equal(after?.body, '', 'and the description was cleared on purpose');
+
+    // The form is on the card, and it is folded shut: an edit replaces part of
+    // the record, and a note adds to it.
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(page.body, new RegExp(`action="/r/${readToken}/board/edit"`));
+    assert.match(page.body, /<summary>Edit the words<\/summary>/);
+  });
+
   it('lets a person say how urgent, filing it and afterwards', async () => {
     // Filing existed and prioritising did not, so a card a person asked for sat
     // behind everything the agents had filed at +5: /next offers by priority.

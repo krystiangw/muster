@@ -140,6 +140,12 @@ td .face { vertical-align:-3px; margin-right:4px; }
 .asked .label { color:var(--accent); margin:0 0 6px; }
 .asked textarea { width:100%; min-height:52px; }
 .asked form { max-width:none; display:flex; flex-direction:column; gap:8px; margin:8px 0 0; }
+/* Rewriting what is already there, folded shut. */
+.edit .rewrite { flex:1 0 100%; }
+.edit .rewrite summary { font-family:var(--mono); font-size:12px; color:var(--muted); cursor:pointer; }
+.edit .rewrite form { max-width:none; display:flex; flex-direction:column; gap:6px; margin:8px 0 0; }
+.edit .rewrite input, .edit .rewrite textarea { width:100%; }
+.edit .rewrite button { align-self:flex-start; }
 /* Filing a card. In a sheet, like everything else that is a form rather than
    something to read: on the page it was a pair of large empty boxes above a
    board, which is the page apologising for itself. */

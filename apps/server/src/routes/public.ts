@@ -1282,7 +1282,9 @@ ${
           ? `"${touched.slug}" is now tagged ${
               touched.labels.length > 0 ? touched.labels.join(', ') : 'nothing'
             }.`
-          : query.what === 'priority'
+          : query.what === 'edit'
+            ? `"${touched.slug}" now reads as you wrote it, and the timeline says who changed it.`
+            : query.what === 'priority'
             ? `"${touched.slug}" is urgency ${touched.priority > 0 ? '+' : ''}${touched.priority}. Every queue here sorts by it, so this is what an agent is offered next.`
             : query.what === 'new'
             ? `"${touched.slug}" is on the board. Every agent reading this project sees it now.`
@@ -1664,6 +1666,40 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
       what: 'priority',
       ...keptParams(form),
     });
+    return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
+  });
+
+  /**
+   * Correcting the words on a card.
+   *
+   * The one write here that replaces rather than adds, which is why it is the
+   * one folded shut on the page. A blank title would leave a card nobody can
+   * read, so an empty field means "leave this as it is" rather than "make it
+   * nothing": clearing a description on purpose is rare enough to be worth a
+   * space, and losing a title to a stray select-all is not.
+   */
+  app.post('/r/:readToken/board/edit', { schema: { hide: true } }, async (request, reply) => {
+    if (!limitWrites(request, reply)) return reply;
+    const { readToken } = request.params as { readToken: string };
+    const form = (request.body ?? {}) as { slug?: string; title?: string; body?: string } & KeptFilter;
+    const project = await store.projects.findOne({ readToken });
+    if (!project) throw new ServiceError(404, 'not_found', 'No such project.');
+    if (!(await readableBy(store, request, project))) {
+      throw new ServiceError(404, 'not_found', 'No such project.');
+    }
+    if (!form.slug) throw new ServiceError(400, 'bad_request', 'Which item?');
+
+    const title = (one(form.title) ?? '').trim().slice(0, 200);
+    const body = (one(form.body) ?? '').slice(0, 4000);
+    await upsertItem(store, project, {
+      slug: form.slug,
+      ...(title === '' ? {} : { title }),
+      body,
+      actor: 'operator',
+      note: 'title and description edited from the board',
+      mustExist: true,
+    });
+    const params = new URLSearchParams({ done: form.slug, what: 'edit', ...keptParams(form) });
     return reply.redirect(`/r/${readToken}/board?${params.toString()}`, 303);
   });
 
