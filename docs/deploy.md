@@ -86,6 +86,13 @@ holds projects, because the realistic accident is restoring over production
 instead of into a copy. Test the restore, not the backup: an archive nobody has
 read back is a guess.
 
+Last read back on 2026-08-18, from `muster-2026-08-18-0317.json.gz` into a
+throwaway mongod: one project with its seven column layout, 43 items, all 43
+with their timelines, four escalations with the three open ones still open,
+four agents, 349 events. Dates come back as dates rather than as the strings
+JSON turned them into, which is the part of this format most likely to rot
+silently. Repeat it after any change to what a document holds.
+
 `watchdog.sh` runs `apps/server/tools/watchdog.mjs` every quarter of an hour.
 It reads a real project through the API rather than `/health`, which answers
 without touching the database and therefore stays green through the failure
@@ -94,6 +101,13 @@ by email through the mail provider, which shares nothing with the dyno or the
 database: an alert that travels through the thing it watches is not an alert.
 It also files an escalation on the board, best effort, because a partial outage
 is the common case and the note belongs with the work.
+
+The same round checks something a liveness probe cannot see: whether hygiene is
+still running. The project read carries `swept_at`, and a dyno that answers
+while its sweeper is dead looks exactly like a board with nothing to tidy, so
+an hour behind, twice in a row, files on the board. On the board and not by
+pager, because the service is up and the escalation mail is throttled to one
+per project per hour already.
 
 ## 4. Domain to the dyno
 
