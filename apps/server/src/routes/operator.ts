@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
 import type { Mailer } from '../email.js';
-import { chip, escapeHtml, when } from '../html.js';
+import { chip, count, escapeHtml, when } from '../html.js';
 import { page } from '../page.js';
 import { who } from '../identity.js';
 import { fromOurPage, originOf } from '../origin.js';
@@ -646,8 +646,11 @@ ${offers
   <p style="font-size:17px;margin:0 0 4px"><b>${escapeHtml(project.name)}</b></p>
   ${project.description ? `<p style="color:var(--ink-2);margin:0 0 8px">${escapeHtml(project.description)}</p>` : ''}
   ${offer.note ? `<p style="color:var(--ink-2);margin:0 0 8px">${escapeHtml(offer.note)}</p>` : ''}
-  <p class="mono" style="color:var(--muted);margin:0 0 10px">${project.counts.items} open item(s),
-     ${project.counts.escalations} question(s) &middot;
+  <p class="mono" style="color:var(--muted);margin:0 0 10px">${count(
+    project.counts.items,
+    'open item',
+    'open items',
+  )}, ${count(project.counts.escalations, 'question')} &middot;
      <a href="/r/${escapeHtml(project.readToken)}/board">look first</a></p>
   <form class="row" method="post" action="/operator/shares/${escapeHtml(offer._id)}">
     ${csrfField(session)}

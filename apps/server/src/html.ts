@@ -472,6 +472,18 @@ ${body}
 </html>`;
 }
 
+/**
+ * A number and the thing it counts, in words that read.
+ *
+ * "1 question(s)" is a page that could not be bothered, and these counts are on
+ * the first screen a stranger holding a read link sees. English plurals here
+ * are all the -s kind so far; the second argument is there for the day one is
+ * not.
+ */
+export function count(howMany: number, singular: string, plural = `${singular}s`): string {
+  return `${howMany} ${howMany === 1 ? singular : plural}`;
+}
+
 export function chip(text: string, kind: string): string {
   return `<span class="chip ${escapeHtml(kind)}">${escapeHtml(text)}</span>`;
 }

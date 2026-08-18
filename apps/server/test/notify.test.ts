@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import type { EscalationNotice } from '../src/email.js';
+import { escalationMail, type EscalationNotice } from '../src/email.js';
 import { runMigrations } from '../src/db.js';
 import { authed, createProject, startHarness, type Harness, type Project } from './helper.js';
 
@@ -80,6 +80,62 @@ describe('the mail an escalation sends', () => {
       assert.equal(sent[0]!.notice.waiting, 1);
       assert.match(sent[0]!.notice.readUrl, /\/r\//);
     });
+  });
+
+  it('carries what the agent wrote for the person, not only the question', async () => {
+    // The protocol asks an agent, in these words, to put enough in `question`
+    // and `context` that a person reading it on a phone can decide without
+    // opening anything else. The message that reaches the phone dropped the
+    // context, so the one field written for this reader was the one field they
+    // had to open a browser to see.
+    await withMailer(async (harness, sent) => {
+      const project = await claimedProject(harness, 'owner@example.com');
+      await harness.server.inject({
+        method: 'POST',
+        url: `${project.api}/items`,
+        headers: authed(project),
+        payload: { slug: 'ops:bridge', title: 'the bridge', actor: 'errors-loop' },
+      });
+      await harness.server.inject({
+        method: 'POST',
+        url: `${project.api}/escalations`,
+        headers: authed(project),
+        payload: {
+          agent: 'errors-loop',
+          question: 'Bridge it, or wait for the direct route?',
+          context: 'Pool depth on the bridge route is too thin, and waiting costs two days.',
+          item_slug: 'ops:bridge',
+        },
+      });
+
+      const notice = sent[0]!.notice;
+      assert.match(notice.context ?? '', /Pool depth on the bridge route/);
+      assert.equal(notice.itemSlug, 'ops:bridge');
+
+      const { lines } = escalationMail(notice);
+      const body = lines.join('\n');
+      assert.match(body, /Pool depth on the bridge route is too thin/, 'the context is in the mail');
+      assert.match(body, /the card "ops:bridge"/, 'and so is the card it is about');
+    });
+  });
+
+  it('cuts a very long context, and says that it cut it', async () => {
+    // The field takes eight thousand characters and a phone will render every
+    // one of them above the link that answers the question. Deciding from a
+    // paragraph that stopped mid sentence is worse than knowing it stopped.
+    const { lines } = escalationMail({
+      projectName: 'venue-ops',
+      agent: 'errors-loop',
+      question: 'Bridge it?',
+      context: 'x'.repeat(5000),
+      waiting: 1,
+      readUrl: 'http://muster.test/r/r_x',
+      operatorUrl: 'http://muster.test/operator',
+      needsSignIn: false,
+    });
+    const body = lines.join('\n');
+    assert.ok(body.length < 3000, `the whole message stays readable: ${body.length}`);
+    assert.match(body, /the rest of the context is on the board/);
   });
 
   it('goes out for a question filed over MCP too', async () => {

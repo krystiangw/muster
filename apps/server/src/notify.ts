@@ -106,6 +106,10 @@ export function createNotifier(deps: {
           projectName: before.name,
           agent: escalation.agent,
           question: escalation.question,
+          // What the agent wrote for this reader. skill.md asks for it in those
+          // words, and the message that reaches them left it on the board.
+          context: escalation.context ?? '',
+          itemSlug: escalation.itemSlug ?? null,
           // The count is read after the insert, so it already includes this
           // question; a project whose count says zero is one whose escalation
           // was answered in the microsecond in between, and one is the honest

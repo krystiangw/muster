@@ -15,7 +15,7 @@ import type { Config } from '../config.js';
 import type { Store } from '../db.js';
 import { redactAddress, type Mailer } from '../email.js';
 import { record, recordView } from '../events.js';
-import { ago, chip, escapeHtml, when } from '../html.js';
+import { ago, chip, count, escapeHtml, when } from '../html.js';
 import { page } from '../page.js';
 import { avatar, who } from '../identity.js';
 import { fromOurPage, originOf } from '../origin.js';
@@ -976,8 +976,10 @@ ${
           )} picks it up on its next iteration, and this page will say when it did.</div>`
         : ''
     }
-<p>${itemsHeld} item(s), ${project.counts.agents} agent(s), ${project.counts.escalations} question(s)
-waiting for you.${project.expiresAt ? ` This project is unclaimed and will be deleted ${when(project.expiresAt)}.` : ''}</p>
+<p>${count(itemsHeld, 'item')}, ${count(project.counts.agents, 'agent')}, ${count(
+      project.counts.escalations,
+      'question',
+    )} waiting for you.${project.expiresAt ? ` This project is unclaimed and will be deleted ${when(project.expiresAt)}.` : ''}</p>
 
 ${
       // Unclaimed, and the person reading this is usually the one who should

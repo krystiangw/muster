@@ -17,6 +17,18 @@ export interface EscalationNotice {
   projectName: string;
   agent: string;
   question: string;
+  /**
+   * What the agent wrote under the question.
+   *
+   * The protocol asks for it in those words: put enough in `question` and
+   * `context` that a person reading it on a phone can decide without opening
+   * anything else. The message that reaches the phone dropped it, so the one
+   * field written for this reader was the one field they had to open a browser
+   * to see.
+   */
+  context?: string;
+  /** The card it is about, when the agent named one. */
+  itemSlug?: string | null;
   /** How many questions on this project are open, this one included. */
   waiting: number;
   /** Where to answer it. The read link, or the sign in page for a private project. */
@@ -30,6 +42,74 @@ export interface Mailer {
   sendClaimCode(to: string, code: string, projectName: string): Promise<Delivery>;
   sendOperatorCode(to: string, code: string): Promise<Delivery>;
   sendEscalation(to: string, notice: EscalationNotice): Promise<Delivery>;
+}
+
+/**
+ * How much of an agent's context a message carries.
+ *
+ * Whole, up to a point: the field takes eight thousand characters and a mail
+ * client on a phone will happily render every one of them above the link that
+ * answers the question. What is cut is said out loud rather than trailing off,
+ * because a person deciding from a truncated paragraph should know it was one.
+ */
+const CONTEXT_IN_MAIL = 1200;
+
+/**
+ * The message an escalation sends, as text.
+ *
+ * Separated from the sending so it can be read in a test: this is the only
+ * thing this service writes to somebody who is not looking at it, and until
+ * this existed nothing checked what it said.
+ */
+export function escalationMail(notice: EscalationNotice): { subject: string; lines: string[] } {
+  const others = notice.waiting - 1;
+  const context = (notice.context ?? '').trim();
+  const cut = context.length > CONTEXT_IN_MAIL;
+  return {
+    // The subject carries the project and the count, because this arrives on a
+    // phone at three in the morning and the decision to open it now or at
+    // breakfast is made from the subject line alone.
+    subject:
+      others > 0
+        ? `${notice.projectName}: ${notice.waiting} questions waiting for you`
+        : `${notice.projectName}: an agent is waiting on you`,
+    lines: [
+      `${notice.agent} stopped and asked:`,
+      '',
+      notice.question,
+      ...(context === ''
+        ? []
+        : [
+            '',
+            cut ? `${context.slice(0, CONTEXT_IN_MAIL)}...` : context,
+            ...(cut ? ['', '(the rest of the context is on the board)'] : []),
+          ]),
+      ...(notice.itemSlug ? ['', `It is about the card "${notice.itemSlug}".`] : []),
+      '',
+      `Answer it here: ${notice.readUrl}`,
+      ...(others > 0
+        ? [
+            others === 1
+              ? '1 other question on this project is open on the same page.'
+              : `${others} other questions on this project are open on the same page.`,
+          ]
+        : []),
+      '',
+      ...(notice.needsSignIn
+        ? [
+            'You narrowed this project to its owner, so that page asks for your',
+            'address and a six digit code first. No account, no password.',
+          ]
+        : [
+            'The page needs no sign in, so anyone holding that link can answer your',
+            'agents on your behalf and change the board. Treat it like a password.',
+            '',
+            `Every project you own: ${notice.operatorUrl}`,
+          ]),
+      '',
+      'One message per project per hour, whatever they ask in between.',
+    ],
+  };
 }
 
 /** Enough of an address to match it to a report, not enough to be a mailing list. */
@@ -118,40 +198,8 @@ export function createMailer(config: Config, log: (msg: string) => void): Mailer
       ]);
     },
     async sendEscalation(to, notice) {
-      // The subject carries the project and the count, because this arrives on
-      // a phone at three in the morning and the decision to open it now or at
-      // breakfast is made from the subject line alone.
-      const others = notice.waiting - 1;
-      return send(
-        to,
-        others > 0
-          ? `${notice.projectName}: ${notice.waiting} questions waiting for you`
-          : `${notice.projectName}: an agent is waiting on you`,
-        [
-          `${notice.agent} stopped and asked:`,
-          '',
-          notice.question,
-          '',
-          `Answer it here: ${notice.readUrl}`,
-          ...(others > 0
-            ? [`${others} other question(s) on this project are open on the same page.`]
-            : []),
-          '',
-          ...(notice.needsSignIn
-            ? [
-                'You narrowed this project to its owner, so that page asks for your',
-                'address and a six digit code first. No account, no password.',
-              ]
-            : [
-                'The page needs no sign in, so anyone holding that link can answer your',
-                'agents on your behalf and change the board. Treat it like a password.',
-                '',
-                `Every project you own: ${notice.operatorUrl}`,
-              ]),
-          '',
-          'One message per project per hour, whatever they ask in between.',
-        ],
-      );
+      const { subject, lines } = escalationMail(notice);
+      return send(to, subject, lines);
     },
     async sendClaimCode(to, code, projectName) {
       // Without an API key the code goes to the log rather than nowhere, so a

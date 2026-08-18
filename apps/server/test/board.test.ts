@@ -2389,7 +2389,10 @@ describe('a layout that would trap finished work', () => {
     assert.match(page.body, new RegExp(`/r/${readToken}/board`));
     // And the line above the table says the same number, rather than reporting
     // the size of the page as the size of the board.
-    assert.match(page.body, /205 item\(s\)/);
+    assert.match(page.body, /205 items/);
+    // And one of a thing is one of it, not "1 item(s)": this line is the first
+    // screen a stranger holding the link reads.
+    assert.ok(!/\(s\)/.test(page.body), 'nothing on this page counts in parentheses');
   });
 
   it('puts the live work above the finished pile, and stops at what a phone can carry', async () => {
@@ -2530,7 +2533,7 @@ describe('a layout that would trap finished work', () => {
     }
 
     const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}` });
-    assert.match(page.body, /55 question\(s\)/, 'the summary counts them all');
+    assert.match(page.body, /55 questions/, 'the summary counts them all');
     assert.match(page.body, /Showing the 50 most urgent of 55/, 'and the list says it is a slice');
   });
 });
