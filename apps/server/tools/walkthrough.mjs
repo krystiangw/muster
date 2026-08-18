@@ -213,18 +213,30 @@ const run = async () => {
     headers: authed,
     body: JSON.stringify({ agent: AGENT, ttl_minutes: 5 }),
   });
+  // The slug is part of what makes this call answered rather than merely
+  // successful: without it the release below is skipped and a real item stays
+  // held until its lease runs out, under an all clear.
+  const held = typeof taken.body?.item?.slug === 'string' ? taken.body.item.slug : '';
   check(
     'the next item can be taken in one call',
-    taken.body?.claimed === true && taken.body?.item?.claim?.agent === AGENT,
+    taken.body?.claimed === true && taken.body?.item?.claim?.agent === AGENT && held !== '',
     JSON.stringify(taken.body).slice(0, 200),
   );
-  if (taken.body?.item?.slug) {
-    const released = await json(`${api}/items/${encodeURIComponent(taken.body.item.slug)}/release`, {
+  if (held !== '') {
+    const released = await json(`${api}/items/${encodeURIComponent(held)}/release`, {
       method: 'POST',
       headers: authed,
       body: JSON.stringify({ agent: AGENT, note: 'the walkthrough was only looking' }),
     });
-    check('and let go again', released.status === 200, released.status);
+    // Releasing answers 200 when there was nothing to release, so the status
+    // alone would pass a deployment that kept the lease. The board is read
+    // back instead.
+    const after = await json(`${api}/items/${encodeURIComponent(held)}`, { headers: authed });
+    check(
+      'and let go again',
+      released.status === 200 && (after.body?.item?.claim ?? null) === null,
+      `${released.status} ${JSON.stringify(after.body?.item?.claim)}`,
+    );
   }
 
   const open = await json(`${api}/escalations?status=open`, { headers: authed });
