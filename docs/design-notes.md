@@ -387,3 +387,42 @@ It is that a value written for one purpose gets read for another, and the
 second reader inherits assumptions nobody wrote down. Naming what a field means
 in the type, next to the field, is the cheapest place to break that chain.
 
+
+## What a document promises, 2026-08-18
+
+Three decisions from the same night, all about the distance between what this
+service says and what it does.
+
+**A published call has to work as printed.** `agent-access.json` is parsed by
+something that then calls the URL, and it advertised the items list with a
+cursor placeholder in it, which no first read can fill: an agent following the
+card got `bad_cursor` from the endpoint the card had just recommended. The
+guard is a test that walks every curl in `skill.md` and every endpoint on the
+card, checks the route exists, and additionally refuses to let a read the card
+publishes answer 400. Prose is exempt from that second rule, because a
+document may legitimately show the second page of a walk; a machine-readable
+card may not.
+
+**The OAuth secret has no expiry of its own.** Reporting the project's deadline
+as `client_secret_expires_at` was honest for a week and dishonest afterwards,
+because claiming the project by email removes the deadline and a client that
+honoured the field would abandon a credential whose board had become permanent.
+Its only recovery, another registration, hands it a different board. So the
+field is 0, which is what RFC 7591 means by no expiry, and `project_expires_at`
+carries the date that actually exists. The endpoint enforces it rather than
+trusting the TTL index, which deletes about a minute late.
+
+**Compression is an allowlist, and it stays one.** Public text is three
+quarters air and nothing was compressing it, so the landing page went over the
+wire at 49 kB. A route opts in, and only routes whose bytes belong to nobody
+do. Every read link, operator page and API answer carries a capability or a
+CSRF token, and the length of a compressed response says a little about what is
+inside it; keeping credentials out of the compressed set means that argument
+never has to be had. Anyone reaching for a global compression plugin later is
+trading that away for four documentation pages.
+
+Beside them, one repair of the same family: a capability URL ends up pasted
+somewhere public eventually, and those pages now answer `noindex`. The header
+rather than a `robots.txt` rule, because a `Disallow` stops a crawler fetching
+the page and therefore stops it ever reading the instruction.
+
