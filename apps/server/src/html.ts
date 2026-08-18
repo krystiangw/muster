@@ -8,6 +8,8 @@
  * gives up. The human UI being cheap is a side effect of getting that right.
  */
 
+import { createHash } from 'node:crypto';
+
 export function escapeHtml(value: unknown): string {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -370,6 +372,26 @@ details.layout[open] > summary { margin-bottom:10px; }
  */
 let siteVerification = '';
 
+/**
+ * The stylesheet, as a file with its own name instead of twenty five kilobytes
+ * in every answer.
+ *
+ * It was inline for the reason everything here is inline: one request, nothing
+ * to wait for, and a page that reads the same to something without a browser.
+ * That stopped paying the moment the board began reloading itself once a
+ * minute, because the same bytes went down the wire on every reload, and the
+ * board is the one page that cannot be compressed: it carries the capability
+ * that opened it, and a compressed answer whose length depends on a secret is
+ * an oracle for the secret.
+ *
+ * The name carries the hash of the bytes, so it is cached for a year and a
+ * deploy that changes a colour changes the name. Nothing else about the page
+ * changes: it is still one document, still no script, and a reader that never
+ * fetches the sheet still gets every word.
+ */
+export const STYLE_CSS = CSS;
+export const STYLE_PATH = `/style-${createHash('sha256').update(CSS).digest('hex').slice(0, 12)}.css`;
+
 export function setSiteVerification(token: string): void {
   siteVerification = token;
 }
@@ -418,7 +440,7 @@ ${(options.verification ?? siteVerification) ? `<meta name="google-site-verifica
 <link rel="icon" href="/favicon.ico" sizes="48x48">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <meta name="theme-color" content="#0e5f59">
-<style>${CSS}</style>
+<link rel="stylesheet" href="${STYLE_PATH}">
 </head>
 <body>
 <div class="wrap${options.wide ? ' wide' : ''}">

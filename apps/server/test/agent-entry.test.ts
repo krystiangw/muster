@@ -713,6 +713,31 @@ describe('the mark', () => {
       /img-src 'self' data:/,
     );
 
+    // The stylesheet is a file every page links rather than twenty five
+    // kilobytes repeated in every answer. It is named after its own bytes, so
+    // it is cached for a year and a deploy that changes it changes the name.
+    const sheetHref = page.body.match(/<link rel="stylesheet" href="([^"]+)"/)?.[1];
+    assert.match(String(sheetHref), /^\/style-[0-9a-f]{12}\.css$/);
+    assert.match(
+      page.headers['content-security-policy'] as string,
+      /style-src 'self' 'unsafe-inline'/,
+      'a sheet the page links is a sheet the policy has to allow',
+    );
+    const sheet = await harness.server.inject({
+      method: 'GET',
+      url: String(sheetHref),
+      headers: { 'accept-encoding': 'gzip' },
+    });
+    assert.equal(sheet.statusCode, 200);
+    assert.match(sheet.headers['content-type'] as string, /text\/css/);
+    assert.match(String(sheet.headers['cache-control']), /immutable/);
+    assert.equal(
+      sheet.headers['content-encoding'],
+      'gzip',
+      'and it holds nothing anybody wants, so it may be compressed',
+    );
+    assert.ok(!page.body.includes('<style>'), 'and it is not in the page as well');
+
     const svg = await harness.server.inject({ method: 'GET', url: '/favicon.svg' });
     assert.equal(svg.statusCode, 200);
     assert.match(svg.headers['content-type'] as string, /image\/svg\+xml/);

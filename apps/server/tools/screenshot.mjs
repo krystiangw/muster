@@ -71,8 +71,16 @@ const page = await fetch(url).then((response) => {
   return response.text();
 });
 
-const style = page.match(/<style>[\s\S]*?<\/style>/)?.[0];
-if (!style) throw new Error(`no stylesheet in ${url}`);
+// The stylesheet is a file with its own name now, so this fetches it and puts
+// it back inline: the shot has to be one self contained document, or Chrome
+// renders it before the sheet lands and the picture is of unstyled text.
+const sheetHref = page.match(/<link rel="stylesheet" href="([^"]+)"/)?.[1];
+if (!sheetHref) throw new Error(`no stylesheet linked from ${url}`);
+const sheet = await fetch(new URL(sheetHref, url)).then((answer) => {
+  if (!answer.ok) throw new Error(`stylesheet ${sheetHref} answered ${answer.status}`);
+  return answer.text();
+});
+const style = `<style>${sheet}</style>`;
 const board = subtree(page, '<div class="demo">');
 
 // `.wrap` carries the page's own measure and padding, so the shot is framed the

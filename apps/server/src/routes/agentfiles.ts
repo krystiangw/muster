@@ -11,6 +11,7 @@ import {
   skillMd,
 } from '../content.js';
 import { APPLE_TOUCH_PNG, FAVICON_ICO, FAVICON_SVG } from '../favicon.js';
+import { STYLE_CSS, STYLE_PATH } from '../html.js';
 
 /**
  * The agent-facing surface. Every file here is static text generated once at
@@ -82,6 +83,18 @@ export function registerAgentFiles(app: FastifyInstance, config: Config, store: 
       .type(type)
       .header('cache-control', 'public, max-age=31536000, immutable')
       .send(body);
+
+  // The stylesheet every page links, under a name that carries the hash of its
+  // own bytes. Public, identical for everybody and holding nothing anybody
+  // could want: that is what makes it safe to compress, which the pages that
+  // carry a capability are not.
+  app.get(STYLE_PATH, { schema: { hide: true } }, (_request, reply) => {
+    reply.compressible = true;
+    return reply
+      .type('text/css; charset=utf-8')
+      .header('cache-control', 'public, max-age=31536000, immutable')
+      .send(STYLE_CSS);
+  });
 
   app.get('/favicon.svg', { schema: { hide: true } }, icon('image/svg+xml', FAVICON_SVG));
   app.get('/favicon.ico', { schema: { hide: true } }, icon('image/x-icon', FAVICON_ICO));

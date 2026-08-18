@@ -188,7 +188,12 @@ export async function buildApp(
       // `img-src 'self'` is for the favicon and nothing else. A browser fetches
       // it under the page's image policy, so a policy of `data:` alone leaves
       // every tab showing the blank sheet while the icon route answers 200.
-      "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+      // `style-src 'self'` for the sheet every page links, which is a file
+      // now rather than twenty five kilobytes repeated in every answer.
+      // `'unsafe-inline'` stays for the style attributes on the page itself: a
+      // handle's colour is computed from the handle, so it cannot live in a
+      // stylesheet written before the handle existed.
+      "default-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
     );
     // Only meaningful over TLS, and the deploy terminates TLS at the router.
     if (request.headers['x-forwarded-proto'] === 'https') {
