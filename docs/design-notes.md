@@ -553,3 +553,35 @@ missing; it reads as a confident zero, which is worse.
 The general shape: a defence that reads a header is only as good as the other
 headers around it. Two policies can each be correct and cancel out, and neither
 one's test will say so.
+
+## Counted at one door, 2026-08-18
+
+The service has four doors, and by now most behaviour that reaches through more
+than one of them goes through a single function on the other side. The counters
+did not. Three of them were written at the route that first needed them, and
+what the log said afterwards was not "some doors are missing" but something
+worse: a confident number about the doors that happened to write it.
+
+An answer was counted on the operator's page and nowhere else, so every human
+decision appeared to arrive there. The mail does not send anybody there; it
+sends them to the capability link, and that link recorded nothing. A project
+created through the web form left no signup event at all, and that count is the
+denominator of the activation and claim rates, so a form that converted well
+would have pushed activation above one hundred percent rather than showing up as
+a source. A question filed over MCP left no escalate event, and MCP is how most
+agents arrive.
+
+All three now happen inside the function every door already calls, and each
+caller says which door it is. That is the same repair the inboxes got when they
+had drifted apart, applied to the part of the system that was never checked for
+drift because it does not change what anybody sees.
+
+Two smaller things fell out of counting an answer properly, and both were real:
+reopening a question ran through the same call and counted as answering it, and
+two identical retries of an edit to an already answered question both passed a
+guard that read only the status, so both won and both counted.
+
+The general shape, and the reason this is worth a note rather than a commit
+message: a measurement taken at one of several equivalent paths does not read as
+incomplete. It reads as evidence about the paths, and the path that measures
+zero is the one somebody eventually deletes.
