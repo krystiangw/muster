@@ -3,6 +3,7 @@ import { BOARD_PRESETS, COLUMN_ITEM_LIMIT } from '../src/board.js';
 import { after, before, describe, it } from 'node:test';
 import { moveItem } from '../src/board.js';
 import { authed, createProject, signIn, startHarness, type Harness, type Project } from './helper.js';
+import { flushEvents } from '../src/events.js';
 import { hashToken } from '../src/ids.js';
 import { boardApplyJson } from '../src/serialize.js';
 
@@ -1891,19 +1892,22 @@ describe('a board many agents write to', () => {
 
     // And the bounce is free: it happens before the read is charged and before
     // the view is counted, because it is the same reader pressing Enter once.
-    const counted = await harness.store.events.countDocuments({
-      projectId: project.id,
-      kind: 'view',
-    });
+    // Counted by what a board view actually writes, which is a row with no
+    // project on it: a capability page counts the page, never whose it is.
+    const views = async () => {
+      await flushEvents();
+      return harness.store.events.countDocuments({ kind: 'view', detail: 'board' });
+    };
+    const before = await views();
     await harness.server.inject({
       method: 'GET',
       url: `/r/${readToken}/board?owner=&agent=errors-loop&label=&q=`,
     });
-    assert.equal(
-      await harness.store.events.countDocuments({ projectId: project.id, kind: 'view' }),
-      counted,
-      'a redirect is not somebody reading the board',
-    );
+    assert.equal(await views(), before, 'a redirect is not somebody reading the board');
+
+    // And the page it bounces to is, so the check above can tell them apart.
+    await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board?agent=errors-loop` });
+    assert.equal(await views(), before + 1, 'the page it lands on is a read');
   });
 
   it('keeps the agent it is already filtered by in the list', async () => {

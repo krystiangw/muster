@@ -1156,15 +1156,7 @@ ${
   });
 
   app.get('/r/:readToken/board', { schema: { hide: true } }, async (request, reply) => {
-    if (!limitSeeking(request, reply)) return reply;
     const { readToken } = request.params as { readToken: string };
-    const project = await store.projects.findOne({ readToken });
-    if (!project) {
-      return reply.code(404).type('text/html; charset=utf-8').send(noSuchProject(request));
-    }
-    if (!(await readableBy(store, request, project))) {
-      return reply.code(404).type('text/html; charset=utf-8').send(noSuchProject(request));
-    }
     // A form sends every field it has, so narrowing by one leaves the other
     // three in the URL as `owner=&label=&q=`. That URL is what somebody copies
     // to somebody else, so the empties are dropped once and the page is drawn
@@ -1180,6 +1172,14 @@ ${
       return reply.redirect(`/r/${readToken}/board${canonical === '' ? '' : `?${canonical}`}`, 303);
     }
 
+    if (!limitSeeking(request, reply)) return reply;
+    const project = await store.projects.findOne({ readToken });
+    if (!project) {
+      return reply.code(404).type('text/html; charset=utf-8').send(noSuchProject(request));
+    }
+    if (!(await readableBy(store, request, project))) {
+      return reply.code(404).type('text/html; charset=utf-8').send(noSuchProject(request));
+    }
     if (!limitReads(request, reply)) return reply;
     // Counted once the page is actually going to be drawn. A stale bookmark and
     // a token probe both end above this line, and neither is somebody reading.
