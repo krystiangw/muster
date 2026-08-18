@@ -473,3 +473,40 @@ one atomic write, which means transactions, which means a replica set under the
 tests. That is a deliberate change, not a 5am one. The waiting version costs a
 leak one extra minute of life and needs none of it.
 
+
+## The question nobody was told about, 2026-08-18
+
+The escalation notice is throttled to one per project per hour: a burst of
+questions from an agent in a loop should not become sixty messages to somebody
+asleep. The throttle was a rate limit in the comments and a delete in the code.
+A question filed inside another question's hour sent nothing at all, and the
+only record of it was a page nobody had open, which is the exact failure the
+notice exists to prevent.
+
+This board was carrying two of them when it was found: a question from the
+afternoon that predated the mail path entirely, and one filed twenty four
+minutes after another had claimed the hour. Neither had reached anybody in
+fourteen hours.
+
+Every question now carries whether anybody was ever told about it, and a pass
+beside the hygiene sweep looks for the ones nobody was. One message per
+project, naming the oldest such question, under the same hourly throttle. Every
+question is mentioned by name exactly once, and one that is answered before its
+turn comes simply drops off the list, so repairing the hole does not turn into a
+nag.
+
+Three details are load bearing and easy to undo by accident:
+
+**Eligibility is decided in the query, before the batch is cut.** The first
+version took twenty questions and then checked which projects had an owner and
+an open hour. Twenty questions on abandoned boards would have taken every slot
+from a board with somebody waiting, every five minutes, for ever.
+
+**A question is read again on its turn.** Twenty provider calls take a while,
+and a message asking somebody to answer something they answered ten seconds ago
+is worse than no message.
+
+**The pass has its own guard.** Sharing the hygiene sweep's meant that one
+project whose sweep threw took the notifications down with it, silently, every
+five minutes.
+
