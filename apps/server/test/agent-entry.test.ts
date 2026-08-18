@@ -75,7 +75,7 @@ describe('A. discovery', () => {
       await harness.server.inject({ method: 'GET', url: '/openapi.json' })
     ).json() as { paths: Record<string, Record<string, { description?: string }>> };
     assert.match(openapi.paths['/v1/{project}/share']!.post!.description!, /admin token/);
-    assert.match(openapi.paths['/v1/{project}/claim']!.post!.description!, /admin|person/);
+    assert.match(openapi.paths['/v1/{project}/claim']!.post!.description!, /admin token/);
 
     const tools = (
       await harness.server.inject({

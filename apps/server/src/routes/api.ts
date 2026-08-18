@@ -1244,7 +1244,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           tags: ['keys'],
           summary: 'List keys',
           description:
-            'Never the tokens themselves, only what each one is and when it was last used. `expires_at` is null for the ordinary project token and set for anything with a life of its own, such as an access token from the OAuth endpoint.',
+            'Never the tokens themselves, only what each one is and when it was last used. `expires_at` covers two different things: a key on an unclaimed project inherits the project’s own expiry and loses it when a person claims the board, while a key with a life of its own keeps one either way, which is what an access token from the OAuth endpoint has.',
         },
       },
       async (request) => {
@@ -1404,7 +1404,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           tags: ['projects'],
           summary: 'Start the human claim: email a six digit code',
           description:
-            'Claiming removes the expiry and raises the limits. It is the only step that needs a person, and it happens after the agent is already working.',
+            'Claiming removes the expiry and raises the limits. It is the only step that needs a person, and it happens after the agent is already working. Needs an admin token: ownership decides who receives this board and has no way back, so a worker key handed to one agent cannot bind the project to an address of its choosing.',
           body: {
             type: 'object',
             required: ['email'],
