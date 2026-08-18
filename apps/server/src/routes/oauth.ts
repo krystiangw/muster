@@ -120,14 +120,17 @@ export function registerOAuth(app: FastifyInstance, deps: OAuthDeps): void {
         client_id: clientId,
         client_secret: clientSecret,
         client_id_issued_at: Math.floor(Date.now() / 1000),
-        // 0 means "never" in RFC 7591, and this credential dies with the
-        // project it was made for: an unclaimed one is deleted, and the client
-        // document carries that same date. Saying never would have been a
-        // promise the seventh day breaks. A human claiming the project by email
-        // clears both.
-        client_secret_expires_at: project.expiresAt
-          ? Math.floor(project.expiresAt.getTime() / 1000)
-          : 0,
+        // 0, and it means what RFC 7591 says: this secret has no expiry of its
+        // own. It dies with the project it addresses, and that date can move:
+        // a human claiming the project by email removes it entirely. Reporting
+        // the current deadline here was worse than saying nothing, because a
+        // client that honours the field would stop using a credential whose
+        // project had since become permanent, and its only recovery, another
+        // registration, would hand it a different board. The date the project
+        // is scheduled to go is below, where it cannot be mistaken for a
+        // property of the secret.
+        client_secret_expires_at: 0,
+        project_expires_at: project.expiresAt,
         client_name: body.client_name ?? 'unnamed client',
         grant_types: ['client_credentials'],
         token_endpoint_auth_method: 'client_secret_post',
@@ -188,11 +191,22 @@ export function registerOAuth(app: FastifyInstance, deps: OAuthDeps): void {
       }
 
       const client = await store.oauthClients.findOne({ _id: clientId });
+      const now = new Date();
+      // Expiry is checked here rather than left to the TTL index. Mongo deletes
+      // on its own schedule, a minute or so behind, and a credential that is
+      // over should not work for that minute: the answer would be a token for a
+      // project that is on its way out.
       if (!client || client.secretHash !== hashToken(clientSecret)) {
         return reply.code(401).send({ error: 'invalid_client' });
       }
+      if (client.expiresAt && client.expiresAt <= now) {
+        return reply.code(401).send({
+          error: 'invalid_client',
+          error_description: 'This client expired with its project. Register again for a new one.',
+        });
+      }
       const project = await store.projects.findOne({ _id: client.projectId });
-      if (!project) {
+      if (!project || (project.expiresAt && project.expiresAt <= now)) {
         return reply
           .code(400)
           .send({ error: 'invalid_client', error_description: 'The project behind this client is gone.' });

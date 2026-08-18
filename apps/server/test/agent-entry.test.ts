@@ -186,10 +186,14 @@ describe('B. agent entry', () => {
     const { client_id, client_secret } = registered.json();
     assert.ok(client_id && client_secret);
 
-    // The credential dies with the project it was made for, and 0 in RFC 7591
-    // means never, so an unclaimed project may not answer 0.
-    const expiresAt = registered.json().client_secret_expires_at;
-    assert.ok(expiresAt > Math.floor(Date.now() / 1000), 'a real date, in the future');
+    // The secret has no expiry of its own, which is what 0 means, and the date
+    // the project is scheduled to go is reported as itself rather than dressed
+    // up as a property of the credential.
+    assert.equal(registered.json().client_secret_expires_at, 0);
+    assert.ok(
+      new Date(registered.json().project_expires_at).getTime() > Date.now(),
+      'and the project deadline is a real date, in the future',
+    );
 
     // A client that can only do authorization_code is asking for something no
     // deployment of this will ever do, and it should hear that here rather
@@ -209,6 +213,30 @@ describe('B. agent entry', () => {
       payload: { grant_types: ['authorization_code', 'client_credentials'] },
     });
     assert.equal(both.statusCode, 201);
+
+    // A client whose project is over stops working at the moment it is over,
+    // not whenever the TTL monitor next runs, which is a minute or so behind.
+    const doomed = await harness.server.inject({
+      method: 'POST',
+      url: '/oauth/register',
+      payload: { client_name: 'expiring' },
+    });
+    const dead = doomed.json();
+    await harness.store.oauthClients.updateOne(
+      { _id: dead.client_id },
+      { $set: { expiresAt: new Date(Date.now() - 1000) } },
+    );
+    const refused = await harness.server.inject({
+      method: 'POST',
+      url: '/oauth/token',
+      payload: {
+        grant_type: 'client_credentials',
+        client_id: dead.client_id,
+        client_secret: dead.client_secret,
+      },
+    });
+    assert.equal(refused.statusCode, 401);
+    assert.equal(refused.json().error, 'invalid_client');
 
     const token = await harness.server.inject({
       method: 'POST',
