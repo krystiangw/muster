@@ -828,33 +828,41 @@ describe('the open item cap', () => {
   });
 
   it('repairs an overcounted project, and never inflates one', async () => {
-    const project = await createProject(harness);
-    await post(project, '/items', { slug: 'one', title: 'one', actor: 'a' });
+    const { correctOvercount } = await import('../src/hygiene.js');
+    const { createProject: createDirect, upsertItem } = await import('../src/service.js');
+    // Built and swept through the service rather than over HTTP. Every request
+    // fires a throttled sweep of its own, and one of those landing between the
+    // two passes below writes a fresh observation over the backdated one, which
+    // is a race this test kept losing on a slower machine.
+    const { project } = await createDirect(harness.store, harness.config, { name: 'overcounted' });
+    await upsertItem(harness.store, project, { slug: 'one', title: 'one', actor: 'a' });
 
-    // Two sweeps, because a repair applies only to a discrepancy that sat
-    // still: the first one records what it saw, the second one acts on it.
-    // Production spaces them a minute apart on its own; here the observation is
-    // moved back instead of waiting for one.
+    // Two passes, because a repair applies only to a discrepancy that sat
+    // still: the first records what it saw, the second acts on it. Production
+    // spaces them a minute apart on its own; here the observation is moved
+    // back instead of waiting for one.
     const settle = async () => {
-      await post(project, '/sweep', {});
+      await correctOvercount(harness.store, project._id);
       await harness.store.projects.updateOne(
-        { _id: project.id },
+        { _id: project._id },
         { $set: { 'countsCheck.items.at': new Date(Date.now() - 60_000) } },
       );
-      await post(project, '/sweep', {});
+      await correctOvercount(harness.store, project._id);
     };
+    const counter = async () =>
+      (await harness.store.projects.findOne({ _id: project._id }))!.counts.items;
 
     // A process that died between closing an item and giving back its slot
     // leaves the counter too high, which would reject valid work forever.
-    await harness.store.projects.updateOne({ _id: project.id }, { $set: { 'counts.items': 40 } });
+    await harness.store.projects.updateOne({ _id: project._id }, { $set: { 'counts.items': 40 } });
     await settle();
-    assert.equal((await harness.store.projects.findOne({ _id: project.id }))!.counts.items, 1);
+    assert.equal(await counter(), 1);
 
     // The other direction is left alone: correcting upwards is how a recount
     // double-counts a write that lands while it is counting.
-    await harness.store.projects.updateOne({ _id: project.id }, { $set: { 'counts.items': 0 } });
+    await harness.store.projects.updateOne({ _id: project._id }, { $set: { 'counts.items': 0 } });
     await settle();
-    assert.equal((await harness.store.projects.findOne({ _id: project.id }))!.counts.items, 0);
+    assert.equal(await counter(), 0);
   });
 
   it('skips the overcount repair when a write lands while it is counting', async () => {
