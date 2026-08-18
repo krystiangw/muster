@@ -19,8 +19,10 @@
  * Nothing here touches a deployment. It starts its own database, fills it,
  * measures it and throws it away.
  */
+import type { Filter } from 'mongodb';
 import { MongoMemoryServer } from 'mongodb-memory-server';
 import { buildApp } from '../src/app.js';
+import type { EventDoc } from '../src/events.js';
 import { loadConfig } from '../src/config.js';
 import { createStore, ensureIndexes, type Store } from '../src/db.js';
 import { newId, newToken, hashToken } from '../src/ids.js';
@@ -29,7 +31,6 @@ import {
   DEFAULT_RULES,
   type AgentDoc,
   type EscalationDoc,
-  type EventDoc,
   type ItemDoc,
   type ProjectDoc,
 } from '../src/types.js';
@@ -53,7 +54,7 @@ const random = () => {
   seed = (seed * 1103515245 + 12345) % 2147483648;
   return seed / 2147483648;
 };
-const pick = <T>(list: T[]): T => list[Math.floor(random() * list.length)]!;
+const pick = <T,>(list: T[]): T => list[Math.floor(random() * list.length)]!;
 
 const mongo = await MongoMemoryServer.create();
 const config = loadConfig({
@@ -105,7 +106,7 @@ await store.keys.insertOne({
   expiresAt: null,
 } as never);
 
-const bulk = async <T>(name: string, total: number, make: (index: number) => T, into: { insertMany: (docs: T[], options: unknown) => Promise<unknown> }) => {
+const bulk = async <T,>(name: string, total: number, make: (index: number) => T, into: { insertMany: (docs: any[], options?: any) => Promise<unknown> }) => {
   const batch = 2_000;
   const at = Date.now();
   for (let start = 0; start < total; start += batch) {
@@ -341,7 +342,9 @@ await timed('  distinct claim.agent (live only)', async () =>
   } as ProjectDoc;
   await timed('the same facets, on a board that hides closed work', async () =>
     boardFacets(store, hidesClosed), 3);
-  const scoped = {
+  // Typed as the driver types a filter: a bare string array reads as a filter
+  // on some other field's type, and the four statuses are what this one is.
+  const scoped: Filter<ItemDoc> = {
     projectId: main._id,
     status: { $nin: ['done', 'dropped'] },
   };

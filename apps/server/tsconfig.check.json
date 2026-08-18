@@ -1,0 +1,6 @@
+{
+  "//": "What `pnpm typecheck` reads. The build config compiles src only, which left the tests and the tools unchecked: a mock with the wrong shape, a helper called with three of its four arguments and a filter typed as somebody else's field all sat there passing, because tsx strips types without looking at them.",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": { "noEmit": true },
+  "include": ["src/**/*.ts", "test/**/*.ts", "tools/**/*.mts"]
+}

@@ -984,3 +984,17 @@ wrong.** Rendering goes through one helper that takes the request now, so the
 answer comes off the same place every time and there is nothing left to forget.
 The test that lists the pages is a check on the helper rather than the fix for
 the pages, which is the difference between the two attempts.
+
+## The half of the repository nobody was checking, 2026-08-18
+
+`pnpm typecheck` compiled `src` and nothing else, and the tests run through tsx,
+which strips types without looking at them. So the tests and the tools were
+unchecked: a stub mailer with a `send` method the `Mailer` interface has never
+had, six calls passing three of `createProject`'s four arguments, a `$nin` typed
+as somebody else's field. All of it ran, most of it even passed, and the mailer
+took twenty minutes to diagnose by hand from a page that said "That code did not
+work".
+
+Twenty four errors when the check was widened, all of them in tests and tools,
+none in `src`. That is the argument for widening it: the code that is only ever
+run by a person watching is the code where a wrong shape survives longest.

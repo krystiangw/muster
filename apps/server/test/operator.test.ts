@@ -114,6 +114,42 @@ describe('the operator view', () => {
     assert.equal(answer.answer, 'Not this week');
   });
 
+  it('links a person straight at the card, open on the board it lives on', async () => {
+    // The link on this page and the sheet on the board are one feature: when
+    // the sheets became addresses, a link built out of a search and a fragment
+    // started landing on a board narrowed to one card, with the card shut.
+    const project = await createProject(harness, 'my work');
+    await claimFor(project, 'me@example.com');
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: {
+        slug: 'ops:bridge-or-wait',
+        title: 'Bridge it, or wait?',
+        status: 'blocked',
+        owner: 'me@example.com',
+        actor: 'ops-loop',
+      },
+    });
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    const session = await signIn(harness, 'me@example.com');
+    const view = await harness.server.inject({
+      method: 'GET',
+      url: '/operator',
+      headers: { cookie: session.cookie },
+    });
+    const href = view.body.match(
+      new RegExp(`/r/${readToken}/board\\?card=[^"]*ops%3Abridge-or-wait[^"]*`),
+    )?.[0];
+    assert.ok(href, view.body.slice(view.body.indexOf('Your work'), 2000));
+
+    const board = await harness.server.inject({ method: 'GET', url: href.split('#')[0]! });
+    assert.match(board.body, /class="peeked open"/, 'and the card is open when they arrive');
+    assert.match(board.body, /Bridge it, or wait\?/);
+  });
+
   it('refuses to answer a question in somebody else’s project', async () => {
     const mine = await createProject(harness, 'mine');
     const theirs = await createProject(harness, 'theirs');

@@ -948,15 +948,16 @@ describe('the open item cap', () => {
     const seen = new Set<string>();
     let cursor: string | null = null;
     for (let page = 0; page < 10; page += 1) {
-      const response = await harness.server.inject({
-        method: 'GET',
-        url: `${project.api}/escalations?limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
-        headers: authed(project),
-      });
-      const body = response.json();
+      const response: Awaited<ReturnType<typeof harness.server.inject>> =
+        await harness.server.inject({
+          method: 'GET',
+          url: `${project.api}/escalations?limit=2${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`,
+          headers: authed(project),
+        });
+      const body = response.json() as { escalations: Array<{ question: string }>; next_cursor?: string };
       for (const doc of body.escalations) seen.add(doc.question);
       if (body.escalations.length < 2 || !body.next_cursor) break;
-      cursor = body.next_cursor;
+      cursor = body.next_cursor ?? null;
     }
     assert.equal(seen.size, 5, 'paging must reach every question, not just the newest page');
   });
@@ -1013,7 +1014,7 @@ describe('the open item cap', () => {
     // fires a throttled sweep of its own, and one of those landing between the
     // two passes below writes a fresh observation over the backdated one, which
     // is a race this test kept losing on a slower machine.
-    const { project } = await createDirect(harness.store, harness.config, { name: 'overcounted' });
+    const { project } = await createDirect(harness.store, harness.config, { name: 'overcounted' }, 'http');
     await upsertItem(harness.store, project, { slug: 'one', title: 'one', actor: 'a' });
 
     // Two passes, because a repair applies only to a discrepancy that sat
@@ -1052,7 +1053,7 @@ describe('the open item cap', () => {
     // sweep runs this same repair, and the patched counter below would be
     // consumed by it. On a slow runner the test then measured the race instead
     // of the guard, and failed in CI while passing on the machine that wrote it.
-    const { project } = await createDirect(harness.store, harness.config, { name: 'overcount' });
+    const { project } = await createDirect(harness.store, harness.config, { name: 'overcount' }, 'http');
     await upsertItem(harness.store, project, { slug: 'one', title: 'one', actor: 'a' });
 
     // Simulate the race directly: the repair reads the counter, and a create
@@ -1110,7 +1111,7 @@ describe('the open item cap', () => {
     // number the repair read while the count it took is already stale, which is
     // how a repair lowers a counter that was right. Seeing the same thing twice
     // is what tells the two apart.
-    const { project } = await createDirect(harness.store, harness.config, { name: 'churn' });
+    const { project } = await createDirect(harness.store, harness.config, { name: 'churn' }, 'http');
     await upsertItem(harness.store, project, { slug: 'one', title: 'one', actor: 'a' });
     await upsertItem(harness.store, project, { slug: 'two', title: 'two', actor: 'a' });
     await harness.store.projects.updateOne({ _id: project._id }, { $set: { 'counts.items': 2 } });
@@ -1146,7 +1147,7 @@ describe('the open item cap', () => {
     // field, and Mongo does not match a missing field against 0. Those are
     // exactly the projects whose counters have been stuck long enough to need
     // this, so the guard has to accept both.
-    const { project } = await createDirect(harness.store, harness.config, { name: 'legacy' });
+    const { project } = await createDirect(harness.store, harness.config, { name: 'legacy' }, 'http');
     await upsertItem(harness.store, project, { slug: 'one', title: 'one', actor: 'a' });
     await harness.store.projects.updateOne(
       { _id: project._id },
@@ -1170,7 +1171,7 @@ describe('the open item cap', () => {
     // numbers alone calls the second one a settled leak and repairs a counter
     // that the first close is about to lower itself. The version every counter
     // write bumps is what tells the two events apart.
-    const { project } = await createDirect(harness.store, harness.config, { name: 'aba' });
+    const { project } = await createDirect(harness.store, harness.config, { name: 'aba' }, 'http');
     await upsertItem(harness.store, project, { slug: 'one', title: 'one', actor: 'a' });
     await upsertItem(harness.store, project, { slug: 'two', title: 'two', actor: 'a' });
     const counters = async () =>
@@ -1214,7 +1215,7 @@ describe('the open item cap', () => {
     // counter, lowers the counter to what it counted, and the decrement lands
     // on top. CI found a counter at -1 that way. The repair still races, and
     // the race now costs a slot rather than the whole cap.
-    const { project } = await createDirect(harness.store, harness.config, { name: 'racing close' });
+    const { project } = await createDirect(harness.store, harness.config, { name: 'racing close' }, 'http');
     await upsertItem(harness.store, project, { slug: 'one', title: 'one', actor: 'a' });
 
     // The repair, having counted before the close and written after it.

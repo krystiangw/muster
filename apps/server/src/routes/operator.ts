@@ -691,11 +691,12 @@ ${mine
   .map((item) => {
     const held = item.claim && new Date(item.claim.expiresAt) > new Date();
     const token = links.get(item.projectId);
-    // Straight to the card, open, on the board it lives on. The search brings
-    // the board down to this one item and the fragment opens its sheet, which
-    // is where the note field and any question waiting on it are.
+    // Straight to the card, open, on the board it lives on: `?card=` is what
+    // opens a sheet now, and the fragment beside it is what scrolls to it. It
+    // used to be a search plus a fragment, which since the sheets became
+    // addresses landed on a board narrowed to one card with the card shut.
     const card = token
-      ? `/r/${escapeHtml(token)}/board?q=${encodeURIComponent(item.slug)}#${escapeHtml(item._id)}`
+      ? `/r/${escapeHtml(token)}/board?card=${encodeURIComponent(item.slug)}#${escapeHtml(item._id)}`
       : null;
     const label = escapeHtml(item.title || item.slug);
     return `<tr><td data-label="Project">${escapeHtml(names.get(item.projectId) ?? item.projectId)}</td>

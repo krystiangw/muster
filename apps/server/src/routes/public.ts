@@ -936,11 +936,11 @@ address. Claiming is free and raises the limits:</p>
   <p style="font-size:17px"><b>${escapeHtml(doc.question)}</b></p>
   ${doc.context ? `<p style="color:var(--ink-2);white-space:pre-wrap">${escapeHtml(doc.context)}</p>` : ''}
   ${
-    // The card this question is about, one click away. The slug was already in
-    // the question's context as text, which meant retyping it into the board's
-    // search box to see what the agent was looking at.
+    // The card this question is about, open, one click away. The slug was
+    // already in the question's context as text, which meant retyping it into
+    // the board's search box to see what the agent was looking at.
     doc.itemSlug
-      ? `<p class="mono" style="font-size:12.5px"><a href="/r/${escapeHtml(readToken)}/board?q=${encodeURIComponent(
+      ? `<p class="mono" style="font-size:12.5px"><a href="/r/${escapeHtml(readToken)}/board?card=${encodeURIComponent(
           doc.itemSlug,
         )}">${escapeHtml(doc.itemSlug)}</a></p>`
       : ''

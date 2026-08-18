@@ -49,7 +49,7 @@ describe('what the service knows about its own use', () => {
     assert.ok(report.funnel.signups >= 1);
     assert.ok(report.funnel.withAnAgent >= 1);
     assert.equal(report.funnel.withWork, 1, 'the first write is the activation, and only the first');
-    assert.equal(report.doors.http >= 1, true);
+    assert.equal((report.doors.http ?? 0) >= 1, true);
   });
 
   it('tells the doors apart', async () => {
@@ -80,7 +80,10 @@ describe('what the service knows about its own use', () => {
     await flushEvents();
 
     const report = await insights(harness.store);
-    assert.ok(report.doors.mcp >= 1, 'an agent arriving over MCP is not the same as one over curl');
+    assert.ok(
+      (report.doors.mcp ?? 0) >= 1,
+      'an agent arriving over MCP is not the same as one over curl',
+    );
 
     await flushEvents();
 
