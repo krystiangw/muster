@@ -1451,16 +1451,21 @@ async function listItems(
  */
 export const SEARCH_MAX_CHARS = 120;
 
+/**
+ * What a query means once, so nothing normalizes it a second way.
+ *
+ * Cut rather than refused, because a search box that answers 400 on a long
+ * paste is worse than one that searches the first hundred characters of it.
+ * Trimmed before it is cut: the board used to slice the raw string, so a
+ * hundred and twenty spaces followed by a word searched for nothing there and
+ * for the word everywhere else.
+ */
+export function normalizeSearch(q: string | undefined): string {
+  return (q ?? '').trim().slice(0, SEARCH_MAX_CHARS);
+}
+
 export function wordsFilter(q: string | undefined): Record<string, unknown> | null {
-  // Cut rather than refused, and cut here so every door cuts at the same place.
-  // A search box that answers 400 on a long paste is worse than one that
-  // searches the first hundred characters of it.
-  const words = (q ?? '')
-    .trim()
-    .slice(0, SEARCH_MAX_CHARS)
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 6);
+  const words = normalizeSearch(q).split(/\s+/).filter(Boolean).slice(0, 6);
   if (words.length === 0) return null;
   return {
     $and: words

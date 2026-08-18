@@ -1,7 +1,7 @@
 import type { Store } from './db.js';
 import { TIMELINE_KEEP } from './hygiene.js';
 import { normalizeSlug } from './ids.js';
-import { ServiceError, claimItem, upsertItem, wordsFilter } from './service.js';
+import { ServiceError, claimItem, normalizeSearch, upsertItem, wordsFilter } from './service.js';
 import {
   DEFAULT_BOARD,
   ITEM_STATUSES,
@@ -236,7 +236,9 @@ export async function loadBoard(
     query.labels = options.label;
   }
   if (options.q) {
-    narrowed.q = options.q;
+    // What was actually searched, so the box and the chip show that rather
+    // than whatever arrived in the query string.
+    narrowed.q = normalizeSearch(options.q);
     // The same question the item list asks. It used to be a second copy of the
     // regex here, and the two agreed by luck rather than by construction.
     const words = wordsFilter(options.q);

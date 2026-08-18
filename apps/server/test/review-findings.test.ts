@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
-import { claimProjectWithEmail, upsertItem } from '../src/service.js';
+import { SEARCH_MAX_CHARS, claimProjectWithEmail, upsertItem } from '../src/service.js';
 import {
   authed,
   createProject,
@@ -330,6 +330,20 @@ describe('one read, two doors', () => {
       'and both doors cut it identically',
     );
 
+    // Leading space, then a word, past the cut: the board used to slice the raw
+    // string and search for nothing, while the API trimmed first and found the
+    // item. One normalization now, so all three agree.
+    const padded = `${' '.repeat(SEARCH_MAX_CHARS)}venue`;
+    const paddedOverHttp = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/items?q=${encodeURIComponent(padded)}`,
+      headers: authed(project),
+    });
+    assert.deepEqual(
+      paddedOverHttp.json().items.map((item: { slug: string }) => item.slug),
+      ['errors:venue-withdraw-stuck'],
+    );
+
     // And the board's own search box asks the same question, because it is the
     // same function now.
     const readToken = project.readUrl.split('/r/')[1]!;
@@ -340,6 +354,13 @@ describe('one read, two doors', () => {
     assert.equal(board.statusCode, 200);
     assert.ok(board.body.includes('errors:venue-withdraw-stuck'));
     assert.ok(!board.body.includes('ops:backups'));
+
+    const paddedBoard = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?q=${encodeURIComponent(padded)}`,
+    });
+    assert.ok(paddedBoard.body.includes('errors:venue-withdraw-stuck'));
+    assert.ok(!paddedBoard.body.includes('ops:backups'), 'the board cuts where the API cuts');
   });
 
   it('reads a lapsed lease as free work, the way the board does', async () => {

@@ -22,9 +22,9 @@ import { DEMO_AGENTS, demoBoard } from './demoBoard.js';
 import { maybeSweep } from '../hygiene.js';
 import { codeAttemptKey, type RateLimiter } from '../rateLimit.js';
 import {
-  SEARCH_MAX_CHARS,
   ServiceError,
   answerEscalation,
+  normalizeSearch,
   appendNote,
   authenticate,
   createProject,
@@ -187,8 +187,9 @@ function keptParams(form: KeptFilter): Record<string, string> {
   if (owner) kept.owner = owner.slice(0, 48);
   if (agent) kept.agent = agent.slice(0, 48);
   if (label) kept.label = label.slice(0, 48);
-  // The same cut the search itself makes, so the box shows what was searched.
-  if (q) kept.q = q.slice(0, SEARCH_MAX_CHARS);
+  // The same reading the search itself takes, so a link built from this form
+  // carries what was searched.
+  if (q) kept.q = normalizeSearch(q);
   return kept;
 }
 
@@ -920,9 +921,9 @@ ${
         ...(query.owner ? { owner: query.owner.slice(0, 48) } : {}),
         ...(query.agent ? { agent: query.agent.slice(0, 48) } : {}),
         ...(query.label ? { label: query.label.slice(0, 48) } : {}),
-        // Long enough for a real phrase, short enough that nobody sends a
-        // novel into a regular expression.
-        ...(query.q ? { q: query.q.slice(0, SEARCH_MAX_CHARS) } : {}),
+        // Raw, because the cut belongs to the search itself: slicing here as
+        // well meant this door trimmed after cutting and the others before it.
+        ...(query.q ? { q: query.q } : {}),
       }),
       boardFacets(store, project),
       // The only work on this board that no agent will ever do. It was
