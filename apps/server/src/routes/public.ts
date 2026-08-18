@@ -674,6 +674,13 @@ address. Claiming is free and raises the limits:</p>
    * same address that is allowed six hundred reads a minute as an agent had no
    * ceiling as a browser, on the one page that carries a search box. Six
    * hundred a minute is ten a second, which no person browsing will meet.
+   *
+   * Charged after the link has been shown to open something, never before. A
+   * project narrowed to its owner refuses the old link, and whoever kept that
+   * link would otherwise spend the owner's budget on requests it is not allowed
+   * to make: the owner, signed in, would meet a wall put up by somebody who was
+   * already locked out. The lookup that decides it is one indexed read, which
+   * is the cheap half of what this protects.
    */
   const limitReads = (request: FastifyRequest, reply: FastifyReply): boolean => {
     const { readToken } = request.params as { readToken: string };
@@ -693,7 +700,6 @@ address. Claiming is free and raises the limits:</p>
   };
 
   app.get('/r/:readToken', { schema: { hide: true } }, async (request, reply) => {
-    if (!limitReads(request, reply)) return reply;
     const { readToken } = request.params as { readToken: string };
     const project = await store.projects.findOne({ readToken });
     if (!project) {
@@ -702,6 +708,7 @@ address. Claiming is free and raises the limits:</p>
     if (!(await readableBy(store, request, project))) {
       return reply.code(404).type('text/html; charset=utf-8').send(noSuchProject());
     }
+    if (!limitReads(request, reply)) return reply;
     // Counted once the page is actually going to be drawn. A stale bookmark and
     // a token probe both end above this line, and neither is somebody reading.
     recordView(store, 'project', request);
@@ -1038,7 +1045,6 @@ ${
   });
 
   app.get('/r/:readToken/board', { schema: { hide: true } }, async (request, reply) => {
-    if (!limitReads(request, reply)) return reply;
     const { readToken } = request.params as { readToken: string };
     const project = await store.projects.findOne({ readToken });
     if (!project) {
@@ -1047,6 +1053,7 @@ ${
     if (!(await readableBy(store, request, project))) {
       return reply.code(404).type('text/html; charset=utf-8').send(noSuchProject());
     }
+    if (!limitReads(request, reply)) return reply;
     // Counted once the page is actually going to be drawn. A stale bookmark and
     // a token probe both end above this line, and neither is somebody reading.
     recordView(store, 'board', request);

@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { BOARD_PRESETS } from '../src/board.js';
 import { after, before, describe, it } from 'node:test';
 import { moveItem } from '../src/board.js';
-import { authed, createProject, startHarness, type Harness, type Project } from './helper.js';
+import { authed, createProject, signIn, startHarness, type Harness, type Project } from './helper.js';
+import { hashToken } from '../src/ids.js';
 import { boardApplyJson } from '../src/serialize.js';
 
 /**
@@ -724,6 +725,57 @@ describe('moving an item into a column', () => {
       // the link: counting them apart would double what the link is allowed.
       const beside = await isolated.server.inject({ method: 'GET', url: `/r/${readToken}` });
       assert.equal(beside.statusCode, 429);
+    } finally {
+      await isolated.stop();
+    }
+  });
+
+  it('does not let a link that no longer opens anything spend the owner budget', async () => {
+    // A project narrowed to its owner refuses the old link. Charged before that
+    // is decided, whoever kept the link could hold the bucket empty for ever,
+    // and the owner, signed in and entitled, would meet a wall put up by
+    // somebody already locked out.
+    const isolated = await startHarness({ LIMIT_READS_PER_MINUTE: '2' });
+    try {
+      const project = await createProject(isolated, 'narrowed later');
+      const readToken = project.readUrl.split('/r/')[1]!;
+      const email = 'owner@example.com';
+      await isolated.server.inject({
+        method: 'POST',
+        url: `${project.api}/claim`,
+        headers: authed(project),
+        payload: { email },
+      });
+      const pending = await isolated.store.claimCodes.findOne({ projectId: project.id, email });
+      await isolated.store.claimCodes.updateOne(
+        { _id: pending!._id },
+        { $set: { codeHash: hashToken('123456') } },
+      );
+      await isolated.server.inject({
+        method: 'POST',
+        url: `${project.api}/claim/verify`,
+        headers: authed(project),
+        payload: { email, code: '123456' },
+      });
+      await isolated.server.inject({
+        method: 'PATCH',
+        url: project.api,
+        headers: authed(project),
+        payload: { visibility: 'owner' },
+      });
+
+      const stale = () => isolated.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+      assert.equal((await stale()).statusCode, 404);
+      assert.equal((await stale()).statusCode, 404);
+      assert.equal((await stale()).statusCode, 404, 'still refused, not rate limited');
+
+      const session = await signIn(isolated, email);
+      const owner = await isolated.server.inject({
+        method: 'GET',
+        url: `/r/${readToken}/board`,
+        headers: { cookie: session.cookie },
+      });
+      assert.equal(owner.statusCode, 200, 'the owner still has their whole budget');
     } finally {
       await isolated.stop();
     }
