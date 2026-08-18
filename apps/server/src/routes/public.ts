@@ -680,12 +680,48 @@ address. Claiming is free and raises the limits:</p>
     recordView(store, 'project', request);
     void maybeSweep(store, project).catch(() => undefined);
 
-    const ITEMS_SHOWN = 200;
+    // Twenty five, not two hundred. This is the page the mail sends somebody to,
+    // and the table was fifty eight percent of what a phone downloaded to read
+    // one question: sixty nine kilobytes, forty of them rows, on a page that
+    // carries a capability and is therefore never compressed. The board next
+    // door has the search and the filters for anybody who came to browse.
+    const ITEMS_SHOWN = 25;
     const [items, open, answered, agents, itemsHeld] = await Promise.all([
+      // Ranked rather than sorted by the status word. Sorting on the string put
+      // "blocked" first and "open" last, alphabetically, so the live work sat
+      // underneath every finished card and a table with a limit on it would
+      // have shown none of it at all.
       store.items
-        .find({ projectId: project._id }, { projection: { timeline: { $slice: -3 } } })
-        .sort({ status: 1, priority: -1, updatedAt: -1 })
-        .limit(ITEMS_SHOWN)
+        .aggregate<ItemDoc>([
+          { $match: { projectId: project._id } },
+          {
+            $addFields: {
+              rank: {
+                $switch: {
+                  branches: [
+                    { case: { $eq: ['$status', 'blocked'] }, then: 0 },
+                    { case: { $eq: ['$status', 'open'] }, then: 1 },
+                    { case: { $eq: ['$status', 'done'] }, then: 2 },
+                  ],
+                  default: 3,
+                },
+              },
+            },
+          },
+          { $sort: { rank: 1, priority: -1, updatedAt: -1 } },
+          { $limit: ITEMS_SHOWN },
+          {
+            $project: {
+              slug: 1,
+              title: 1,
+              status: 1,
+              stale: 1,
+              claim: 1,
+              updatedAt: 1,
+              timeline: { $slice: ['$timeline', -3] },
+            },
+          },
+        ])
         .toArray(),
       // Open and answered asked for separately, and that is the whole point:
       // one query for the newest fifty of both kinds loses an open question as

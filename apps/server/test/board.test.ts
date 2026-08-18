@@ -1467,11 +1467,40 @@ describe('a layout that would trap finished work', () => {
 
     const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}` });
     assert.equal(page.statusCode, 200);
-    assert.match(page.body, /Showing 200 of 205/);
+    assert.match(page.body, /Showing 25 of 205/);
     assert.match(page.body, new RegExp(`/r/${readToken}/board`));
     // And the line above the table says the same number, rather than reporting
     // the size of the page as the size of the board.
     assert.match(page.body, /205 item\(s\)/);
+  });
+
+  it('puts the live work above the finished pile, and stops at what a phone can carry', async () => {
+    // Sorting on the status word put "blocked" first and "open" last, because
+    // that is alphabetical, so the work somebody could actually pick up sat
+    // underneath every finished card. Harmless while the table showed two
+    // hundred rows; with a limit on it, the open items were what fell off.
+    const { upsertItem } = await import('../src/service.js');
+    const project = await createProject(harness, 'a working board');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const doc = (await harness.store.projects.findOne({ _id: project.id }))!;
+    for (let index = 0; index < 30; index += 1) {
+      await upsertItem(harness.store, doc, {
+        slug: `closed:${index}`,
+        title: `finished ${index}`,
+        status: 'done',
+        actor: 'a',
+      });
+    }
+    await upsertItem(harness.store, doc, { slug: 'live:one', title: 'still going', actor: 'a' });
+
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}` });
+    assert.equal(page.statusCode, 200);
+    const rows = page.body.split('<tr>');
+    const live = rows.findIndex((row) => row.includes('live:one'));
+    const finished = rows.findIndex((row) => row.includes('closed:'));
+    assert.ok(live > 0, 'the open item is on the page at all');
+    assert.ok(live < finished, 'and above the finished ones');
+    assert.match(page.body, /Showing 25 of 31/);
   });
 
   it('finds an open question behind a wall of answered ones', async () => {
