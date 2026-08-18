@@ -577,6 +577,15 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
         requests: config.rateLimits.read.requests,
         window_seconds: config.rateLimits.read.windowSeconds,
       },
+      {
+        // Published because an agent is told to use this door and can hit its
+        // limit: skill.md sends unauthenticated reports here. The two limits
+        // left out of this list guard browser forms, which nothing here asks an
+        // agent to fill in.
+        scope: 'unauthenticated feedback, per source address',
+        requests: config.rateLimits.feedback.requests,
+        window_seconds: config.rateLimits.feedback.windowSeconds,
+      },
     ],
     limits: {
       counted: 'open items, not items ever created: closing one frees its slot',
