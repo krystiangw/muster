@@ -533,6 +533,32 @@ describe('starting up against a database that has already run', () => {
     }
   });
 
+  it('tells a cache that every page depends on the cookie, and on the encoding', async () => {
+    // The navigation is drawn from the session now, which makes every page this
+    // service renders a page a shared cache must not hand to the next reader.
+    // Both hooks have something to say about `vary`, and setting it replaces:
+    // whichever ran last used to be the only thing a cache was told.
+    const plain = await harness.server.inject({
+      method: 'GET',
+      url: '/pricing',
+      headers: { accept: 'text/html' },
+    });
+    assert.match(String(plain.headers.vary ?? ''), /cookie/i);
+
+    const zipped = await harness.server.inject({
+      method: 'GET',
+      url: '/pricing',
+      headers: { accept: 'text/html', 'accept-encoding': 'gzip' },
+    });
+    const vary = String(zipped.headers.vary ?? '');
+    assert.match(vary, /cookie/i, 'the session it was drawn for');
+    assert.match(vary, /accept-encoding/i, 'and the bytes it was drawn as');
+
+    // A JSON answer is nobody's page and says nothing about cookies.
+    const json = await harness.server.inject({ method: 'GET', url: '/openapi.json' });
+    assert.ok(!/cookie/i.test(String(json.headers.vary ?? '')), 'not the API');
+  });
+
   it('opens a connection for a report without building anything', async () => {
     // The report the operator runs against production says in its own header
     // that it never writes. It reached for the same constructor the server

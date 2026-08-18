@@ -1,4 +1,4 @@
-import type { FastifyRequest } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { page } from './page.js';
 import formbody from '@fastify/formbody';
 import swagger from '@fastify/swagger';
@@ -7,7 +7,7 @@ import { gzipSync } from 'node:zlib';
 import type { Config } from './config.js';
 import type { Store } from './db.js';
 import { createMailer, type Mailer } from './email.js';
-import { layout, setSiteVerification } from './html.js';
+import { setSiteVerification } from './html.js';
 import { createNotifier, type Notifier } from './notify.js';
 import { RateLimiter } from './rateLimit.js';
 import { registerAgentFiles } from './routes/agentfiles.js';
@@ -55,6 +55,23 @@ const COMPRESS_MIN_BYTES = 1400;
  * asked not to receive. An explicit entry decides on its own; `*` answers only
  * for codings the header never mentions.
  */
+/**
+ * One more thing this response varies by, without dropping what was there.
+ *
+ * `reply.header('vary', ...)` replaces, and two hooks have something to say
+ * about it: the compression hook varies by encoding, and every page rendered
+ * for whoever is signed in varies by cookie. Whichever ran last used to be the
+ * only one a cache was told about.
+ */
+function addVary(reply: FastifyReply, value: string): void {
+  const current = reply.getHeader('vary');
+  const parts =
+    typeof current === 'string' && current !== '' ? current.split(',').map((part) => part.trim()) : [];
+  if (parts.some((part) => part.toLowerCase() === value)) return;
+  parts.push(value);
+  reply.header('vary', parts.join(', '));
+}
+
 export function acceptsGzip(header: string | undefined): boolean {
   if (!header) return false;
   let wildcard: number | null = null;
@@ -177,6 +194,14 @@ export async function buildApp(
     if (request.headers['x-forwarded-proto'] === 'https') {
       reply.header('strict-transport-security', 'max-age=31536000; includeSubDomains');
     }
+    // Every page this service draws now answers the navigation from the session
+    // cookie, so every page this service draws varies by it. Said here rather
+    // than at each route for the reason the navigation itself was moved: a rule
+    // that has to be remembered per page is a rule that will be forgotten by
+    // the next page.
+    if (String(reply.getHeader('content-type') ?? '').startsWith('text/html')) {
+      addVary(reply, 'cookie');
+    }
     // Nobody else's to cache: a capability URL, or a page rendered for whoever
     // is signed in. `/operator` with no trailing slash is the signed in view
     // itself, so matching only `/operator/` would miss the page that actually
@@ -244,7 +269,7 @@ export async function buildApp(
     // Set whether or not this particular request took the compressed branch:
     // a cache that keeps one and serves it to the other is the classic way to
     // hand a client bytes it cannot read.
-    reply.header('vary', 'accept-encoding');
+    addVary(reply, 'accept-encoding');
     if (typeof payload !== 'string') return payload;
     if (!acceptsGzip(request.headers['accept-encoding'] as string | undefined)) return payload;
     if (Buffer.byteLength(payload) < COMPRESS_MIN_BYTES) return payload;
