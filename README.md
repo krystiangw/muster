@@ -207,11 +207,13 @@ The full protocol, with every call and the reasoning behind it, is at
 
 ### TypeScript
 
-The SDK is not on npm yet. It lives in `packages/sdk` and builds with the rest
-of the repo:
+The SDK is not on npm yet. It lives in `packages/sdk`, and a project uses it by
+building it and adding the folder as a dependency:
 
 ```bash
-pnpm install && pnpm --filter @muster/sdk build
+git clone https://github.com/krystiangw/muster
+cd muster && pnpm install && pnpm --filter @muster/sdk build
+cd ../your-project && pnpm add ../muster/packages/sdk
 ```
 
 ```ts
