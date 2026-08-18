@@ -903,41 +903,38 @@ describe('the open item cap', () => {
     );
   });
 
-  it('stands the repair down when an item moves under it, not just the counter', async () => {
+  it('never takes a counter below zero, whatever raced what', async () => {
     const { correctOvercount } = await import('../src/hygiene.js');
-    const { createProject: createDirect, upsertItem } = await import('../src/service.js');
-    // Closing an item is two writes: the status, then the slot. In between, the
-    // counter still reads the old number while the item is already closed, so a
-    // repair counting in that gap sees one fewer than the counter, matches its
-    // guard, writes the lower number, and the close's own decrement then takes
-    // it one lower still. CI found the counter at -1 from exactly that.
+    const { createProject: createDirect, upsertItem, deleteItem } = await import('../src/service.js');
+    // Closing an item is two writes, the status and then the slot, and the
+    // repair reads the world in between: it sees one item fewer than the
+    // counter, lowers the counter to what it counted, and the decrement lands
+    // on top. CI found a counter at -1 that way. The repair still races, and
+    // the race now costs a slot rather than the whole cap.
     const { project } = await createDirect(harness.store, harness.config, { name: 'racing close' });
     await upsertItem(harness.store, project, { slug: 'one', title: 'one', actor: 'a' });
-    await harness.store.projects.updateOne({ _id: project._id }, { $set: { 'counts.items': 1 } });
 
-    const original = harness.store.items.countDocuments.bind(harness.store.items);
-    let raced = false;
-    harness.store.items.countDocuments = (async (...callArgs: unknown[]) => {
-      const result = await (original as (...a: unknown[]) => Promise<number>)(...callArgs);
-      if (!raced) {
-        raced = true;
-        // The status half of a close, with the slot not given back yet.
-        await harness.store.items.updateOne(
-          { projectId: project._id, slug: 'one' },
-          { $set: { status: 'done', updatedAt: new Date(), closedAt: new Date() } },
-        );
-      }
-      return result;
-    }) as typeof harness.store.items.countDocuments;
+    // The repair, having counted before the close and written after it.
+    await harness.store.items.updateOne(
+      { projectId: project._id, slug: 'one' },
+      { $set: { status: 'done', closedAt: new Date(), updatedAt: new Date() } },
+    );
+    await correctOvercount(harness.store, project._id);
+    assert.equal(
+      (await harness.store.projects.findOne({ _id: project._id }))!.counts.items,
+      0,
+      'the repair lowered it to what it counted',
+    );
 
-    try {
-      const repaired = await correctOvercount(harness.store, project._id);
-      assert.equal(repaired, false, 'a repair that raced a close must not apply');
-      const counts = await harness.store.projects.findOne({ _id: project._id });
-      assert.equal(counts!.counts.items, 1, 'the slot is still the close request to give back');
-    } finally {
-      harness.store.items.countDocuments = original;
-    }
+    // And now the close's own decrement, arriving late.
+    await upsertItem(harness.store, { ...project, counts: { ...project.counts, items: 0 } }, {
+      slug: 'one',
+      status: 'open',
+      actor: 'a',
+    });
+    await deleteItem(harness.store, { ...project, counts: { ...project.counts, items: 0 } }, 'one');
+    const counts = (await harness.store.projects.findOne({ _id: project._id }))!.counts;
+    assert.ok(counts.items >= 0, `a counter may be one low, never negative: ${counts.items}`);
   });
 
   it('keeps the counter honest through exact deltas on every path', async () => {

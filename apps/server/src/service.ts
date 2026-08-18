@@ -1,6 +1,6 @@
 import type { Config } from './config.js';
 import type { Store } from './db.js';
-import { maybeSweep, resolveAbsent } from './hygiene.js';
+import { maybeSweep, resolveAbsent, spend } from './hygiene.js';
 import { hashToken, isValidHandle, newId, newOtpCode, newToken, normalizeHandle, normalizeSlug } from './ids.js';
 import {
   DEFAULT_RULES,
@@ -843,7 +843,10 @@ export async function upsertItem(
    */
   const addSlots = async (delta: number): Promise<void> => {
     if (delta === 0) return;
-    await store.projects.updateOne({ _id: project._id }, { $inc: { 'counts.items': delta } });
+    await store.projects.updateOne(
+      { _id: project._id },
+      delta > 0 ? { $inc: { 'counts.items': delta } } : spend('counts.items', -delta),
+    );
   };
   const atCapacity = (): boolean => project.counts.items >= project.limits.items;
 
@@ -1280,7 +1283,7 @@ export async function deleteItem(
   });
   if (!deleted) throw notFound(slug);
   if (!TERMINAL_STATUSES.includes(deleted.status)) {
-    await store.projects.updateOne({ _id: project._id }, { $inc: { 'counts.items': -1 } });
+    await store.projects.updateOne({ _id: project._id }, spend('counts.items'));
   }
 }
 
@@ -1978,7 +1981,7 @@ export async function answerEscalation(
   if (wasOpen !== isOpen) {
     await store.projects.updateOne(
       { _id: projectId },
-      { $inc: { 'counts.escalations': isOpen ? 1 : -1 } },
+      isOpen ? { $inc: { 'counts.escalations': 1 } } : spend('counts.escalations'),
     );
   }
   return doc as EscalationDoc;

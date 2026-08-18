@@ -32,6 +32,32 @@ export interface HygieneOutcome {
   unmarked?: number;
 }
 
+/**
+ * Giving a slot back, clamped at zero.
+ *
+ * Returning a slot is always the second half of something: an item's status
+ * changes and then its slot comes back, an item is deleted and then its slot
+ * comes back. The overcount repair reads the world between those two writes,
+ * sees one item fewer than the counter, and lowers the counter to what it
+ * counted; the decrement then lands on top and takes it below zero. CI found a
+ * counter at -1 that way, and a negative counter is not a small error: it hands
+ * out the whole cap and then some.
+ *
+ * Clamping does not pretend the race did not happen. It bounds it in the
+ * direction this service already prefers: a counter one too low is a project
+ * with one extra slot, which the next create raises again, where a counter one
+ * too high is work refused for good.
+ */
+export function spend(field: 'counts.items' | 'counts.escalations', count = 1): Record<string, unknown>[] {
+  return [
+    {
+      $set: {
+        [field]: { $max: [0, { $subtract: [`$${field}`, count] }] },
+      },
+    },
+  ];
+}
+
 /** Builds the pipeline-update fragment that appends one timeline entry. */
 function appendTimeline(message: unknown, now: Date): Record<string, unknown> {
   return {
@@ -63,7 +89,7 @@ function hoursAgo(now: Date, hours: number): Date {
  */
 async function releaseSlots(store: Store, projectId: string, count: number): Promise<void> {
   if (count <= 0) return;
-  await store.projects.updateOne({ _id: projectId }, { $inc: { 'counts.items': -count } });
+  await store.projects.updateOne({ _id: projectId }, spend('counts.items', count));
 }
 
 /**
@@ -316,30 +342,10 @@ export async function correctOvercount(store: Store, projectId: string): Promise
   const before = await store.projects.findOne({ _id: projectId }, { projection: { counts: 1 } });
   if (!before) return false;
 
-  // Stamped before the count, checked after it. Closing an item is two writes,
-  // the status and then the slot, and the counter still reads the old number in
-  // between: a repair that counted in that gap saw one item fewer than the
-  // counter, matched its guard, wrote the lower number, and then the close's
-  // own decrement took it one lower still. CI found the counter at -1 from
-  // exactly that. The counter guard cannot see it, because at that instant the
-  // counter genuinely is what the repair read; what moved was an item.
-  const mark = new Date();
   const [openItems, openEscalations] = await Promise.all([
     store.items.countDocuments({ projectId, status: { $nin: [...TERMINAL_STATUSES] } }),
     store.escalations.countDocuments({ projectId, status: 'open' }),
   ]);
-  // Only worth asking when something is actually going to be written: on a
-  // project whose counters are already right, which is nearly all of them
-  // nearly all of the time, this is two queries for nothing.
-  const wouldRepair =
-    before.counts.items > openItems || before.counts.escalations > openEscalations;
-  if (!wouldRepair) return false;
-
-  const [itemsMoved, escalationsMoved] = await Promise.all([
-    store.items.countDocuments({ projectId, updatedAt: { $gte: mark } }),
-    store.escalations.countDocuments({ projectId, updatedAt: { $gte: mark } }),
-  ]);
-  if (itemsMoved > 0 || escalationsMoved > 0) return false;
 
   const repairs = await Promise.all([
     before.counts.items > openItems
