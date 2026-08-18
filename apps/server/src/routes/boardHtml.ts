@@ -477,6 +477,13 @@ export interface BoardRenderOptions {
   /** Where an answer posts, when questions are offered. */
   answerAction?: string;
   /**
+   * This project's id, for the one sentence that has to name it: the person
+   * looking at an empty board has to tell an agent which board to write to,
+   * and the protocol document cannot know. Absent on the demonstration, which
+   * belongs to nobody.
+   */
+  projectId?: string;
+  /**
    * The slugs whose blockers are not finished yet, so the card can say which
    * of them is actually stuck.
    *
@@ -578,11 +585,26 @@ ${
           // which reads as broken rather than as new. This is often the first
           // page a person sees, handed to them before the agent has written
           // anything at all.
-          shown.length === 0
+          //
+          // Empty means the project is empty, not that this layout drew
+          // nothing: a board whose columns match none of its items has work on
+          // it, says so in the warning below, and must not also be told that
+          // nobody has written here.
+          view.scanned === 0
             ? `<p class="notice">Nothing on this board yet. It fills in when an agent writes its
-first item, and the columns below are already waiting for the work. If the agent that should be
-writing here has not been told where to write, everything it needs is one page:
-<a href="/skill.md">skill.md</a>.</p>`
+first item, and the columns below are already waiting for the work.${
+                // What the sentence used to leave out, which made it advice
+                // that produces a second board: the protocol starts by
+                // creating a project, so an agent sent there without this
+                // one's name signs up again and writes somewhere else.
+                options.projectId
+                  ? ` To point an agent at <em>this</em> board, give it
+<a href="/skill.md">skill.md</a>, the project <span class="mono">${escapeHtml(options.projectId)}</span>
+and the token you were shown when it was created. The token is not on this page and never will be:
+this link is for reading and answering, not for writing as an agent.`
+                  : ` If the agent that should be writing here has not been told where to write,
+everything it needs is one page: <a href="/skill.md">skill.md</a>.`
+              }</p>`
             : ''
         }`
   }

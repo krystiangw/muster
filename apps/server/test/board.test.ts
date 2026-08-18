@@ -2635,6 +2635,38 @@ describe('a layout that would trap finished work', () => {
   });
 });
 
+describe('a board with nothing on it', () => {
+  it('names this project, because the protocol starts by making a new one', async () => {
+    // Advice that produces a second board is worse than no advice: skill.md
+    // opens with "get a project", so an agent sent there without this board's
+    // name signs up again and writes somewhere nobody is looking.
+    const project = await createProject(harness);
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const board = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(board.body, /Nothing on this board yet/);
+    assert.match(board.body, new RegExp(project.id));
+    assert.match(board.body, /token is not on this page/);
+  });
+
+  it('says nothing of the sort when the layout is what is empty', async () => {
+    // A board whose columns match none of its items has work on it and says so
+    // in its own warning. Telling that reader nobody has written here is the
+    // one sentence that would send them looking for an agent that is running.
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'real-work', title: 't', body: 'b', actor: 'a' });
+    await put(project, '/board', {
+      columns: [{ key: 'never', title: 'Never matches', match: { labels: ['nothing-has-this'] } }],
+    });
+    const board = await harness.server.inject({ method: 'GET', url: `/r/${readToken(project)}/board` });
+    assert.doesNotMatch(board.body, /Nothing on this board yet/);
+    assert.match(board.body, /match no column/);
+  });
+});
+
+function readToken(project: Project): string {
+  return project.readUrl.split('/r/')[1]!;
+}
+
 describe('a card that waits on another', () => {
   it('is not offered, refuses a claim, and names what is unfinished', async () => {
     const project = await createProject(harness);

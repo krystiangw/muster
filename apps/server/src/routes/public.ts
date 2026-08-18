@@ -1504,6 +1504,7 @@ ${renderBoard(view, {
   // One query, and the same one the offer and the claim use, so the chip on
   // the card cannot disagree with what an agent asking for work is told.
   waiting: await waitingBlockers(store, project._id),
+  projectId: project._id,
   ...(notice ? { notice } : {}),
   ...(searchStopped ? { searchStopped } : {}),
 })}
