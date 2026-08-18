@@ -206,6 +206,27 @@ const run = async () => {
     JSON.stringify(nearMiss.body?.warnings),
   );
 
+  // The newest write path, and the one a fleet leans on: choose and claim in
+  // one call, then let go, so the board this walkthrough keeps stays as it was.
+  const taken = await json(`${api}/next`, {
+    method: 'POST',
+    headers: authed,
+    body: JSON.stringify({ agent: AGENT, ttl_minutes: 5 }),
+  });
+  check(
+    'the next item can be taken in one call',
+    taken.body?.claimed === true && taken.body?.item?.claim?.agent === AGENT,
+    JSON.stringify(taken.body).slice(0, 200),
+  );
+  if (taken.body?.item?.slug) {
+    const released = await json(`${api}/items/${encodeURIComponent(taken.body.item.slug)}/release`, {
+      method: 'POST',
+      headers: authed,
+      body: JSON.stringify({ agent: AGENT, note: 'the walkthrough was only looking' }),
+    });
+    check('and let go again', released.status === 200, released.status);
+  }
+
   const open = await json(`${api}/escalations?status=open`, { headers: authed });
   let escalation = (open.body?.escalations ?? []).find((one) => one.question === QUESTION);
   if (!escalation) {
