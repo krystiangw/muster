@@ -51,11 +51,54 @@ export interface BoardOffer {
   expiresInDays: number;
 }
 
+/** What a board that has gone quiet says to the person who owns it. */
+export interface QuietBoard {
+  projectName: string;
+  /** Open items on it right now. */
+  open: number;
+  /** How many of those hygiene has marked stale. */
+  stale: number;
+  /** Hours since anybody, agent or human, last wrote to it. */
+  quietFor: number;
+  readUrl: string;
+}
+
 export interface Mailer {
   sendClaimCode(to: string, code: string, projectName: string): Promise<Delivery>;
   sendOperatorCode(to: string, code: string): Promise<Delivery>;
   sendEscalation(to: string, notice: EscalationNotice): Promise<Delivery>;
   sendBoardOffer(to: string, offer: BoardOffer): Promise<Delivery>;
+  sendQuietBoard(to: string, notice: QuietBoard): Promise<Delivery>;
+}
+
+/**
+ * The message a stopped fleet cannot send for itself.
+ *
+ * An agent in a crash loop never files the escalation, because it never gets
+ * that far: the board simply stops moving, and the only record is a page
+ * nobody has open. This is the one notice that goes out because nothing
+ * happened, so it is written to be read once and acted on or ignored, and it
+ * says plainly that no reply is needed.
+ */
+export function quietBoardMail(notice: QuietBoard): { subject: string; lines: string[] } {
+  const days = Math.floor(notice.quietFor / 24);
+  const since = days >= 1 ? `${days} day${days === 1 ? '' : 's'}` : `${notice.quietFor} hours`;
+  return {
+    subject: `Nothing has moved on ${notice.projectName} for ${since}`,
+    lines: [
+      `Nobody has written to "${notice.projectName}" in ${since}. It has ${notice.open} open`,
+      `item${notice.open === 1 ? '' : 's'}, ${notice.stale} of which hygiene has marked stale.`,
+      '',
+      'This is what a stopped fleet looks like from here: an agent that crashes does not',
+      'file a question, so the board goes quiet rather than asking for anything. It may',
+      'also just be work you parked, which is why this is one message and not a reminder.',
+      '',
+      notice.readUrl,
+      '',
+      'Nothing needs answering. You get this once per quiet spell, and again only if the',
+      'board starts moving and stops again.',
+    ],
+  };
 }
 
 /**
@@ -245,6 +288,10 @@ export function createMailer(config: Config, log: (msg: string) => void): Mailer
     },
     async sendEscalation(to, notice) {
       const { subject, lines } = escalationMail(notice);
+      return send(to, subject, lines);
+    },
+    async sendQuietBoard(to, notice) {
+      const { subject, lines } = quietBoardMail(notice);
       return send(to, subject, lines);
     },
     async sendBoardOffer(to, offer) {

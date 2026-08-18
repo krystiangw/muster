@@ -41,6 +41,16 @@ const MISSED_AFTER_MS = 10 * 60 * 1000;
 /** How many projects one periodic pass will look after. */
 const REMINDER_BATCH = 20;
 
+/**
+ * How long a claimed board has to be silent before its operator is told.
+ *
+ * Silent means nobody wrote: not an agent, not a person, not a move on the
+ * page. Long enough that a fleet running nightly is not reported as dead, and
+ * paired with hygiene's own judgement below, so this never fires on a board
+ * that is simply finished.
+ */
+const QUIET_AFTER_MS = 24 * 60 * 60 * 1000;
+
 export interface Notifier {
   escalationRaised(project: ProjectDoc, escalation: EscalationDoc): Promise<void>;
   /**
@@ -71,6 +81,22 @@ export interface Notifier {
     project: ProjectDoc,
     offer: { email: string; offeredBy?: string | undefined; note?: string | undefined },
   ): Promise<void>;
+  /**
+   * Boards that stopped moving, told once each.
+   *
+   * The case the rest of this file cannot cover: an agent in a crash loop
+   * never files a question, because filing one is work and it is not getting
+   * that far. Nothing asks for anything, so nothing is sent, and the board
+   * goes quiet exactly when somebody most needs to know. This is the only
+   * notice in the service that exists because nothing happened.
+   *
+   * Deliberately not a rule on the cards. The audit that produced this cut the
+   * alternative, which was counting attempts and reopening items: "failed" is
+   * not observable from here, an expired lease is evidence a process stopped
+   * rather than that work failed, and reopening moves a status the agents own.
+   * This writes to no card at all.
+   */
+  sweepQuiet(): Promise<number>;
 }
 
 export function createNotifier(deps: {
@@ -251,6 +277,100 @@ export function createNotifier(deps: {
         const still = await store.escalations.findOne({ _id: entry.oldest._id, status: 'open' });
         if (!still) continue;
         if (await notifyOnce(entry.project, still as EscalationDoc)) sent += 1;
+      }
+      return sent;
+    },
+    async sweepQuiet() {
+      const now = new Date();
+      const quietSince = new Date(now.getTime() - QUIET_AFTER_MS);
+      const hourAgo = new Date(now.getTime() - NOTIFY_EVERY_MS);
+
+      // Candidates first, cheaply: a board with an owner and something on it.
+      // Oldest notice first, so a busy deployment cycles rather than telling
+      // the same twenty projects for ever.
+      const candidates = await store.projects
+        .find({ claimedBy: { $ne: null }, 'counts.items': { $gt: 0 } })
+        .sort({ quietNotifiedAt: 1 })
+        .limit(REMINDER_BATCH)
+        .toArray();
+
+      let sent = 0;
+      for (const project of candidates) {
+        // A question notice in the last hour means this operator has already
+        // heard from us about this board, and a second message in the same
+        // hour is how a useful notice becomes one people filter. Checked and
+        // deliberately not stamped: a real question filed a minute from now
+        // must not be delayed by this pass having looked.
+        const told = project.escalationNotifiedAt;
+        if (told && told > hourAgo) continue;
+
+        // Anybody at all, agent or person: `touchedAt` is the write that says
+        // somebody is on this, and hygiene deliberately does not move it, so a
+        // board being tidied by the engine still reads as quiet.
+        const moved = await store.items.countDocuments(
+          { projectId: project._id, touchedAt: { $gte: quietSince } },
+          { limit: 1 },
+        );
+        if (moved > 0) continue;
+
+        const [open, stale, newest] = await Promise.all([
+          store.items.countDocuments({ projectId: project._id, status: 'open' }, { limit: 500 }),
+          store.items.countDocuments(
+            { projectId: project._id, status: 'open', stale: true },
+            { limit: 500 },
+          ),
+          store.items
+            .find({ projectId: project._id }, { projection: { touchedAt: 1 } })
+            .sort({ touchedAt: -1 })
+            .limit(1)
+            .toArray(),
+        ]);
+        // Two conditions, not one. Silence alone is a board somebody parked;
+        // silence with work hygiene has already marked as rotting is the shape
+        // a stopped fleet leaves behind, and the threshold for stale is the
+        // project's own setting rather than a number invented here.
+        if (open === 0 || stale === 0) continue;
+
+        const lastTouched = newest[0]?.touchedAt ?? project.createdAt;
+        // One per quiet spell. Told already, and nothing has happened since
+        // that message: saying it again adds nothing that was not true then.
+        if (project.quietNotifiedAt && lastTouched <= project.quietNotifiedAt) continue;
+
+        // The stamp is taken before the send and guarded on what we read, so
+        // two dynos running this pass in the same minute produce one message.
+        const claimed = await store.projects.findOneAndUpdate(
+          { _id: project._id, quietNotifiedAt: project.quietNotifiedAt ?? null },
+          { $set: { quietNotifiedAt: now } },
+        );
+        if (!claimed) continue;
+
+        try {
+          const isPrivate = (project.visibility ?? 'link') === 'owner';
+          const delivery = await mailer.sendQuietBoard(project.claimedBy!, {
+            projectName: project.name,
+            open,
+            stale,
+            quietFor: Math.max(
+              1,
+              Math.round((now.getTime() - lastTouched.getTime()) / (60 * 60 * 1000)),
+            ),
+            readUrl: isPrivate
+              ? `${config.baseUrl}/operator`
+              : `${config.baseUrl}/r/${project.readToken}`,
+          });
+          if (delivery === 'sent') sent += 1;
+          else log(`quiet notice for ${project._id} was ${delivery}, not sent`);
+        } catch (error) {
+          // The stamp goes back, guarded on our own claim, so a provider
+          // having a bad minute does not cost this board its one message.
+          await store.projects
+            .updateOne(
+              { _id: project._id, quietNotifiedAt: now },
+              { $set: { quietNotifiedAt: project.quietNotifiedAt ?? null } },
+            )
+            .catch(() => undefined);
+          log(`quiet notice for ${project._id} failed: ${(error as Error).message}`);
+        }
       }
       return sent;
     },

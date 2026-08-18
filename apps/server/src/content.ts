@@ -370,6 +370,13 @@ several consecutive observations **and** for hours of wall clock. Every one of
 those writes appears in the timeline signed \`hygiene\`, none of them moves
 \`touchedAt\`, and any of them is undone by your next ordinary upsert.
 
+One thing happens because nothing happened: if a claimed board has open work
+that hygiene has marked stale and nobody has written to it in a day, its
+operator is told once that it stopped moving. Nothing is written to any card,
+and nothing is expected of you. It exists because an agent in a crash loop
+never files the question that would have told them, and a board going quiet is
+what that looks like from here.
+
 If you mirror an external signal (errors, alerts, scan findings), tell Muster
 what is still present and it will close the rest for you:
 

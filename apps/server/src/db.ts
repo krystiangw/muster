@@ -291,6 +291,9 @@ export async function runMigrations(store: Store): Promise<void> {
  * database that has run the previous version, which is every deploy. Dropping
  * the old one and asking again is the only thing the caller ever wants here.
  */
+/** The two ways MongoDB says "that name is taken by a different index". */
+const INDEX_CONFLICT = new Set([85, 86]);
+
 async function ensure(
   collection: { createIndexes: (specs: IndexDescription[]) => Promise<unknown>; dropIndex: (name: string) => Promise<unknown> },
   specs: IndexDescription[],
@@ -299,8 +302,11 @@ async function ensure(
     await collection.createIndexes(specs);
     return;
   } catch (error) {
-    // 86 is IndexKeySpecsConflict: same name, different definition.
-    if ((error as { code?: number }).code !== 86) throw error;
+    // 86 is IndexKeySpecsConflict: same name, different key. 85 is
+    // IndexOptionsConflict: same name and key, different options, which is
+    // what a sparse index becoming a partial one raises. Both mean the same
+    // thing to the only caller this has: the definition moved, replace it.
+    if (!INDEX_CONFLICT.has((error as { code?: number }).code ?? 0)) throw error;
   }
 
   // One at a time, so a redefinition replaces the index it redefines and
@@ -312,7 +318,7 @@ async function ensure(
     try {
       await collection.createIndexes([spec]);
     } catch (error) {
-      if ((error as { code?: number }).code !== 86 || !spec.name) throw error;
+      if (!INDEX_CONFLICT.has((error as { code?: number }).code ?? 0) || !spec.name) throw error;
       await collection.dropIndex(spec.name).catch(() => undefined);
       await collection.createIndexes([spec]);
     }

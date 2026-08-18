@@ -1673,12 +1673,12 @@ export async function handBack(
   projectId: string,
   slug: string,
   agent: string,
-  expiresAt: Date,
+  nonce: string,
   why: string,
 ): Promise<void> {
   const now = new Date();
   await store.items.updateOne(
-    { projectId, slug, 'claim.agent': agent, 'claim.expiresAt': expiresAt },
+    { projectId, slug, 'claim.agent': agent, 'claim.nonce': nonce },
     {
       $set: { claim: null, updatedAt: now },
       $push: {
@@ -1699,10 +1699,10 @@ export async function handBack(
   );
 }
 
-function takingIt(agent: string, now: Date, ttl: number, expiresAt: Date) {
+function takingIt(agent: string, now: Date, ttl: number, expiresAt: Date, nonce: string) {
   return {
     $set: {
-      claim: { agent, claimedAt: now, heartbeatAt: now, expiresAt },
+      claim: { agent, claimedAt: now, heartbeatAt: now, expiresAt, nonce },
       updatedAt: now,
       touchedAt: now,
       stale: false,
@@ -1826,6 +1826,10 @@ export async function claimItem(
   const now = new Date();
   const ttl = Math.min(Math.max(ttlMinutes ?? project.rules.claimTtlMinutes, 1), 1440);
   const expiresAt = new Date(now.getTime() + ttl * 60_000);
+  // Which lease this is, so the rollback below can only ever take back the one
+  // this call wrote. Two requests renewing in the same millisecond share an
+  // expiry; they do not share this.
+  const nonce = newId('l', 10);
   const normalized = normalizeSlug(slug);
 
   // Read before the lease is taken, because the refusal has to name what it is
@@ -1866,7 +1870,7 @@ export async function claimItem(
           : { blockedBy: snapshot },
       ],
     },
-    takingIt(agent, now, ttl, expiresAt),
+    takingIt(agent, now, ttl, expiresAt, nonce),
     { returnDocument: 'after' },
   );
 
@@ -1885,7 +1889,7 @@ export async function claimItem(
         project._id,
         normalized,
         agent,
-        expiresAt,
+        nonce,
         blockedMessage(normalized, stillUnmet),
       );
       throw new ServiceError(409, 'blocked_by', blockedMessage(normalized, stillUnmet), {
@@ -2473,6 +2477,7 @@ export async function nextItemHeld(
   const now = new Date();
   const ttl = Math.min(Math.max(ttlMinutes ?? project.rules.claimTtlMinutes, 1), 1440);
   const expiresAt = new Date(now.getTime() + ttl * 60_000);
+  const nonce = newId('l', 10);
 
   // Held already, and handed back rather than claimed again: a session that
   // restarts must be given the work it took, or it abandons it for an hour.
@@ -2500,7 +2505,7 @@ export async function nextItemHeld(
   const take = async (filter: Record<string, unknown>) => {
     const taken = await store.items.findOneAndUpdate(
       filter,
-      takingIt(handle, now, ttl, expiresAt),
+      takingIt(handle, now, ttl, expiresAt, nonce),
       { sort: { priority: -1, touchedAt: 1 }, returnDocument: 'after' },
     );
     if (!taken) return null;
@@ -2519,7 +2524,7 @@ export async function nextItemHeld(
       project._id,
       taken.slug,
       handle,
-      expiresAt,
+      nonce,
       blockedMessage(taken.slug, unmet),
     );
     return null;

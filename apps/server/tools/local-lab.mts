@@ -57,6 +57,8 @@ const { server, limiter } = await buildApp(config, store, {
     sendEscalation: (to, notice) => delivered(`question for ${to}: ${notice.question}`),
     sendBoardOffer: (to, offer) =>
       delivered(`board "${offer.projectName}" offered to ${to} at ${offer.readUrl}`),
+    sendQuietBoard: (to, notice) =>
+      delivered(`nothing moving on "${notice.projectName}" for ${notice.quietFor}h, told ${to}`),
   },
 });
 await server.listen({ port: PORT, host: '127.0.0.1' });

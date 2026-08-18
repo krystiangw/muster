@@ -83,6 +83,19 @@ export interface Claim {
   claimedAt: Date;
   heartbeatAt: Date;
   expiresAt: Date;
+  /**
+   * Which lease this is, as opposed to when it ends.
+   *
+   * The one thing that can name a lease without ambiguity. A rollback that
+   * matches on the holder can delete a newer lease the same agent took a
+   * moment later, and one that matches on the expiry can still hit it: two
+   * requests that renew in the same millisecond compute the same date. Only
+   * the writer that put this value there may take it away.
+   *
+   * Absent on leases taken before it existed, which the rollback treats as a
+   * lease it cannot claim to have written.
+   */
+  nonce?: string;
 }
 
 export interface Absence {
@@ -433,6 +446,17 @@ export interface ProjectDoc {
    * reached anybody, which makes it the wrong thing to publish as health.
    */
   escalationNoticeSentAt?: Date | null;
+  /**
+   * When this project last told its operator that nothing was moving.
+   *
+   * One per quiet spell rather than one per period: the pass sends only when
+   * the board has been written to since this stamp, so a board that is quiet
+   * for a month produces one message and a board that wakes up and stops again
+   * produces a second. A notice that repeats on a timer is a notice people
+   * filter, and this one is about the absence of events, which does not become
+   * more true by being said twice.
+   */
+  quietNotifiedAt?: Date | null;
   /** Unclaimed demo projects are swept by a TTL index. Null once claimed. */
   expiresAt: Date | null;
   createdAt: Date;

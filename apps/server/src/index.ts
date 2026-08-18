@@ -59,6 +59,18 @@ async function main(): Promise<void> {
       } catch (error) {
         server.log.error({ err: error }, 'missed question sweep failed');
       }
+
+      try {
+        // Its own guard for the same reason as the two above: this one is
+        // about boards where nothing is happening, and it must not be able to
+        // take the notices about boards where something is.
+        const quiet = await notifier.sweepQuiet();
+        if (quiet > 0) {
+          server.log.info({ projects: quiet }, 'told somebody their board stopped moving');
+        }
+      } catch (error) {
+        server.log.error({ err: error }, 'quiet board sweep failed');
+      }
     })();
   }, SWEEP_INTERVAL_MS);
   sweeper.unref();

@@ -689,6 +689,7 @@ describe('the operator view', () => {
           sendOperatorCode: () => deliver(),
           sendClaimCode: async () => 'sent',
           sendBoardOffer: async () => 'sent',
+          sendQuietBoard: async () => 'sent',
             sendEscalation: async () => 'sent',
         },
       },

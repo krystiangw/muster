@@ -5,6 +5,7 @@ import {
   escalationMail,
   type BoardOffer,
   type EscalationNotice,
+  type QuietBoard,
 } from '../src/email.js';
 import { runMigrations } from '../src/db.js';
 import { authed, createProject, startHarness, type Harness, type Project } from './helper.js';
@@ -48,6 +49,7 @@ async function withMailer(
         sendClaimCode: async () => 'sent',
         sendOperatorCode: async () => 'sent',
         sendBoardOffer: async () => 'sent',
+        sendQuietBoard: async () => 'sent',
         sendEscalation: async (to, notice) => {
           if (outcome === 'throws') throw new Error('the provider said no');
           sent.push({ to, notice });
@@ -464,6 +466,7 @@ describe('the board an agent set up for somebody', () => {
           sendClaimCode: async () => 'sent',
           sendOperatorCode: async () => 'sent',
           sendEscalation: async () => 'sent',
+          sendQuietBoard: async () => 'sent',
           sendBoardOffer: async (to, offer) => {
             offers.push({ to, offer });
             return 'sent';
@@ -518,5 +521,128 @@ describe('the board an agent set up for somebody', () => {
       const project = (await harness.store.projects.findOne({ name: 'quiet' }))!;
       assert.equal(await harness.store.shares.countDocuments({ projectId: project._id }), 0);
     });
+  });
+});
+
+describe('a board that stopped moving', () => {
+  /** Everything about this pass is a clock, so the clock is the fixture. */
+  async function quietHarness(): Promise<{ harness: Harness; sent: QuietBoard[] }> {
+    const sent: QuietBoard[] = [];
+    const harness = await startHarness(
+      {},
+      {
+        mailer: {
+          sendClaimCode: async () => 'sent',
+          sendOperatorCode: async () => 'sent',
+          sendEscalation: async () => 'sent',
+          sendBoardOffer: async () => 'sent',
+          sendQuietBoard: async (_to, notice) => {
+            sent.push(notice);
+            return 'sent';
+          },
+        },
+      },
+    );
+    return { harness, sent };
+  }
+
+  async function goQuiet(harness: Harness, project: Project, hours: number): Promise<void> {
+    const when = new Date(Date.now() - hours * 3_600_000);
+    await harness.store.items.updateMany(
+      { projectId: project.id },
+      { $set: { touchedAt: when, updatedAt: when, stale: true, staleSince: when } },
+    );
+  }
+
+  it('tells the operator once, and only when hygiene agrees the work is rotting', async () => {
+    const { harness, sent } = await quietHarness();
+    try {
+      const project = await createProject(harness);
+      await harness.server.inject({
+        method: 'POST',
+        url: `${project.api}/items`,
+        headers: authed(project),
+        payload: { slug: 'work', title: 'something', body: 'that nobody finished', actor: 'a' },
+      });
+      await harness.store.projects.updateOne(
+        { _id: project.id },
+        { $set: { claimedBy: 'owner@example.com', claimedAt: new Date(), expiresAt: null } },
+      );
+
+      // Busy: nothing to say.
+      assert.equal(await harness.notifier.sweepQuiet(), 0);
+
+      await goQuiet(harness, project, 30);
+      assert.equal(await harness.notifier.sweepQuiet(), 1);
+      assert.equal(sent.length, 1);
+      assert.equal(sent[0]!.open, 1);
+      assert.equal(sent[0]!.stale, 1);
+      assert.ok(sent[0]!.quietFor >= 29);
+
+      // One per quiet spell: the board is still quiet, and saying it again
+      // adds nothing that was not true the first time.
+      assert.equal(await harness.notifier.sweepQuiet(), 0);
+      assert.equal(sent.length, 1);
+
+      // A write puts it back to work, and a board being worked on is not quiet.
+      await harness.server.inject({
+        method: 'POST',
+        url: `${project.api}/items/work/timeline`,
+        headers: authed(project),
+        payload: { message: 'back on it', actor: 'a' },
+      });
+      assert.equal(await harness.notifier.sweepQuiet(), 0, 'a board being worked on is not quiet');
+
+      // Then it stops again, which is a different silence and worth one more
+      // message. Written as the relation that decides it rather than by
+      // waiting a day: the last write is after the last notice.
+      await goQuiet(harness, project, 30);
+      await harness.store.projects.updateOne(
+        { _id: project.id },
+        { $set: { quietNotifiedAt: new Date(Date.now() - 40 * 3_600_000) } },
+      );
+      assert.equal(await harness.notifier.sweepQuiet(), 1);
+      assert.equal(sent.length, 2);
+    } finally {
+      await harness.stop();
+    }
+  });
+
+  it('says nothing about a board nobody owns, or one with nothing rotting', async () => {
+    const { harness, sent } = await quietHarness();
+    try {
+      const orphan = await createProject(harness);
+      await harness.server.inject({
+        method: 'POST',
+        url: `${orphan.api}/items`,
+        headers: authed(orphan),
+        payload: { slug: 'work', title: 't', body: 'b', actor: 'a' },
+      });
+      await goQuiet(harness, orphan, 40);
+      assert.equal(await harness.notifier.sweepQuiet(), 0, 'nobody to tell');
+
+      const parked = await createProject(harness);
+      await harness.server.inject({
+        method: 'POST',
+        url: `${parked.api}/items`,
+        headers: authed(parked),
+        payload: { slug: 'work', title: 't', body: 'b', actor: 'a' },
+      });
+      await harness.store.projects.updateOne(
+        { _id: parked.id },
+        { $set: { claimedBy: 'owner@example.com', claimedAt: new Date(), expiresAt: null } },
+      );
+      const when = new Date(Date.now() - 40 * 3_600_000);
+      await harness.store.items.updateMany(
+        { projectId: parked.id },
+        { $set: { touchedAt: when, updatedAt: when, stale: false, staleSince: null } },
+      );
+      // Quiet, but hygiene has not called anything rotten: that is work
+      // somebody parked, and this notice is not a reminder service.
+      assert.equal(await harness.notifier.sweepQuiet(), 0);
+      assert.equal(sent.length, 0);
+    } finally {
+      await harness.stop();
+    }
   });
 });

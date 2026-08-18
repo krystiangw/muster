@@ -2754,11 +2754,17 @@ describe('handing a lease straight back', () => {
     // deletes a newer, valid lease while that request reports success.
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'leased', title: 't', body: 'b', actor: 'a' });
-    const taken = await post(project, '/items/leased/claim', { agent: 'a', ttl_minutes: 30 });
-    const mine = new Date(taken.json().expires_at as string);
+    await post(project, '/items/leased/claim', { agent: 'a', ttl_minutes: 30 });
 
+    // The lease names itself, and only the writer that put that name there may
+    // take it away: an expiry cannot do the job, because two requests renewing
+    // in the same millisecond compute the same one.
     const doc = (await harness.store.projects.findOne({ _id: project.id }))!;
-    await handBack(harness.store, doc._id, 'leased', 'a', new Date(mine.getTime() + 60_000), 'a lease this call never took');
+    const held = (await harness.store.items.findOne({ projectId: doc._id, slug: 'leased' }))!;
+    const mine = held.claim!.nonce!;
+    assert.ok(mine, 'a lease carries which lease it is');
+
+    await handBack(harness.store, doc._id, 'leased', 'a', 'l_somebodyelse', 'a lease this call never took');
     const untouched = await read(project, '/items/leased');
     assert.ok(untouched.json().item.claim, 'a lease this rollback did not take is not its to clear');
 
