@@ -486,6 +486,28 @@ describe('starting up against a database that has already run', () => {
     assert.equal(email?.unique, true, 'and it ends up with the definition the code asked for');
   });
 
+  it('calls a signed in reader by name on every page, not only the one that remembered', async () => {
+    // Reported from a browser: signed in, click through to another page, and
+    // the nav offers to sign you in. Only the operator page passed the flag, so
+    // every other page told the same person they were a stranger.
+    const session = await signIn(harness, 'nav@example.com');
+    for (const url of ['/', '/docs', '/pricing', '/signup', '/docs/keys']) {
+      const anonymous = await harness.server.inject({ method: 'GET', url });
+      assert.match(anonymous.body, /<a href="\/operator">sign in<\/a>/, `${url} for a stranger`);
+
+      const known = await harness.server.inject({
+        method: 'GET',
+        url,
+        headers: { cookie: session.cookie },
+      });
+      assert.match(
+        known.body,
+        /<a href="\/operator">your projects<\/a>/,
+        `${url} for somebody signed in`,
+      );
+    }
+  });
+
   it('opens a connection for a report without building anything', async () => {
     // The report the operator runs against production says in its own header
     // that it never writes. It reached for the same constructor the server

@@ -81,6 +81,25 @@ export async function startSession(
   return { id: session._id, email, csrf };
 }
 
+/**
+ * Whether this browser is carrying a session, without asking the database.
+ *
+ * Only the chrome depends on this: the nav says "your projects" to somebody who
+ * has signed in and "sign in" to everybody else, and getting that from the
+ * cookie rather than from a lookup keeps every public page free of a read it
+ * would otherwise do on every visit. A cookie whose session has since expired
+ * says "your projects" and lands on the sign in form, which is the same place
+ * the other label would have taken it.
+ *
+ * Never for anything that decides access. That is `readSession`, which checks
+ * the token against the store, and the difference between the two is the whole
+ * reason this one is safe to call anywhere.
+ */
+export function hasSessionCookie(request: FastifyRequest): boolean {
+  const token = parseCookies(request.headers.cookie)[SESSION_COOKIE];
+  return typeof token === 'string' && token !== '';
+}
+
 export async function readSession(
   store: Store,
   request: FastifyRequest,

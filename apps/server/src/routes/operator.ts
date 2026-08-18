@@ -17,6 +17,7 @@ import {
   checkCsrf,
   csrfField,
   endSession,
+  hasSessionCookie,
   readSession,
   startSession,
   type OperatorSession,
@@ -59,13 +60,20 @@ const MAX_CODE_ATTEMPTS = 5;
 export function registerOperator(app: FastifyInstance, deps: OperatorDeps): void {
   const { store, config, limiter, mailer } = deps;
 
+  // The nav label comes off the cookie, on every page here rather than on the
+  // one that remembered to pass it. Half of these pages are only ever seen by
+  // somebody signed in, and they were telling that person to sign in.
   const html = (
+    request: FastifyRequest,
     reply: FastifyReply,
     title: string,
     body: string,
     code = 200,
-    signedIn = false,
-  ) => reply.code(code).type('text/html; charset=utf-8').send(layout({ title, signedIn }, body));
+  ) =>
+    reply
+      .code(code)
+      .type('text/html; charset=utf-8')
+      .send(layout({ title, signedIn: hasSessionCookie(request) }, body));
 
   /** Every action below belongs to whoever is signed in, and to nobody else. */
   async function requireSession(
@@ -75,6 +83,7 @@ export function registerOperator(app: FastifyInstance, deps: OperatorDeps): void
     const session = await readSession(store, request);
     if (session) return session;
     void html(
+      request,
       reply,
       'Sign in',
       `<h1>Sign in first</h1>
@@ -122,8 +131,8 @@ and you can end that from the view itself.</p>
   app.get('/operator', { schema: { hide: true } }, async (request, reply) => {
     recordView(store, 'operator', request);
     const session = await readSession(store, request);
-    if (!session) return html(reply, 'Sign in to Muster', signInForm());
-    return html(reply, 'Your Muster projects', await renderView(session), 200, true);
+    if (!session) return html(request, reply, 'Sign in to Muster', signInForm());
+    return html(request, reply, 'Your Muster projects', await renderView(session), 200);
   });
 
   app.post('/operator', { schema: { hide: true } }, async (request, reply) => {
@@ -132,6 +141,7 @@ and you can end that from the view itself.</p>
     const verdict = limiter.check(`operator-send:${clientIp(request)}`, config.rateLimits.claimEmail);
     if (!verdict.ok) {
       return html(
+        request,
         reply,
         'Slow down',
         `<h1>Too many requests</h1><p>Try again in ${verdict.retryAfterSeconds} seconds.</p>`,
@@ -144,6 +154,7 @@ and you can end that from the view itself.</p>
     // address, so it reads the same for everyone and stays no kind of probe.
     if (!config.resendApiKey && !config.logUnsentEmails) {
       return html(
+        request,
         reply,
         'This Muster cannot send email',
         `<h1>This Muster cannot send email</h1>
@@ -225,6 +236,7 @@ and you can end that from the view itself.</p>
     // not an address at all. Whether somebody uses this service is not
     // something a stranger gets to establish by typing a guess into a form.
     return html(
+      request,
       reply,
       'Check your email',
       `<h1>Check your email</h1>
@@ -252,6 +264,7 @@ and you can end that from the view itself.</p>
     );
     if (!verdict.ok) {
       return html(
+        request,
         reply,
         'Slow down',
         `<h1>Too many attempts</h1><p>Try again in ${verdict.retryAfterSeconds} seconds.</p>`,
@@ -261,6 +274,7 @@ and you can end that from the view itself.</p>
 
     const wrong = () =>
       html(
+        request,
         reply,
         'That code did not work',
         `<h1>That code did not work</h1>
@@ -297,8 +311,9 @@ and you can end that from the view itself.</p>
    * or a Referer header before this change stops being a way in the moment its
    * owner uses it.
    */
-  const noSuchLink = (reply: FastifyReply) =>
+  const noSuchLink = (request: FastifyRequest, reply: FastifyReply) =>
     html(
+      request,
       reply,
       'No such link',
       `<h1>No such link</h1>
@@ -311,7 +326,7 @@ and you can end that from the view itself.</p>
   app.get('/operator/:token', { schema: { hide: true } }, async (request, reply) => {
     const { token } = request.params as { token: string };
     const record = await store.operatorTokens.findOne({ hash: hashToken(token) });
-    if (!record) return noSuchLink(reply);
+    if (!record) return noSuchLink(request, reply);
 
     // The same page under an older door, so it counts under the same name.
     recordView(store, 'operator', request);
@@ -321,6 +336,7 @@ and you can end that from the view itself.</p>
     // a one use link that a scanner can burn is a link that never works. The
     // exchange happens on the button below, which a crawler will not press.
     return html(
+      request,
       reply,
       'Sign in',
       `<h1>Sign in as ${escapeHtml(record.email)}</h1>
@@ -337,7 +353,7 @@ and you can end that from the view itself.</p>
   app.post('/operator/:token', { schema: { hide: true } }, async (request, reply) => {
     const { token } = request.params as { token: string };
     const record = await store.operatorTokens.findOneAndDelete({ hash: hashToken(token) });
-    if (!record) return noSuchLink(reply);
+    if (!record) return noSuchLink(request, reply);
     await startSession(store, config, reply, record.email);
     return reply.redirect('/operator', 303);
   });
@@ -349,6 +365,7 @@ and you can end that from the view itself.</p>
     const form = (request.body ?? {}) as { scope?: string };
     await endSession(store, config, request, reply, form.scope === 'everywhere');
     return html(
+      request,
       reply,
       'Signed out',
       `<h1>Signed out</h1>
@@ -780,6 +797,7 @@ ${
     });
 
     return html(
+      request,
       reply,
       'A new token',
       `<h1>A new token for ${escapeHtml(project.name)}</h1>

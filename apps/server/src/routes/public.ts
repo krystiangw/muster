@@ -33,7 +33,8 @@ import {
   upsertItem,
   verifyClaimCode,
 } from '../service.js';
-import { checkCsrf, csrfField, readSession } from '../session.js';
+import { checkCsrf, csrfField, readSession,
+  hasSessionCookie,} from '../session.js';
 import {
   ESCALATION_STATUSES,
   type EscalationDoc,
@@ -203,8 +204,12 @@ export function registerPublic(app: FastifyInstance, deps: PublicDeps): void {
 
   app.get('/', { schema: { hide: true } }, async (request, reply) => {
     recordView(store, 'landing', request);
-    // The biggest page here by some way, the same bytes for everybody, and
-    // nothing on it belongs to anyone. See the allowlist in app.ts.
+    // The biggest page here by some way, and nothing on it belongs to anyone.
+    // See the allowlist in app.ts. One word of it does depend on the reader,
+    // the nav label, which is read off the cookie and never from the database:
+    // a page that calls somebody a stranger while they are signed in is the
+    // site forgetting them, and it did that on every page but this one's
+    // neighbours.
     reply.compressible = true;
     const body = `
 <p class="eyebrow">For agents that outlive their own sessions</p>
@@ -316,6 +321,7 @@ GitHub</a>, and it runs on Node and MongoDB if you would rather host it yourself
           title: 'Muster',
           description:
             'Shared operational memory for long-lived agents: who is on duty, who owns what, what rotted and what needs a human.',
+          signedIn: hasSessionCookie(request),
         },
         body,
       ),
@@ -490,7 +496,16 @@ also how an existing inbox gets imported:</p>
 `;
     return reply
       .type('text/html; charset=utf-8')
-      .send(layout({ title: 'Muster docs', description: 'Objects, statuses, hygiene rules and interfaces.' }, body));
+      .send(
+        layout(
+          {
+            title: 'Muster docs',
+            description: 'Objects, statuses, hygiene rules and interfaces.',
+            signedIn: hasSessionCookie(request),
+          },
+          body,
+        ),
+      );
   });
 
   app.get('/docs/keys', { schema: { hide: true } }, async (request, reply) => {
@@ -540,7 +555,16 @@ There is no authorization code flow, because there is no end user to ask for con
 `;
     return reply
       .type('text/html; charset=utf-8')
-      .send(layout({ title: 'Keys and access', description: 'Tokens, roles and programmatic key provisioning.' }, body));
+      .send(
+        layout(
+          {
+            title: 'Keys and access',
+            description: 'Tokens, roles and programmatic key provisioning.',
+            signedIn: hasSessionCookie(request),
+          },
+          body,
+        ),
+      );
   });
 
   app.get('/pricing', { schema: { hide: true } }, async (request, reply) => {
@@ -589,7 +613,16 @@ want us to run it under an agreement, and the free tier stays.</p>
 `;
     return reply
       .type('text/html; charset=utf-8')
-      .send(layout({ title: 'Muster pricing', description: 'Free tier limits, retention and self-hosting.' }, body));
+      .send(
+        layout(
+          {
+            title: 'Muster pricing',
+            description: 'Free tier limits, retention and self-hosting.',
+            signedIn: hasSessionCookie(request),
+          },
+          body,
+        ),
+      );
   });
 
   // -------------------------------------------------------------- signup
@@ -612,7 +645,16 @@ curl -sX POST ${escapeHtml(base)}/p -H 'content-type: application/json' -d '{"na
 `;
     return reply
       .type('text/html; charset=utf-8')
-      .send(layout({ title: 'Create a Muster project', description: 'One field, no account.' }, body));
+      .send(
+        layout(
+          {
+            title: 'Create a Muster project',
+            description: 'One field, no account.',
+            signedIn: hasSessionCookie(request),
+          },
+          body,
+        ),
+      );
   });
 
   app.post('/signup', { schema: { hide: true } }, async (request, reply) => {
@@ -661,7 +703,7 @@ address. Claiming is free and raises the limits:</p>
 `;
     return reply
       .type('text/html; charset=utf-8')
-      .send(layout({ title: 'Project created' }, body));
+      .send(layout({ title: 'Project created', signedIn: hasSessionCookie(request) }, body));
   });
 
   // ----------------------------------------------------------- read view
