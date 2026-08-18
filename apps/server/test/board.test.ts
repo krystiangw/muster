@@ -779,6 +779,22 @@ describe('moving an item into a column', () => {
     ).json();
     assert.ok(!facets.agents.includes('ancient-only'), 'nothing that only expired work carries');
 
+    // Narrowing by agent must not undo the window. Both are conditions, and a
+    // second one written over the first is how a bounded scan quietly stops
+    // being bounded.
+    const byAgent = (
+      await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/board?agent=ancient-only`,
+        headers: authed(project),
+      })
+    ).json();
+    assert.equal(
+      byAgent.totals.find((column: { key: string }) => column.key === 'done').count,
+      0,
+      'the expired card stays off the board, filtered or not',
+    );
+
     // And the layout carries it back out, in the same words it went in.
     const again = await put(project, '/board', {
       columns: [

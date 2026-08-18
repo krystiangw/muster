@@ -336,9 +336,20 @@ export async function loadBoard(
     // The claim has to be live. An expired one is not a claim anywhere else in
     // this system, and counting it here would put somebody else's item on an
     // agent's board hours after its lease ran out.
-    query.$or = [
-      { 'claim.agent': options.agent, 'claim.expiresAt': { $gt: new Date() } },
-      { lastActor: options.agent },
+    //
+    // Under `$and`, not as a second `$or` at the top level. The scope above
+    // already uses one to say which statuses this layout can show and how far
+    // back, and a second assignment does not narrow that, it replaces it: the
+    // board would go back to reading everything the moment somebody filtered by
+    // agent.
+    query.$and = [
+      ...((query.$and as unknown[]) ?? []),
+      {
+        $or: [
+          { 'claim.agent': options.agent, 'claim.expiresAt': { $gt: new Date() } },
+          { lastActor: options.agent },
+        ],
+      },
     ];
   }
 
