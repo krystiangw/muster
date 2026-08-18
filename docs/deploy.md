@@ -227,6 +227,17 @@ never hold one claim. It earned its place on 2026-08-18 by finding the counter
 drifting below the collection, permanently, because nothing raises a counter
 that is too low.
 
+All three of the checks below, in one command, which is what to run after a
+deploy:
+
+```bash
+node tools/acceptance.mjs
+```
+
+Non-zero if any door fails. Each one keeps its own board or client and reuses
+it, so this can also be a nightly cron entry without filling the funnel with our
+own signups.
+
 And the door that hands out credentials, which is the one where a regression
 costs more than a broken page:
 
