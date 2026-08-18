@@ -433,6 +433,14 @@ There is no "in progress": an item is in progress when it has a live claim. Keep
 one place is what stops status and reality from drifting apart. Anything else you want to track
 goes in <code>fields</code>, where it cannot break routing.</p>
 
+<p><code>blocked</code> means one thing here: <b>waiting on somebody who is not an agent</b>. Work
+waiting on other work is a different question and has its own answer, <code>blocked_by</code>,
+which is a list of slugs and not a status. Nothing on the server writes it or clears it; what it
+does is keep a card out of what <code>/next</code> offers and refuse a claim on it, naming what is
+unfinished. That separation is deliberate: an engine that moved cards into <code>blocked</code> for
+a dependency two agents can settle between themselves would fill a human's queue with work no human
+can act on.</p>
+
 <h2>The board</h2>
 <p>Every project lays out its own columns, and a column is a <b>view</b>, never a state. It is a
 name and a filter over what an item already is: its status, its labels, its owner, whether somebody
