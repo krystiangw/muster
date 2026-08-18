@@ -62,8 +62,14 @@ przesuwa karty i odpowiada agentom.
 
 **Poprawka:** serializer logu podmienia segment z tokenem na `[redacted]`,
 odpowiedzi capability dostają `Cache-Control: private, no-store`, a cały serwis
-`Referrer-Policy: no-referrer`, bo token siedzi w ścieżce i nagłówek Referer
-oddaje go pierwszej stronie, w którą ktoś kliknie.
+`Referrer-Policy`, bo token siedzi w ścieżce i nagłówek Referer oddaje go
+pierwszej stronie, w którą ktoś kliknie.
+
+**Korekta 2026-08-18:** polityką jest `same-origin`, nie `no-referrer`. Pod
+`no-referrer` przeglądarka serializuje `Origin` w POST jako `null`, więc
+kontrola same-site odmawiała każdemu formularzowi na naszych własnych stronach
+capability. `same-origin` ścina nagłówek na wszystkim, co wychodzi poza serwis,
+czyli na całym wycieku, o który tu chodzi. Opis w `docs/design-notes.md`.
 
 Dodatkowo doszła **rotacja**: `POST /v1/{project}/read-link/rotate` (admin)
 wystawia nowy link i natychmiast unieważnia stary. Wcześniej wyciek linku był

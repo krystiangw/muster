@@ -244,7 +244,11 @@ describe('the response headers', () => {
     assert.match(csp, /default-src 'none'/);
     assert.match(csp, /frame-ancestors 'none'/, 'those pages carry one click forms');
     assert.ok(!csp.includes('script-src'), 'nothing may execute, so nothing is allowed to');
-    assert.equal(page.headers['referrer-policy'], 'no-referrer', 'the token lives in the path');
+    // Not `no-referrer`, on purpose and load bearing: under it a browser posts
+    // our own forms with `Origin: null`, and the same-site check refused every
+    // one of them. `same-origin` strips the header on everything that leaves
+    // this service, which is the leak the policy is here for.
+    assert.equal(page.headers['referrer-policy'], 'same-origin', 'the token lives in the path');
     assert.equal(page.headers['x-content-type-options'], 'nosniff');
   });
 
@@ -673,6 +677,60 @@ describe('a read link can ask for a project and never take one', () => {
     assert.equal(fromUs.statusCode, 303);
     const assigned = await harness.store.items.findOne({ projectId: project.id, slug: 'work' });
     assert.equal(assigned?.owner, 'alex');
+  });
+
+  it('takes our own form when the referrer policy blanks out the Origin', async () => {
+    // What a browser actually sent all night: our pages ship a referrer policy,
+    // Fetch turns `Origin` into `null` under a strict one, and a check that
+    // only reads `Origin` cannot tell our own page from a stranger's. It has to
+    // read `Sec-Fetch-Site`, which no policy of ours can blank out.
+    const project = await createProject(harness);
+    const readToken = project.readUrl.split('/r/')[1]!;
+    await post(project, '/items', { slug: 'work', title: 'work', actor: 'a' });
+
+    const fromOurPage = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/owner`,
+      payload: 'slug=work&owner=alex',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        origin: 'null',
+        'sec-fetch-site': 'same-origin',
+      },
+    });
+    assert.equal(fromOurPage.statusCode, 303);
+    const assigned = await harness.store.items.findOne({ projectId: project.id, slug: 'work' });
+    assert.equal(assigned?.owner, 'alex');
+
+    // And the same blanked out Origin from somewhere else is still refused, so
+    // the repair did not buy the forms back by giving up the check.
+    const fromElsewhere = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/owner`,
+      payload: 'slug=work&owner=attacker',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        origin: 'null',
+        'sec-fetch-site': 'cross-site',
+      },
+    });
+    assert.equal(fromElsewhere.statusCode, 403);
+    const untouched = await harness.store.items.findOne({ projectId: project.id, slug: 'work' });
+    assert.equal(untouched?.owner, 'alex');
+
+    // A neighbouring host is not this page either: `board.example.com` reaching
+    // `musterboard.dev` is a cross site post wearing a familiar domain.
+    const fromNeighbour = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/owner`,
+      payload: 'slug=work&owner=neighbour',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        origin: 'null',
+        'sec-fetch-site': 'same-site',
+      },
+    });
+    assert.equal(fromNeighbour.statusCode, 403);
   });
 
   it('will not take an ask for a project that already has an owner', async () => {

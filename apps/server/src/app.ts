@@ -148,16 +148,22 @@ export async function buildApp(
    * executed, and the only thing allowed is the stylesheet the page carries
    * inline. Two of these are load bearing for this particular product:
    *
-   *  - `Referrer-Policy: no-referrer`, because a read link and an operator link
+   *  - `Referrer-Policy: same-origin`, because a read link and an operator link
    *    are credentials that live in the path, and a Referer header hands them
-   *    to whatever a person clicks through to next.
+   *    to whatever a person clicks through to next. `same-origin` strips the
+   *    header on every request that leaves this service, which is the whole of
+   *    the leak, and keeps it on our own pages, where the address is already in
+   *    the request line. `no-referrer` looks stricter and costs more than it
+   *    buys: Fetch serializes `Origin` as `null` under it, so the same-site
+   *    check on the capability forms saw every one of our own posts as a
+   *    stranger's.
    *  - `frame-ancestors 'none'`, because those same pages carry one click
    *    forms that accept a board or move a card, which is exactly what a
    *    clickjacking frame is for.
    */
   server.addHook('onSend', async (request, reply, payload) => {
     reply.header('x-content-type-options', 'nosniff');
-    reply.header('referrer-policy', 'no-referrer');
+    reply.header('referrer-policy', 'same-origin');
     reply.header('cross-origin-opener-policy', 'same-origin');
     reply.header(
       'content-security-policy',

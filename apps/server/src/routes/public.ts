@@ -1038,8 +1038,14 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
    * attacker who learned the read token could otherwise make the owner's own
    * browser move cards.
    *
-   * An absent Origin is allowed on purpose. Every browser sends one on a form
-   * post; curl sends none, and refusing those would break the agents.
+   * `Sec-Fetch-Site` is asked first because it is the header that survives our
+   * own policy. Origin does not: a page served with `Referrer-Policy:
+   * no-referrer` posts with `Origin: null`, which is how this check spent a
+   * night refusing every form on our own capability pages while the operator
+   * read the refusal as the product being broken.
+   *
+   * An absent signal is allowed on purpose. Every browser sends both headers on
+   * a form post; curl sends neither, and refusing those would break the agents.
    */
   // Compared as parsed origins, not as strings. A deployment whose BASE_URL is
   // spelled `https://Example.com:443` is the same site as the `https://example.com`
@@ -1054,6 +1060,29 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
   })();
 
   const sameOrigin = (request: FastifyRequest, reply: FastifyReply): boolean => {
+    const refuse = (came: string): boolean => {
+      void reply
+        .code(403)
+        .type('text/html; charset=utf-8')
+        .send(
+          layout(
+            { title: 'Not from this page' },
+            `<h1>That form did not come from here</h1>
+             <p>The request arrived from ${escapeHtml(came)}, which is not this service. Nothing
+             was changed. Open the board again and retry.</p>`,
+          ),
+        );
+      return false;
+    };
+
+    // `none` is a typed address or a bookmark, which no form post is; it is
+    // allowed anyway because it is nobody else's page either.
+    const site = request.headers['sec-fetch-site'];
+    if (typeof site === 'string' && site !== '') {
+      if (site === 'same-origin' || site === 'none') return true;
+      return refuse(site === 'same-site' ? 'another host on this domain' : 'another site');
+    }
+
     const origin = request.headers.origin;
     if (typeof origin !== 'string' || origin === '') return true;
     let sent = origin;
@@ -1063,18 +1092,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
       // Not a URL at all. Nothing a browser sends, so it is refused below.
     }
     if (sent === ourOrigin) return true;
-    void reply
-      .code(403)
-      .type('text/html; charset=utf-8')
-      .send(
-        layout(
-          { title: 'Not from this page' },
-          `<h1>That form did not come from here</h1>
-           <p>The request arrived from ${escapeHtml(origin)}, which is not this service. Nothing
-           was changed. Open the board again and retry.</p>`,
-        ),
-      );
-    return false;
+    return refuse(origin);
   };
 
   const limitWrites = (request: FastifyRequest, reply: FastifyReply): boolean => {

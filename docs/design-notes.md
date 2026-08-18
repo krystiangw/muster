@@ -510,3 +510,36 @@ is worse than no message.
 project whose sweep threw took the notifications down with it, silently, every
 five minutes.
 
+
+## One header that switched another one off, 2026-08-18
+
+The capability pages carry `Referrer-Policy: no-referrer` because the read link
+is a credential in the path, and a Referer header hands it to whatever a person
+clicks through to next. The forms on those same pages are checked by comparing
+`Origin` against our own, because a project narrowed to its owner opens on a
+session cookie and a cross site post would then be worth forging.
+
+Both are ordinary. Together they do not work. Fetch says that when a request's
+referrer policy is `no-referrer`, the `Origin` header is serialized as `null`,
+so every form on our own pages arrived looking like a stranger's, and the check
+answered 403 to all of them: moving a card, setting an owner, answering a
+question, asking for the board.
+
+It survived a security audit and a suite with a cross site case in it, because
+both asked what the check does with an origin, and neither asked what a browser
+actually puts there under our own headers. It was found in the router log:
+`POST /r/<token>/escalations/<id>` at 403, and the operator signing in thirty
+seconds later to answer the same question the other way. The refusal page
+prints the origin it got, so the response size named the value: four characters
+where a real origin is twenty.
+
+Two changes, and the order matters. The check now reads `Sec-Fetch-Site` first,
+which is the one header this service cannot blank out with a policy of its own,
+and only falls back to `Origin`. And the policy became `same-origin`, which
+strips the header on everything that leaves the service, which is the entire
+leak it was there for, while leaving our own pages an origin to send. A browser
+too old for `Sec-Fetch-Site` is served by the second change, not the first.
+
+The general shape: a defence that reads a header is only as good as the other
+headers around it. Two policies can each be correct and cancel out, and neither
+one's test will say so.
