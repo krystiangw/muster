@@ -1170,12 +1170,18 @@ ${
       const kept = new URLSearchParams();
       for (const [name, value] of raw.entries()) if (value !== '') kept.append(name, value);
       const canonical = kept.toString();
-      // The path exactly as it arrived, rather than one rebuilt from the
-      // decoded token: only the query is being tidied here. Rebuilding it put
-      // whatever was in the path through a decode and an encode, and the pair
-      // is not a round trip: `%2e%2e` comes back as `..`, which a client then
-      // resolves away to a path this service never named.
-      return reply.redirect(`${asked}${canonical === '' ? '' : `?${canonical}`}`, 303);
+      // Rebuilt from the one path segment this route matched, taken raw.
+      //
+      // Not from the decoded token, because decode and encode is not a round
+      // trip: `%2e%2e` comes back as `..`, which a client resolves away to a
+      // path this service never named. And not from the request target either:
+      // a request line may carry an absolute form, `GET http://elsewhere/...`,
+      // which Fastify routes on its path while leaving the authority in
+      // `request.url`, and echoing that into a Location is an open redirect.
+      // One segment, split on the separator it cannot contain, between two
+      // pieces this file wrote.
+      const segment = asked!.split('/')[asked!.startsWith('/') ? 2 : 4] ?? '';
+      return reply.redirect(`/r/${segment}/board${canonical === '' ? '' : `?${canonical}`}`, 303);
     }
 
     if (!limitSeeking(request, reply)) return reply;

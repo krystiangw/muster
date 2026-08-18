@@ -1937,6 +1937,16 @@ describe('a board many agents write to', () => {
     });
     assert.equal(String(dotted.headers.location), '/r/%2e%2e%2fsomewhere/board');
 
+    // A request line may carry an absolute form, which is routed on its path
+    // while the authority stays in the target. Echoing that into a Location is
+    // an open redirect, so the redirect is built from the one segment this
+    // route matched rather than from anything the caller wrote around it.
+    const absolute = await harness.server.inject({
+      method: 'GET',
+      url: 'http://elsewhere.example/r/sometoken/board?owner=',
+    });
+    assert.equal(String(absolute.headers.location), '/r/sometoken/board');
+
     // And what it lands on is the 404 any unknown token gets.
     const landed = await harness.server.inject({ method: 'GET', url: location });
     assert.equal(landed.statusCode, 404);
