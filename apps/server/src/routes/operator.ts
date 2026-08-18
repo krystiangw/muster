@@ -21,7 +21,12 @@ import {
   startSession,
   type OperatorSession,
 } from '../session.js';
-import { ESCALATION_STATUSES, type EscalationStatus } from '../types.js';
+import {
+  ESCALATION_STATUSES,
+  type EscalationDoc,
+  type EscalationStatus,
+  type ItemDoc,
+} from '../types.js';
 import { clientIp } from './api.js';
 import { record, recordView } from '../events.js';
 
@@ -388,13 +393,65 @@ and you can end that from the view itself.</p>
     const aliases = await aliasesFor(session.email);
     const WAITING_SHOWN = 100;
     const MINE_SHOWN = 40;
-    const [waiting, recent, staleItems, mine, waitingTotal, mineTotal] = await Promise.all([
+    /**
+     * The list and its total from one read, per list.
+     *
+     * A `find` and a `countDocuments` fired side by side see two different
+     * moments, so an answer landing between them prints "showing 100 of 99", or
+     * a headline of nothing over a page with questions on it. `$facet` cuts the
+     * page and counts the same matched set once.
+     *
+     * The per project column comes out of the same pass, which also settles a
+     * second thing: it is a count of questions rather than a read of the
+     * capacity counter beside them, and that counter is a second write whose
+     * repair only ever lowers it.
+     */
+    const [waitingPass, minePass, recent, staleItems] = await Promise.all([
       store.escalations
-        .find({ projectId: { $in: ids }, status: 'open' })
-        // By urgency, then by age. Sorting on the word itself would put "high"
-        // below "low", which is alphabetical and useless.
-        .sort({ priorityRank: -1, createdAt: 1 })
-        .limit(WAITING_SHOWN)
+        .aggregate<{
+          page: EscalationDoc[];
+          byProject: Array<{ _id: string; n: number }>;
+        }>([
+          { $match: { projectId: { $in: ids }, status: 'open' } },
+          {
+            $facet: {
+              // By urgency, then by age. Sorting on the word itself would put
+              // "high" below "low", which is alphabetical and useless.
+              page: [{ $sort: { priorityRank: -1, createdAt: 1 } }, { $limit: WAITING_SHOWN }],
+              byProject: [{ $group: { _id: '$projectId', n: { $sum: 1 } } }],
+            },
+          },
+        ])
+        .toArray(),
+      store.items
+        .aggregate<{ page: ItemDoc[]; total: Array<{ n: number }> }>([
+          {
+            // Work, as opposed to questions. Assigned to one of the names this
+            // person answers to, or blocked and therefore somebody's to
+            // unblock, across every project at once. Blocked items count
+            // whoever owns them, because a board where nothing moves is the
+            // operator's problem by definition.
+            $match: {
+              projectId: { $in: ids },
+              status: { $nin: ['done', 'dropped'] },
+              $or: [
+                { owner: { $in: aliases } },
+                { status: 'blocked' },
+                // A lease that ran out is an agent that stopped. Hygiene will
+                // clear the claim on its next pass, and until then the item is
+                // nobody's, which is the operator's problem sooner than it is
+                // anybody's.
+                { 'claim.expiresAt': { $lte: new Date() } },
+              ],
+            },
+          },
+          {
+            $facet: {
+              page: [{ $sort: { priority: -1, updatedAt: -1 } }, { $limit: MINE_SHOWN }],
+              total: [{ $count: 'n' }],
+            },
+          },
+        ])
         .toArray(),
       store.escalations
         .find({ projectId: { $in: ids }, status: { $ne: 'open' } })
@@ -406,40 +463,15 @@ and you can end that from the view itself.</p>
         .sort({ staleSince: 1 })
         .limit(20)
         .toArray(),
-      // Work, as opposed to questions. Assigned to one of the names this person
-      // answers to, or blocked and therefore somebody's to unblock, across
-      // every project at once. Blocked items count whoever owns them, because a
-      // board where nothing moves is the operator's problem by definition.
-      store.items
-        .find({
-          projectId: { $in: ids },
-          status: { $nin: ['done', 'dropped'] },
-          $or: [
-            { owner: { $in: aliases } },
-            { status: 'blocked' },
-            // A lease that ran out is an agent that stopped. Hygiene will clear
-            // the claim on its next pass, and until then the item is nobody's,
-            // which is the operator's problem sooner than it is anybody's.
-            { 'claim.expiresAt': { $lte: new Date() } },
-          ],
-        })
-        .sort({ priority: -1, updatedAt: -1 })
-        .limit(MINE_SHOWN)
-        .toArray(),
-      // The totals behind the two lists this page is for. Both are capped, and
-      // a page whose whole promise is "everything waiting on you" cannot say a
-      // number that is really the size of its own first page.
-      store.escalations.countDocuments({ projectId: { $in: ids }, status: 'open' }),
-      store.items.countDocuments({
-        projectId: { $in: ids },
-        status: { $nin: ['done', 'dropped'] },
-        $or: [
-          { owner: { $in: aliases } },
-          { status: 'blocked' },
-          { 'claim.expiresAt': { $lte: new Date() } },
-        ],
-      }),
     ]);
+
+    const waiting = (waitingPass[0]?.page ?? []) as EscalationDoc[];
+    const waitingByProject = new Map(
+      (waitingPass[0]?.byProject ?? []).map((row) => [row._id, row.n]),
+    );
+    const waitingTotal = [...waitingByProject.values()].reduce((all, n) => all + n, 0);
+    const mine = (minePass[0]?.page ?? []) as ItemDoc[];
+    const mineTotal = minePass[0]?.total[0]?.n ?? 0;
 
     const question = (
       id: string,
@@ -590,7 +622,7 @@ ${projects
       }<br><span class="mono" style="color:var(--muted)">${escapeHtml(project._id)}</span></td>
        <td class="mono" data-label="Open items">${project.counts.items}</td>
        <td class="mono" data-label="Agents">${project.counts.agents}</td>
-       <td class="mono" data-label="Waiting">${project.counts.escalations}</td>
+       <td class="mono" data-label="Waiting">${waitingByProject.get(project._id) ?? 0}</td>
        <td data-label="Go to"><a href="/r/${escapeHtml(project.readToken)}/board">board</a><br>
            <a href="/r/${escapeHtml(project.readToken)}">questions</a>
            <form method="post" action="/operator/projects/${escapeHtml(project._id)}/keys"
