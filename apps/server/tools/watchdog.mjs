@@ -194,6 +194,15 @@ const noteIsDue = () =>
 // round, and cannot claim the hour on a round that had something to say.
 let hygieneBehind = false;
 let noticesStuck = false;
+// Anything this round already said, recoveries included. A round that printed
+// "hygiene is running again" has reported itself, and following that with a
+// line claiming nothing happened would both repeat it and take the hour from
+// the next quiet round.
+let said = false;
+const say = (line) => {
+  said = true;
+  console.log(line);
+};
 
 if (broken.length === 0) {
   const recovered = state.alerted;
@@ -204,7 +213,7 @@ if (broken.length === 0) {
       '',
       'The watchdog will stay quiet until something else breaks.',
     ]);
-    console.log(`recovered, told you: ${delivery}`);
+    say(`recovered, told you: ${delivery}`);
   }
 } else {
   state.failures += 1;
@@ -226,9 +235,9 @@ if (broken.length === 0) {
       `${detail}. Last healthy ${state.lastOk ?? 'unknown'}.`,
     );
     state.alerted = true;
-    console.log(`down: ${detail} | email ${delivery} | board ${filed}`);
+    say(`down: ${detail} | email ${delivery} | board ${filed}`);
   } else {
-    console.log(`miss ${state.failures}: ${detail}`);
+    say(`miss ${state.failures}: ${detail}`);
   }
 }
 
@@ -260,7 +269,7 @@ if (broken.length === 0 && apiRead?.body && 'swept_at' in apiRead.body) {
   const ageMs = sweptAt ? Date.parse(now) - sweptAt.getTime() : null;
   const behind = ageMs === null || ageMs > HYGIENE_MAX_AGE_MS;
   if (!behind) {
-    if (state.hygieneAlerted) console.log('hygiene is running again');
+    if (state.hygieneAlerted) say('hygiene is running again');
     state.hygieneMisses = 0;
     state.hygieneAlerted = false;
   } else {
@@ -287,12 +296,12 @@ if (broken.length === 0 && apiRead?.body && 'swept_at' in apiRead.body) {
         'heroku restart -a muster-web',
       ]);
       state.hygieneAlerted = filed === 'filed' || delivery === 'sent';
-      console.log(
+      say(
         `hygiene behind: last swept ${since} | board ${filed} | email ${delivery}`
           + (state.hygieneAlerted ? '' : ' | nothing landed, will try again'),
       );
     } else {
-      console.log(`hygiene miss ${state.hygieneMisses}: last swept ${since}`);
+      say(`hygiene miss ${state.hygieneMisses}: last swept ${since}`);
     }
   }
 }
@@ -330,7 +339,7 @@ if (broken.length === 0 && apiRead?.body && 'oldest_unannounced_at' in apiRead.b
     summary.claimed === true && oldestMs !== null && Date.parse(now) - oldestMs > NOTICE_STUCK_MS;
   const silent = lastNoticeMs === null || Date.parse(now) - lastNoticeMs > NOTICE_STUCK_MS;
   if (!(waiting && silent)) {
-    if (state.noticeAlerted) console.log('notices are going out again');
+    if (state.noticeAlerted) say('notices are going out again');
     state.noticeMisses = 0;
     state.noticeAlerted = false;
   } else {
@@ -355,17 +364,17 @@ if (broken.length === 0 && apiRead?.body && 'oldest_unannounced_at' in apiRead.b
         `Filing this on the board was refused: ${filed}.`,
       ]);
       state.noticeAlerted = filed === 'filed' || delivery === 'sent';
-      console.log(
+      say(
         `notices stuck: oldest waited ${waitedMin} min, last notice ${lastNotice} | board ${filed} | email ${delivery}`
           + (state.noticeAlerted ? '' : ' | nothing landed, will try again'),
       );
     } else {
-      console.log(`notice miss ${state.noticeMisses}: oldest waited ${waitedMin} min, last notice ${lastNotice}`);
+      say(`notice miss ${state.noticeMisses}: oldest waited ${waitedMin} min, last notice ${lastNotice}`);
     }
   }
 }
 
-if (broken.length === 0 && !hygieneBehind && !noticesStuck && noteIsDue()) {
+if (broken.length === 0 && !hygieneBehind && !noticesStuck && !said && noteIsDue()) {
   state.lastNote = now;
   const swept = apiRead?.body?.swept_at
     ? `${Math.round((Date.parse(now) - Date.parse(apiRead.body.swept_at)) / 60_000)} min`

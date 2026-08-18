@@ -18,7 +18,10 @@ import { spawn } from 'node:child_process';
 
 const argv = process.argv.slice(2);
 const at = argv.indexOf('--base');
-const base = at === -1 ? 'https://musterboard.dev' : argv[at + 1];
+// Trailing slashes stripped, as the checks it runs already do: `//health` is
+// not `/health` to a router, and the whole command would report a healthy
+// deployment as broken over a character somebody typed.
+const base = (at === -1 ? 'https://musterboard.dev' : argv[at + 1]).replace(/\/+$/, '');
 
 const run = (tool) =>
   new Promise((resolve) => {
