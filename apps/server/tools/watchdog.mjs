@@ -101,7 +101,14 @@ const checks = [
  * The probe writes nothing. An unknown status word is refused after the link
  * has been recognised and before anything is answered, so 400 means the whole
  * path in front of the write is open: same-site check, read token, visibility.
- * A 403 means the forms are dead again.
+ *
+ * 404 counts as open too, and that is not slack. A board narrowed to its owner
+ * answers 404 to anybody without the owner's session cookie, which this has no
+ * way to hold, and so does a board whose read link was rotated since the last
+ * round. Both of those are healthy, and the check would otherwise page about a
+ * button on the operator's own page. What it is looking for sits in front of
+ * all of that: the same-site check runs before the link is even looked up, so
+ * a 403 is the only answer that means the forms are dead again.
  */
 const readUrl = checks.find((check) => check.name === 'api read')?.body?.read_url;
 if (readUrl) {
@@ -116,7 +123,11 @@ if (readUrl) {
     },
     body: 'status=watchdog-probe',
   });
-  checks.push({ name: 'browser form', ok: form.status === 400, status: form.status || form.error });
+  checks.push({
+    name: 'browser form',
+    ok: form.status === 400 || form.status === 404,
+    status: form.status || form.error,
+  });
 }
 const broken = checks.filter((check) => !check.ok);
 const now = new Date().toISOString();
