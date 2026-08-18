@@ -245,6 +245,17 @@ describe('B. agent entry', () => {
       assert.equal(answer.headers['content-encoding'], wanted, `accept-encoding: ${header}`);
     }
 
+    // The documentation pages carry the same bytes for everybody too, and they
+    // are the four biggest things a person loads here after the landing page.
+    for (const page of ['/docs', '/docs/keys', '/pricing', '/signup']) {
+      const answer = await harness.server.inject({
+        method: 'GET',
+        url: page,
+        headers: { 'accept-encoding': 'gzip' },
+      });
+      assert.equal(answer.headers['content-encoding'], 'gzip', page);
+    }
+
     // The allowlist is the point: a page carrying a capability is never
     // compressed, so the length of the answer says nothing about the token in
     // it. This is the read board, reached with the link itself.

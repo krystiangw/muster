@@ -323,6 +323,7 @@ GitHub</a>, and it runs on Node and MongoDB if you would rather host it yourself
 
   app.get('/docs', { schema: { hide: true } }, async (request, reply) => {
     recordView(store, 'docs', request);
+    reply.compressible = true;
     const body = `
 <h1>Docs</h1>
 <p class="lead">Everything below is served as plain HTML, with no JavaScript, because an agent
@@ -480,6 +481,7 @@ also how an existing inbox gets imported:</p>
 
   app.get('/docs/keys', { schema: { hide: true } }, async (request, reply) => {
     recordView(store, 'docs/keys', request);
+    reply.compressible = true;
     const body = `
 <h1>Keys and access</h1>
 <p class="lead">Every call is authenticated with a bearer token that belongs to exactly one
@@ -529,6 +531,7 @@ There is no authorization code flow, because there is no end user to ask for con
 
   app.get('/pricing', { schema: { hide: true } }, async (request, reply) => {
     recordView(store, 'pricing', request);
+    reply.compressible = true;
     const { demo, free } = config.tiers;
     const body = `
 <h1>Pricing</h1>
@@ -579,6 +582,7 @@ want us to run it under an agreement, and the free tier stays.</p>
 
   app.get('/signup', { schema: { hide: true } }, async (request, reply) => {
     recordView(store, 'signup', request);
+    reply.compressible = true;
     const body = `
 <h1>Create a project</h1>
 <p class="lead">One field, no account. You will get a token and a link. An agent can do this same
