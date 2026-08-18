@@ -102,15 +102,20 @@ const checks = [
  * has been recognised and before anything is answered, so 400 means the whole
  * path in front of the write is open: same-site check, read token, visibility.
  *
- * 404 counts as open too, and that is not slack. A board narrowed to its owner
- * answers 404 to anybody without the owner's session cookie, which this has no
- * way to hold, and so does a board whose read link was rotated since the last
- * round. Both of those are healthy, and the check would otherwise page about a
- * button on the operator's own page. What it is looking for sits in front of
- * all of that: the same-site check runs before the link is even looked up, so
- * a 403 is the only answer that means the forms are dead again.
+ * A board narrowed to its owner is the exception, and only that one. It answers
+ * 404 to anybody without the owner's session cookie, which this has no way to
+ * hold, so on a private board 404 is the healthy answer and requiring 400 would
+ * page about a button on the operator's own page. On a board open by link it is
+ * not healthy at all: it means the route or the read link stopped resolving
+ * while everything else stayed green, which is the same kind of silent breakage
+ * this check exists for. An older deployment that does not report `visibility`
+ * gets the benefit of the doubt rather than a page.
  */
-const readUrl = checks.find((check) => check.name === 'api read')?.body?.read_url;
+const summary = checks.find((check) => check.name === 'api read')?.body;
+const readUrl = summary?.read_url;
+// A closed set, so a healthy answer has to be named rather than merely not be
+// a 403. Everything else, a 500 or a timeout included, is a miss.
+const formOpen = summary?.visibility === undefined || summary.visibility === 'owner' ? [400, 404] : [400];
 if (readUrl) {
   const form = await probe(`${readUrl}/escalations/e_watchdog_probe`, {
     method: 'POST',
@@ -125,7 +130,7 @@ if (readUrl) {
   });
   checks.push({
     name: 'browser form',
-    ok: form.status === 400 || form.status === 404,
+    ok: formOpen.includes(form.status),
     status: form.status || form.error,
   });
 }
