@@ -866,6 +866,14 @@ export async function writeWarnings(
   item?: Pick<ItemDoc, 'slug' | 'labels' | 'owner'>,
 ): Promise<string[]> {
   if (!project.rules.scopeWarnings) return [];
+  // Before the lookup: on a board where `operator` was registered as an agent
+  // before that name was reserved, finding the registration would answer the
+  // question with silence, and the ambiguity is the whole point of saying
+  // anything.
+  if (normalizeHandle(actor) === OPERATOR_ACTOR) {
+    const reserved = await nameWarning(store, project._id, actor);
+    return reserved ? [reserved] : [];
+  }
   const agent = actor ? await store.agents.findOne({ projectId: project._id, handle: actor }) : null;
   if (!agent) {
     const named = await nameWarning(store, project._id, actor);
@@ -898,12 +906,15 @@ export async function nameWarning(
   projectId: string,
   actor: string,
 ): Promise<string | null> {
+  // Normalised, because the actor on an item is free text: `Operator` and
+  // ` operator ` are the same name to everything that acts on it, and telling
+  // only the lowercase one to register is advice the other half never hears.
+  if (normalizeHandle(actor) === OPERATOR_ACTOR) {
+    return `"${OPERATOR_ACTOR}" is the name this board signs a person's own writes with, so a timeline cannot tell you apart from whoever is reading it. Register a handle of your own and write under that.`;
+  }
   // An empty actor and the sentinel it becomes are the same event: nobody
   // said who was writing. Reading them differently is how one of the two ends
   // up silent, which is the case this whole function exists for.
-  if (actor === OPERATOR_ACTOR) {
-    return `"${OPERATOR_ACTOR}" is the name this board signs a person's own writes with, so a timeline cannot tell you apart from whoever is reading it. Register a handle of your own and write under that.`;
-  }
   if (actor === '' || actor === 'unknown-agent') {
     return 'Nothing named itself on that write, so the board shows it as "unknown-agent". Send `actor` with every write, and register the handle with POST /agents so a person can tell it from the others.';
   }

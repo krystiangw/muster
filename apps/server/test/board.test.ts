@@ -1019,6 +1019,9 @@ describe('moving an item into a column', () => {
     for (const [slug, actor] of [
       ['one', 'trades-loop'],
       ['two', 'trades_loop'],
+      // The person's own door, typed by an agent that shouted it. It is not a
+      // spelling of anything, so it is never one of the two names on offer.
+      ['three', 'Operator'],
     ] as const) {
       await harness.server.inject({
         method: 'POST',
@@ -1032,6 +1035,11 @@ describe('moving an item into a column', () => {
     const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
     assert.match(page.body, new RegExp(`action="/r/${readToken}/board/agent-rename"`));
     assert.match(page.body, /trades_loop \(seen, not registered\)/);
+    const merge = page.body.slice(page.body.indexOf('/board/agent-rename'));
+    assert.ok(
+      !merge.slice(0, merge.indexOf('</form>')).includes('value="Operator"'),
+      'the door is not a name to consolidate, however it was typed',
+    );
 
     const merged = await harness.server.inject({
       method: 'POST',

@@ -1207,6 +1207,28 @@ describe('who is writing, and by what name', () => {
       payload: { slug: 'five', title: 'five', actor: 'operator' },
     });
     assert.match(signed.json().warnings.join(' '), /signs a person's own writes with/);
+
+    // The actor on a write is free text, so the reservation has to hold for
+    // every spelling of it: a warning that only fires on the lowercase one
+    // leaves `Operator` signing as the person and hearing nothing.
+    const shouted = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'six', title: 'six', actor: 'Operator' },
+    });
+    assert.match(shouted.json().warnings.join(' '), /signs a person's own writes with/);
+    const shoutedSeen = (
+      await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/agents`,
+        headers: authed(project),
+      })
+    ).json();
+    assert.ok(
+      !shoutedSeen.seen.some((handle: string) => handle.toLowerCase() === 'operator'),
+      'the door is the door however it was typed',
+    );
   });
 
   it('consolidates a handle that was already written two ways', async () => {

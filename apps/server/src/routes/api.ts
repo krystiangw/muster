@@ -2,7 +2,14 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
 import { maybeSweep, sweepProject } from '../hygiene.js';
-import { hashToken, isValidHandle, newOtpCode, newId, normalizeSlug } from '../ids.js';
+import {
+  hashToken,
+  isValidHandle,
+  newOtpCode,
+  newId,
+  normalizeHandle,
+  normalizeSlug,
+} from '../ids.js';
 import type { Notifier } from '../notify.js';
 import { RateLimiter } from '../rateLimit.js';
 import { record, recordFirstWrite } from '../events.js';
@@ -537,7 +544,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
               // Not an agent that forgot to register: it is the door a person
               // writes through, and listing it here as a name to consolidate is
               // an invitation to merge the operator into a loop.
-              handle !== OPERATOR_ACTOR &&
+              normalizeHandle(handle) !== OPERATOR_ACTOR &&
               !registered.has(handle),
           )
           .sort()

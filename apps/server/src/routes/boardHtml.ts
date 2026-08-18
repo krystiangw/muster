@@ -1,4 +1,5 @@
 import type { AgentFacet, BoardFacets, BoardFilter, BoardView } from '../board.js';
+import { normalizeHandle } from '../ids.js';
 import { OPERATOR_ACTOR } from '../types.js';
 import { BOARD_PRESETS, COLUMN_RENDER_LIMIT, applyForColumn, unsatisfiableBy } from '../board.js';
 import { boardConfigJson } from '../serialize.js';
@@ -734,7 +735,7 @@ ${filterRow(
       // The door a person writes through is neither of the two things this
       // marking is about, so it says what it is instead of implying somebody
       // forgot to register it.
-      if (handle === OPERATOR_ACTOR) {
+      if (normalizeHandle(handle) === OPERATOR_ACTOR) {
         return { value: handle, note: 'written from this page, by a person' };
       }
       return {
@@ -795,7 +796,12 @@ function renderAgentMerge(facets: BoardFacets, action: string, keep: BoardFilter
   // Not the door. A person's own writes are signed with it, and offering it
   // here as a name to consolidate is offering to file everything a human did
   // under a loop, on the control built to undo exactly that kind of mixing.
-  const agents = facets.agents.filter((agent) => agent.handle !== OPERATOR_ACTOR);
+  const agents = facets.agents.filter(
+    // Normalised, like the rename it feeds: an item written by `Operator`
+    // survives an exact comparison and is then offered as a merge that always
+    // fails, which is a control that lies about what it can do.
+    (agent) => normalizeHandle(agent.handle) !== OPERATOR_ACTOR,
+  );
   if (agents.length < 2) return '';
   const options = (selected: string) =>
     agents
