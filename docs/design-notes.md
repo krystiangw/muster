@@ -585,3 +585,37 @@ The general shape, and the reason this is worth a note rather than a commit
 message: a measurement taken at one of several equivalent paths does not read as
 incomplete. It reads as evidence about the paths, and the path that measures
 zero is the one somebody eventually deletes.
+
+## A decision taken from a stale read, 2026-08-18
+
+The soak exists to check three things the unit tests cannot: that the open
+counter matches the collection, that a slug never becomes two items, and that
+two agents never hold one claim. Run against a build of this morning it reported
+the first one broken, by one, and the interesting part is which direction. The
+counter was *below* the collection, and the repair in the sweep only ever
+lowers a counter. Nothing in this service raises one, so that gap does not close
+on the next pass, or ever.
+
+The interleaving is ordinary. Two agents write the same new slug, one of them
+carrying a status. The second looks, sees nothing, and by the time its write
+lands the first has created the item. The status then went out through `$set`,
+onto a document nobody had read. Two things were missing at once, and both
+matter: no guard, so no writer owned the transition, and no accounting, because
+the counter moves either in the guarded branch or on creation, and this was
+neither.
+
+Both directions were reachable from there. A request meaning to create a done
+item, landing on an open one, closed it and left the counter high, which the
+sweep repairs. One meaning to create an open item, landing on a done one,
+opened it and left the counter low, which nothing repairs. The board had been
+accumulating that quietly for as long as two agents have shared a slug.
+
+The fix is one word of intent: the status belongs in `$setOnInsert`, because
+this branch was only ever reached by believing the item was new. Losing that
+race means the other writer's status stands, which is the rule the guarded
+branch already follows when it loses.
+
+The shape worth remembering: a decision taken from a read has to be applied
+under a guard that still holds, or not applied at all. `$set` on a document you
+have not read is neither, and it is invisible, because the write succeeds and
+the wrong number is the only trace.
