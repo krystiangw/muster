@@ -417,7 +417,25 @@ and you can end that from the view itself.</p>
             $facet: {
               // By urgency, then by age. Sorting on the word itself would put
               // "high" below "low", which is alphabetical and useless.
-              page: [{ $sort: { priorityRank: -1, createdAt: 1 } }, { $limit: WAITING_SHOWN }],
+              //
+              // Cut to what this page draws, because a facet returns its page
+              // inside one document and a document is capped at sixteen
+              // megabytes. A cursor had no such ceiling; a hundred questions
+              // carrying eight kilobytes of context each would find this one.
+              page: [
+                { $sort: { priorityRank: -1, createdAt: 1 } },
+                { $limit: WAITING_SHOWN },
+                {
+                  $project: {
+                    projectId: 1,
+                    question: 1,
+                    context: 1,
+                    agent: 1,
+                    priority: 1,
+                    createdAt: 1,
+                  },
+                },
+              ],
               byProject: [{ $group: { _id: '$projectId', n: { $sum: 1 } } }],
             },
           },
@@ -447,7 +465,25 @@ and you can end that from the view itself.</p>
           },
           {
             $facet: {
-              page: [{ $sort: { priority: -1, updatedAt: -1 } }, { $limit: MINE_SHOWN }],
+              // Same ceiling as the questions above, and closer to it: an item
+              // carries its timeline, and forty of those in one document is the
+              // shape that reaches sixteen megabytes first.
+              page: [
+                { $sort: { priority: -1, updatedAt: -1 } },
+                { $limit: MINE_SHOWN },
+                {
+                  $project: {
+                    projectId: 1,
+                    slug: 1,
+                    title: 1,
+                    status: 1,
+                    owner: 1,
+                    stale: 1,
+                    claim: 1,
+                    updatedAt: 1,
+                  },
+                },
+              ],
               total: [{ $count: 'n' }],
             },
           },
