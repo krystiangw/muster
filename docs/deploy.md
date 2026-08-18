@@ -208,6 +208,20 @@ else echo 'ok: capability pages are not compressed'
 fi
 ```
 
+And the other half of the promise, which is released separately from this one:
+
+```bash
+node tools/smoke-sdk.mjs
+```
+
+That installs `musterboard` from the registry into a temporary directory and
+drives the deployment through it, thirteen calls, the way an agent that read
+`/skill.md` and ran `npm install musterboard` does. Nothing in the suite covers
+this: the tests import the package from next door, so a server change that
+breaks the published client passes everything and fails the first stranger. It
+signs itself up, so it needs no token, and the project it leaves behind is
+unclaimed and expires on its own.
+
 ## 5b. Before a second dyno
 
 Three things here assume one process, and only one of them breaks quietly.
