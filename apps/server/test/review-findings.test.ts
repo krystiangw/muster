@@ -187,12 +187,79 @@ describe('one read, two doors', () => {
       overHttp.json().items.map((item: { slug: string }) => item.slug),
       first.items.map((item) => item.slug),
     );
-    assert.equal(overHttp.json().next_cursor, first.next_cursor);
+    // The keyset halves match; the checkpoints do not, because these are two
+    // reads taken a moment apart and each carries its own.
+    const keyset = (cursor: string) => cursor.slice(0, cursor.lastIndexOf('~'));
+    assert.equal(keyset(overHttp.json().next_cursor), keyset(first.next_cursor!));
 
     // as_of is what a poller hands back as `since`, so it has to be a date the
     // next read accepts rather than a decorative string.
     const nothingNew = await call({ since: second.as_of });
     assert.equal(nothingNew.items.length, 0, 'nothing changed after the read that reported it');
+
+    // And it has to be the same checkpoint on every page. A write that lands
+    // while somebody is on page two sorts above their cursor, so it appears on
+    // no later page; keeping the first page's moment is what makes the next
+    // poll pick it up instead of stepping over it.
+    assert.equal(second.as_of, first.as_of, 'paging does not move the checkpoint');
+  });
+
+  it('carries migrated fields through the MCP door, so its columns are reachable', async () => {
+    // A column can filter on `fields`, and this door could not write one, so a
+    // board laid out around another tracker's states had columns an MCP agent
+    // could see and never reach.
+    const project = await createProject(harness);
+    await harness.server.inject({
+      method: 'PUT',
+      url: `${project.api}/board`,
+      headers: authed(project),
+      payload: {
+        rows: 'none',
+        columns: [
+          {
+            key: 'investigating',
+            title: 'Investigating',
+            match: { fields: { legacy_status: ['investigating'] } },
+          },
+          { key: 'rest', title: 'Rest', match: {} },
+        ],
+      },
+    });
+
+    const written = await harness.server.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: authed(project),
+      payload: {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'upsert_item',
+          arguments: {
+            slug: 'imported',
+            title: 'imported',
+            actor: 'migrator',
+            fields: { legacy_status: 'investigating' },
+          },
+        },
+      },
+    });
+    assert.equal(written.json().result.isError, undefined);
+
+    const board = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/board`,
+      headers: authed(project),
+    });
+    const column = board
+      .json()
+      .rows[0].columns.find((entry: { key: string }) => entry.key === 'investigating');
+    assert.deepEqual(
+      column.items.map((item: { slug: string }) => item.slug),
+      ['imported'],
+      'the card reaches the column its fields describe',
+    );
   });
 
   it('shows closed work on the board over MCP, the way the API does', async () => {

@@ -124,6 +124,12 @@ const TOOLS: ToolDefinition[] = [
         priority: { type: 'integer', minimum: -10, maximum: 10 },
         labels: { type: 'array', items: { type: 'string' } },
         source: { type: 'string', description: 'Set when the item mirrors an external signal' },
+        fields: {
+          type: 'object',
+          additionalProperties: true,
+          description:
+            'Values kept from the system this item came from. A board column can filter on them, so a column for "investigating" in another tracker is reachable from here.',
+        },
         note: { type: 'string', description: 'Timeline entry describing this change' },
         actor: { type: 'string', description: 'Your agent handle' },
       },
@@ -567,6 +573,14 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           priority: typeof args.priority === 'number' ? args.priority : undefined,
           labels: Array.isArray(args.labels) ? (args.labels as string[]) : undefined,
           source: args.source === undefined ? undefined : str(args.source),
+          // A board column can filter on these, so an agent that cannot write
+          // them cannot reach such a column. `history` stays off this door: it
+          // is the one-time import path, admin only, and what carries it is a
+          // migration script that already speaks HTTP.
+          fields:
+            args.fields && typeof args.fields === 'object' && !Array.isArray(args.fields)
+              ? (args.fields as Record<string, unknown>)
+              : undefined,
           note: args.note === undefined ? undefined : str(args.note),
           actor,
         });

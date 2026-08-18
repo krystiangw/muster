@@ -1444,6 +1444,28 @@ export interface ReadItemsResult {
   asOf: Date;
 }
 
+/**
+ * The checkpoint travels inside the cursor, after a `~`.
+ *
+ * `as_of` is the moment a caller hands back as `since` next time, and paging
+ * has to hand back the same one on every page or an incremental read loses
+ * work. A write that lands while somebody is on page three sorts above their
+ * cursor, so it is on no later page; it is newer than the first page's
+ * checkpoint, so saving that one picks it up on the next poll. Saving the last
+ * page's, freshly stamped, starts the next poll after it, and it is gone.
+ *
+ * A cursor with no `~` is one issued before this existed and simply gets a new
+ * checkpoint, which is what it had all along.
+ */
+function splitCursor(cursor: string | undefined): { keyset?: string; asOf?: Date } {
+  if (!cursor) return {};
+  const at = cursor.lastIndexOf('~');
+  if (at === -1) return { keyset: cursor };
+  const carried = new Date(cursor.slice(at + 1));
+  if (Number.isNaN(carried.getTime())) return { keyset: cursor.slice(0, at) };
+  return { keyset: cursor.slice(0, at), asOf: carried };
+}
+
 export async function readItems(
   store: Store,
   projectId: string,
@@ -1461,9 +1483,10 @@ export async function readItems(
   if (since && Number.isNaN(since.getTime())) {
     throw new ServiceError(400, 'bad_since', 'since must be an ISO timestamp.');
   }
+  const { keyset, asOf: carried } = splitCursor(input.cursor);
   // Stamped before the read, never after: anything written while this query
   // ran must fall inside the next window rather than between them.
-  const asOf = new Date();
+  const asOf = carried ?? new Date();
   const items = await listItems(store, projectId, {
     ...(input.status === undefined ? {} : { status: input.status }),
     ...(input.owner === undefined ? {} : { owner: input.owner }),
@@ -1471,14 +1494,17 @@ export async function readItems(
     ...(input.source === undefined ? {} : { source: input.source }),
     ...(input.stale === undefined ? {} : { stale: input.stale }),
     ...(input.claimed === undefined ? {} : { claimed: input.claimed }),
-    ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+    ...(keyset === undefined ? {} : { cursor: keyset }),
     ...(since ? { since } : {}),
     limit,
     order,
   });
   return {
     items,
-    nextCursor: items.length === limit ? itemCursor(items[items.length - 1]!, order) : null,
+    nextCursor:
+      items.length === limit
+        ? `${itemCursor(items[items.length - 1]!, order)}~${asOf.toISOString()}`
+        : null,
     asOf,
   };
 }
