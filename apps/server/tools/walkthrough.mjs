@@ -16,6 +16,11 @@
  *   node apps/server/tools/walkthrough.mjs
  *   node apps/server/tools/walkthrough.mjs --url http://localhost:3000
  *   node apps/server/tools/walkthrough.mjs --fresh      # a new project, not the kept one
+ *   node apps/server/tools/walkthrough.mjs --mail       # and say so by email if it broke
+ *
+ * The mail goes through the provider rather than through the board, for the
+ * reason the watchdog already learned: an alert that travels through the thing
+ * it watches is an alert nobody gets on the day it matters.
  *
  * One project, kept between runs in ~/.muster/walkthrough.json and keyed by the
  * deployment it belongs to. A tool that signs up every time it runs is a tool
@@ -33,8 +38,10 @@ const flag = (name) => {
 };
 const BASE = (flag('--url') || 'https://musterboard.dev').replace(/\/$/, '');
 const FRESH = args.includes('--fresh');
+const MAIL = args.includes('--mail');
 const HOME = join(homedir(), '.muster');
 const STATE = join(HOME, 'walkthrough.json');
+const ALERT_TO = process.env.MUSTER_ALERT_TO || 'gwizdala.kr@gmail.com';
 const AGENT = 'probe-loop';
 const SLUG = 'probe:the-card';
 const QUESTION = 'Walkthrough probe: does this reach a person?';
@@ -46,6 +53,27 @@ const check = (what, condition, detail) => {
   failures.push(what);
   console.log(`  FAIL  ${what}${detail ? `\n        ${String(detail).slice(0, 300)}` : ''}`);
 };
+
+/** Said outside the service, because the service is what is being doubted. */
+async function mail(subject, lines) {
+  const keyPath = join(HOME, 'resend.key');
+  if (!existsSync(keyPath)) return 'no key';
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${readFileSync(keyPath, 'utf8').trim()}`,
+      'content-type': 'application/json',
+      'user-agent': 'muster-walkthrough/1.0',
+    },
+    body: JSON.stringify({
+      from: 'Muster walkthrough <hello@musterboard.dev>',
+      to: [ALERT_TO],
+      subject,
+      text: lines.join('\n'),
+    }),
+  });
+  return response.ok ? 'sent' : `failed ${response.status}`;
+}
 
 const state = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8')) : {};
 const saveState = () => {
@@ -170,6 +198,13 @@ const run = async () => {
   check('and reloads itself', closed.body.includes('http-equiv="refresh"'));
   check('and varies by the cookie it is drawn for', /cookie/i.test(closed.headers.get('vary') ?? ''));
   check('and offers a stranger the sign in', closed.body.includes('>sign in</a>'));
+  // The other branch of the same sentence. The navigation is drawn from the
+  // presence of the session cookie and nothing else, deliberately: no page
+  // should read the database to decide one word. So any cookie exercises it,
+  // which is the only way this tool can reach the branch at all without an
+  // inbox to take a code out of.
+  const known = await html(board, { headers: { cookie: 'muster_session=walkthrough' } });
+  check('and calls somebody signed in by their own name', known.body.includes('>your projects</a>'));
   check(
     'a card links to its own address',
     closed.body.includes(`href="${board}?card=${encodeURIComponent(SLUG)}#`),
@@ -186,9 +221,18 @@ const run = async () => {
   check('with somewhere to write a note', opened.body.includes(`action="${board}/note"`));
   check('and the page holds still while it is open', !opened.body.includes('http-equiv="refresh"'));
 
+  // As a browser posts it, not as curl does. A form on a page with a
+  // `Referrer-Policy: no-referrer` sends `Origin: null`, and for twenty one
+  // hours those two correct headers cancelled each other out and refused every
+  // write on our own board. A check that posts without them is green through
+  // exactly that outage.
   const answered = await html(`/r/${readToken}/escalations/${escalation.id}`, {
     method: 'POST',
-    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      origin: 'null',
+      'sec-fetch-site': 'same-origin',
+    },
     body: 'status=answered&answer=Yes.+This+is+the+walkthrough+answering+itself.&back=board',
   });
   check('an answer posts from the board', answered.status === 303, answered.status);
@@ -203,6 +247,28 @@ const run = async () => {
     (inbox.body?.answers ?? []).some((one) => one.id === escalation.id),
     JSON.stringify(inbox.body).slice(0, 200),
   );
+
+  const noted = await html(`${board}/note`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      origin: BASE,
+      'sec-fetch-site': 'same-origin',
+    },
+    body: `slug=${encodeURIComponent(SLUG)}&message=${encodeURIComponent('The walkthrough was here.')}`,
+  });
+  check('a note posts from the board as a browser posts it', noted.status === 303, noted.status);
+
+  const elsewhere = await html(`${board}/note`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      origin: 'https://not-this-service.example',
+      'sec-fetch-site': 'cross-site',
+    },
+    body: `slug=${encodeURIComponent(SLUG)}&message=${encodeURIComponent('From somewhere else.')}`,
+  });
+  check('and the same form posted from another site is refused', elsewhere.status === 403, elsewhere.status);
 
   console.log('\nthe same board over MCP');
   const tools = await mcp(token, 'tools/list', {});
@@ -221,6 +287,16 @@ const run = async () => {
     `\n${failures.length === 0 ? 'all clear' : `${failures.length} broken:\n  - ${failures.join('\n  - ')}`}`,
   );
   console.log(`project ${id} kept for the next run; purge with tools/purge-projects.mjs --ids ${id}`);
+  if (MAIL && failures.length > 0) {
+    const said = await mail(`Muster walkthrough: ${failures.length} broken`, [
+      `${BASE} answers, and behaves differently than it is meant to:`,
+      '',
+      ...failures.map((line) => `  - ${line}`),
+      '',
+      'Run it yourself: node apps/server/tools/walkthrough.mjs',
+    ]).catch((error) => `failed ${error.message}`);
+    console.log(`mail ${said}`);
+  }
   process.exit(failures.length === 0 ? 0 : 1);
 };
 
