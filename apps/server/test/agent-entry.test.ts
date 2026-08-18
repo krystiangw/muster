@@ -211,6 +211,20 @@ describe('A. discovery', () => {
     }
   });
 
+  it('keeps a body that is too large from reading as a syntax error', async () => {
+    // The parser's failures are one thing and every other client error is
+    // another. Rounding them together told a caller whose body was a megabyte
+    // of perfectly good JSON to go looking for a missing quote.
+    const answer = await harness.server.inject({
+      method: 'POST',
+      url: '/p',
+      headers: { 'content-type': 'application/json' },
+      payload: JSON.stringify({ name: 'x', description: 'y'.repeat(2_000_000) }),
+    });
+    assert.equal(answer.statusCode, 413);
+    assert.notEqual(answer.json().error, 'bad_json');
+  });
+
   it('describes itself the same way wherever a catalogue asks', async () => {
     // Three surfaces ask for one line about this server, and `server.json` is
     // published by hand from a laptop, so it is the one that drifts: the

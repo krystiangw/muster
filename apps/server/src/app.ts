@@ -447,14 +447,26 @@ ${rows
      * Fastify already decided this is a 400 and says which failure it was, so
      * the only thing missing was reading it.
      */
+    const code = (error as { code?: string }).code;
+    if (code === 'FST_ERR_CTP_EMPTY_JSON_BODY' || code === 'FST_ERR_CTP_INVALID_JSON_BODY') {
+      return reply.code(400).send({
+        error: 'bad_json',
+        message:
+          code === 'FST_ERR_CTP_EMPTY_JSON_BODY'
+            ? 'The body was empty. Send the JSON this call takes, or {} if every field is optional.'
+            : `That body is not JSON this can read: ${error.message}. Nothing was applied, and retrying it unchanged will fail the same way.`,
+        docs: `${config.baseUrl}/openapi.json`,
+      });
+    }
+    // Anything else the framework has already judged a client error keeps its
+    // own status and its own words. Rounding all of them to "bad json" told a
+    // caller whose body was a megabyte of perfectly good JSON to go and look
+    // for a syntax error.
     const status = (error as { statusCode?: number }).statusCode;
     if (typeof status === 'number' && status >= 400 && status < 500) {
-      const empty = (error as { code?: string }).code === 'FST_ERR_CTP_EMPTY_JSON_BODY';
       return reply.code(status).send({
-        error: 'bad_json',
-        message: empty
-          ? 'The body was empty. Send the JSON this call takes, or {} if every field is optional.'
-          : `That body is not JSON this can read: ${error.message}. Nothing was applied, and retrying it unchanged will fail the same way.`,
+        error: code ? String(code).toLowerCase() : 'bad_request',
+        message: error.message,
         docs: `${config.baseUrl}/openapi.json`,
       });
     }

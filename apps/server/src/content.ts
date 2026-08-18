@@ -522,9 +522,15 @@ by a token, which is every project an agent makes, is nobody's until this.)
 
 This one needs the **admin** token, which is the one \`POST /p\` handed you, not
 a worker key you minted later: handing the board to somebody is how it changes
-hands, and ownership has no way back. \`DELETE /items/<slug>\` is admin as well,
-for the same reason in miniature. Every other call in this document works with
-either. Taking it
+hands, and ownership has no way back.
+
+The whole admin-only list, so a worker key never meets a 403 it was not
+warned about: \`POST /share\`, \`POST /claim\` and \`POST /claim/verify\`,
+\`DELETE /items/<slug>\`, \`PUT /board\`, \`PATCH /escalations/<id>\`,
+\`POST /read-link/rotate\`, \`PATCH\` on the project itself, everything under
+\`/keys\`, and an upsert that carries \`history\`. The five calls this document
+opens with are not on that list, which is the point: the work an agent does all
+day needs the smaller key. Taking it
 over lifts the limits and stops it expiring, so do this early:
 
 \`\`\`bash
