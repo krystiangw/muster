@@ -133,6 +133,33 @@ describe('the operator view', () => {
     );
   });
 
+  it('refuses a visibility it does not have, rather than picking one', async () => {
+    // Reading "anything that is not owner" as "open it by link" is a coin flip
+    // on a privacy switch, and the wrong side of it publishes a board.
+    const project = await createProject(harness, 'privacy');
+    await claimFor(project, 'me@example.com');
+    const session = await signIn(harness, 'me@example.com');
+    await harness.server.inject({
+      method: 'POST',
+      url: `/operator/projects/${project.id}/visibility`,
+      payload: session.form({ visibility: 'owner' }),
+      headers: session.headers,
+    });
+
+    const nonsense = await harness.server.inject({
+      method: 'POST',
+      url: `/operator/projects/${project.id}/visibility`,
+      payload: session.form({ visibility: 'sideways' }),
+      headers: session.headers,
+    });
+    assert.equal(nonsense.statusCode, 400);
+    assert.equal(
+      (await harness.store.projects.findOne({ _id: project.id }))?.visibility,
+      'owner',
+      'and the board it was protecting stays protected',
+    );
+  });
+
   it('forgets a cookie that opens nothing, so the navigation stops lying', async () => {
     // The navigation is drawn from the cookie's presence and nothing else, on
     // purpose: no page reads the database to decide one word. The cost is a

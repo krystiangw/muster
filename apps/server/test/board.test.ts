@@ -1924,7 +1924,18 @@ describe('a board many agents write to', () => {
     assert.equal(crafted.statusCode, 303);
     const location = String(crafted.headers.location);
     assert.ok(!location.includes('//'), `a redirect with an authority in it: ${location}`);
-    assert.equal(location, '/r/..%2F%2Felsewhere.example/board');
+    assert.equal(location, '/r/..%2f%2felsewhere.example/board', 'the path exactly as it arrived');
+
+    // Dots included: `%2e%2e` decoded and re-encoded comes back as `..`, which
+    // a client resolves away, and `/r/../board` is a path this service never
+    // named. The test harness resolves the encoded dots before routing, so the
+    // case is written the way it reaches a real server: encoded dots inside a
+    // longer token.
+    const dotted = await harness.server.inject({
+      method: 'GET',
+      url: '/r/%2e%2e%2fsomewhere/board?owner=',
+    });
+    assert.equal(String(dotted.headers.location), '/r/%2e%2e%2fsomewhere/board');
 
     // And what it lands on is the 404 any unknown token gets.
     const landed = await harness.server.inject({ method: 'GET', url: location });

@@ -1164,12 +1164,18 @@ ${
     // the ceiling: this bounce is the same reader on the same page, and
     // charging them twice for one filter is a board that answers 429 to
     // somebody who pressed Enter once.
-    const raw = new URLSearchParams(request.url.split('?')[1] ?? '');
+    const [asked, sent] = request.url.split('?');
+    const raw = new URLSearchParams(sent ?? '');
     if ([...raw.entries()].some(([, value]) => value === '')) {
       const kept = new URLSearchParams();
       for (const [name, value] of raw.entries()) if (value !== '') kept.append(name, value);
       const canonical = kept.toString();
-      return reply.redirect(`/r/${encodeURIComponent(readToken)}/board${canonical === '' ? '' : `?${canonical}`}`, 303);
+      // The path exactly as it arrived, rather than one rebuilt from the
+      // decoded token: only the query is being tidied here. Rebuilding it put
+      // whatever was in the path through a decode and an encode, and the pair
+      // is not a round trip: `%2e%2e` comes back as `..`, which a client then
+      // resolves away to a path this service never named.
+      return reply.redirect(`${asked}${canonical === '' ? '' : `?${canonical}`}`, 303);
     }
 
     if (!limitSeeking(request, reply)) return reply;

@@ -914,9 +914,18 @@ curl -sX DELETE ${escapeHtml(config.baseUrl)}/v1/${escapeHtml(project._id)}/keys
     const project = await store.projects.findOne({ _id: id, claimedBy: session.email });
     if (!project) throw new ServiceError(404, 'not_found', 'No project of yours with that id.');
 
-    await updateProject(store, project._id, {
-      visibility: form.visibility === 'owner' ? 'owner' : 'link',
-    });
+    // The two states this control has, and nothing else. Reading "anything
+    // that is not owner" as "open it by link" is a coin flip on a privacy
+    // switch: a request that says `visibility=sideways` has not asked for the
+    // board to be readable by whoever holds the link.
+    if (form.visibility !== 'owner' && form.visibility !== 'link') {
+      throw new ServiceError(
+        400,
+        'bad_visibility',
+        'A project is "link", which anybody holding the read link can open, or "owner", which only you can.',
+      );
+    }
+    await updateProject(store, project._id, { visibility: form.visibility });
     return reply.redirect('/operator', 303);
   });
 
