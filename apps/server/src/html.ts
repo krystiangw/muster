@@ -424,6 +424,7 @@ ${options.description ? `<meta name="description" content="${escapeHtml(options.
 ${(options.verification ?? siteVerification) ? `<meta name="google-site-verification" content="${escapeHtml(options.verification ?? siteVerification)}">\n` : ''}<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon.ico" sizes="48x48">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="ai-catalog" href="/.well-known/ai-catalog.json">
 <meta name="theme-color" content="#0e5f59">
 <link rel="stylesheet" href="${STYLE_PATH}">
 </head>

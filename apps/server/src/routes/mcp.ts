@@ -64,12 +64,37 @@ export interface McpDeps {
   notifier: Notifier;
 }
 
+/**
+ * What a client is allowed to assume before it runs the tool.
+ *
+ * These are hints in the protocol and a decision in practice: several clients
+ * run a read-only tool without asking anybody, so the flattering answer is the
+ * one that gets a write executed unattended. Every field is set explicitly on
+ * every tool for that reason, and a tool that writes on one branch and not on
+ * the other is annotated for the branch that writes.
+ *
+ * - readOnly: cannot change anything, on any argument.
+ * - destructive: may undo or close somebody's work, not only add to it.
+ * - idempotent: calling it twice with the same arguments leaves the same state
+ *   as calling it once. A timeline entry per call is an effect, so a tool that
+ *   appends one is not idempotent however stable its key is.
+ * - openWorld: reaches past this project, which here means it sends mail to a
+ *   person.
+ */
+interface ToolAnnotations {
+  readOnlyHint: boolean;
+  destructiveHint: boolean;
+  idempotentHint: boolean;
+  openWorldHint: boolean;
+}
+
 interface ToolDefinition {
   name: string;
   title: string;
   description: string;
   inputSchema: Record<string, unknown>;
   requiresProject: boolean;
+  annotations: ToolAnnotations;
 }
 
 function str(value: unknown, fallback = ''): string {
@@ -123,6 +148,13 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: false,
+    // A second call with the same name is a second project: nothing about the name addresses anything.
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
   },
   {
     name: 'register_agent',
@@ -139,6 +171,13 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    // The handle is the key, so registering twice converges on one agent.
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
   },
   {
     name: 'upsert_item',
@@ -194,6 +233,13 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    // Idempotent on the card, not on the call: a note or a status change writes a timeline entry every time.
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
   },
   {
     name: 'claim_item',
@@ -210,6 +256,13 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    // Claiming again extends the lease, which is a different expiry and so a different state.
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
   },
   {
     name: 'append_note',
@@ -226,6 +279,13 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    // Appending is the point.
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
   },
   {
     name: 'next_item',
@@ -245,6 +305,13 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    // Annotated for the branch that writes: with claim it takes a lease, and a client cannot tell which branch it gets before it calls.
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
   },
   {
     name: 'list_items',
@@ -289,6 +356,12 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
   },
   {
     name: 'observe',
@@ -304,6 +377,13 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    // Closes items whose signal has been absent long enough, which is somebody else's work being ended.
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
   },
   {
     name: 'escalate',
@@ -322,6 +402,13 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    // Files a question and mails the operator, so a retry is a second question in a human's queue and a second mail.
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
   },
   {
     name: 'board',
@@ -344,6 +431,12 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
   },
   {
     name: 'move',
@@ -361,6 +454,13 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    // A column can carry a terminal status, and the note lands on the timeline each time.
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
   },
   {
     name: 'share_project',
@@ -377,6 +477,13 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    // Ownership has no way back, and it mails an address you name.
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: true,
+      idempotentHint: false,
+      openWorldHint: true,
+    },
   },
   {
     name: 'inbox',
@@ -388,6 +495,12 @@ const TOOLS: ToolDefinition[] = [
       properties: { agent: { type: 'string' } },
     },
     requiresProject: true,
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
   },
 ];
 
@@ -489,6 +602,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
                 title: tool.title,
                 description: tool.description,
                 inputSchema: tool.inputSchema,
+                annotations: tool.annotations,
               })),
             },
           };

@@ -669,7 +669,14 @@ want us to run it under an agreement, and the free tier stays.</p>
       .send(
         page(request, {
             title: 'Muster pricing',
-            description: 'Free tier limits, retention and self-hosting.',
+            // What a search engine shows about this page is what an agent
+            // rejects us on, and it rejects a page that reads as "contact
+            // sales" without opening it. So the snippet answers the only
+            // question being asked at that moment: what it costs to start,
+            // in numbers, from the same config the table below is built from.
+            description:
+              `Free, no card and no account: ${free.items} open items and ${free.agents} agents per project. ` +
+              `A project an agent made itself holds ${demo.items} for ${config.demoTtlDays} days. Self-hosting: same limits, set by you.`,
           },
           body,
         ),

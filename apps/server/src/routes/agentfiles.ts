@@ -5,6 +5,7 @@ import { isCrawler, record } from '../events.js';
 import {
   agentAccessJson,
   agentSignupMd,
+  aiCatalogJson,
   llmsTxt,
   mcpJson,
   robotsTxt,
@@ -41,6 +42,7 @@ export function registerAgentFiles(app: FastifyInstance, config: Config, store: 
   const robots = robotsTxt(config);
   const access = agentAccessJson(config);
   const mcpCard = mcpJson(config);
+  const catalog = aiCatalogJson(config);
 
   // Public text with nothing secret in it, which is what makes it safe to
   // compress. See the allowlist in app.ts.
@@ -125,6 +127,11 @@ export function registerAgentFiles(app: FastifyInstance, config: Config, store: 
   app.get('/.well-known/mcp.json', { schema: { hide: true } }, async (request) => {
     seen('mcp.json', request);
     return mcpCard;
+  });
+  app.get('/.well-known/ai-catalog.json', { schema: { hide: true } }, async (request, reply) => {
+    seen('ai-catalog.json', request);
+    reply.compressible = true;
+    return catalog;
   });
   // The legacy plugin manifest, kept for clients that still look for it. Its
   // schema requires a contact address and a logo, and a manifest missing a

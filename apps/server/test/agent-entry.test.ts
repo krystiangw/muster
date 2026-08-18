@@ -88,6 +88,54 @@ describe('A. discovery', () => {
     assert.match(share.description, /admin token/);
   });
 
+  it('tells a client what every tool will do before it runs it', async () => {
+    // Several clients auto-approve a read-only tool. So the annotation is not
+    // documentation, it is the difference between a tool being run unattended
+    // and being shown to somebody first, and the flattering answer is the one
+    // that gets a write executed behind the operator's back. Two things are
+    // checked: that no tool ships without an answer, and that the answers we
+    // would most like to be wrong about are the honest ones.
+    const tools = (
+      await harness.server.inject({
+        method: 'POST',
+        url: '/mcp',
+        payload: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+      })
+    ).json().result.tools as Array<{
+      name: string;
+      annotations?: Record<string, boolean>;
+    }>;
+
+    for (const tool of tools) {
+      assert.ok(tool.annotations, `${tool.name} must say what it does`);
+      for (const hint of [
+        'readOnlyHint',
+        'destructiveHint',
+        'idempotentHint',
+        'openWorldHint',
+      ]) {
+        assert.equal(
+          typeof tool.annotations![hint],
+          'boolean',
+          `${tool.name}.${hint} must be set explicitly, not left to a default`,
+        );
+      }
+    }
+
+    const byName = new Map(tools.map((tool) => [tool.name, tool.annotations!]));
+    // next_item writes whenever claim is set, and the client cannot see which
+    // branch it will get. share_project hands the board away for good and
+    // mails somebody. observe closes other people's items.
+    for (const name of ['next_item', 'share_project', 'observe', 'upsert_item']) {
+      assert.equal(byName.get(name)!.readOnlyHint, false, `${name} writes`);
+    }
+    assert.equal(byName.get('share_project')!.destructiveHint, true);
+    assert.equal(byName.get('observe')!.destructiveHint, true);
+    assert.equal(byName.get('escalate')!.openWorldHint, true, 'escalate mails a person');
+    assert.equal(byName.get('list_items')!.readOnlyHint, true);
+    assert.equal(byName.get('board')!.readOnlyHint, true);
+  });
+
   it('publishes llms.txt with the entry points in it', async () => {
     const response = await harness.server.inject({ method: 'GET', url: '/llms.txt' });
     assert.equal(response.statusCode, 200);
@@ -154,6 +202,32 @@ describe('B. agent entry', () => {
     const mcp = await harness.server.inject({ method: 'GET', url: '/.well-known/mcp.json' });
     assert.equal(mcp.statusCode, 200);
     assert.equal(mcp.json().transport, 'streamable-http');
+
+    // The AIR catalogue. Adoption is near zero and it is served anyway, on the
+    // grounds that it is generated from the same config as everything else and
+    // so cannot drift. That last part is what this checks: every entry has to
+    // point at something this server actually answers, because a catalogue
+    // naming a dead URL is worse than no catalogue at all.
+    const catalog = await harness.server.inject({
+      method: 'GET',
+      url: '/.well-known/ai-catalog.json',
+    });
+    assert.equal(catalog.statusCode, 200);
+    const air = catalog.json() as {
+      entries: Array<{ identifier: string; url: string }>;
+    };
+    assert.ok(air.entries.length >= 2);
+    for (const entry of air.entries) {
+      assert.match(entry.identifier, /^urn:air:/);
+      const reached = await harness.server.inject({
+        method: 'GET',
+        url: new URL(entry.url).pathname,
+      });
+      assert.equal(reached.statusCode, 200, entry.url);
+    }
+
+    const robots = await harness.server.inject({ method: 'GET', url: '/robots.txt' });
+    assert.match(robots.body, /AI-Catalog: \S+\/\.well-known\/ai-catalog\.json/);
 
     // Three surfaces once told a newcomer to run `npm install @muster/sdk`
     // while the registry answered 404. Both states are checked, because both

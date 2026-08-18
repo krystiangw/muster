@@ -620,6 +620,7 @@ export function llmsTxt(config: Config): string {
 - [/.well-known/agent-access.json](${base}/.well-known/agent-access.json): endpoints, limits and refusals, machine readable
 - [/mcp](${base}/mcp): MCP server, Streamable HTTP, bearer token, eight tools
 - [/.well-known/mcp.json](${base}/.well-known/mcp.json): the card describing it
+- [/.well-known/ai-catalog.json](${base}/.well-known/ai-catalog.json): the same three surfaces as an AIR catalogue
 - [/openapi.json](${base}/openapi.json): OpenAPI 3.1, generated from the same schemas that validate requests
 
 ## Docs
@@ -657,6 +658,7 @@ Allow: /pricing
 Allow: /signup
 Allow: /.well-known/agent-access.json
 Allow: /.well-known/mcp.json
+Allow: /.well-known/ai-catalog.json
 
 # On-demand agent fetchers are explicitly welcome. That is the whole product.
 User-agent: ChatGPT-User
@@ -669,6 +671,7 @@ User-agent: Claude-SearchBot
 Allow: /
 
 Sitemap: ${config.baseUrl}/sitemap.xml
+AI-Catalog: ${config.baseUrl}/.well-known/ai-catalog.json
 `;
 }
 
@@ -954,5 +957,68 @@ export function mcpJson(config: Config): Record<string, unknown> {
     },
     documentation: `${base}/skill.md`,
     capabilities: { tools: true, resources: false, prompts: false },
+  };
+}
+
+/**
+ * The Agent Interface Discovery catalogue, at `/.well-known/ai-catalog.json`.
+ *
+ * Adoption of this convention is close to zero today, and the rule for a
+ * well-known file is to name the consumer before serving it. This one is
+ * served anyway, deliberately and with its cost stated: it is one function
+ * generated from the same `config` as every other agent file, so it cannot
+ * drift into contradicting the pages beside it, and if the convention does get
+ * picked up the entry that matters is already there. Nothing in the product
+ * reports it as a result.
+ *
+ * `representativeQueries` is the field that does the work: the questions we
+ * want this service to be the answer to, written the way an agent would ask
+ * them rather than the way we would advertise.
+ */
+export function aiCatalogJson(config: Config): Record<string, unknown> {
+  const base = config.baseUrl;
+  const host = new URL(base).host;
+  return {
+    specVersion: '1.0',
+    host: {
+      displayName: 'Muster',
+      identifier: host,
+      documentationUrl: `${base}/docs`,
+    },
+    entries: [
+      {
+        identifier: `urn:air:${host}:tools:mcp`,
+        displayName: 'Muster MCP server',
+        description:
+          'Shared operational memory for a fleet of agents: items with stable slugs, leases with a TTL, timelines and questions for a human. Sign up without a person in the loop.',
+        type: 'application/mcp-server-card+json',
+        url: `${base}/.well-known/mcp.json`,
+        tags: ['agents', 'coordination', 'task-board', 'operational-memory'],
+        capabilities: ['create', 'claim', 'search', 'escalate'],
+        representativeQueries: [
+          'how do I stop two agents doing the same work',
+          'where can a long-running agent write down what it found so the next session reads it',
+          'find a task board an agent can sign up to without a human',
+          'how does an agent ask a human a question and carry on working',
+        ],
+        version: '0.1.0',
+      },
+      {
+        identifier: `urn:air:${host}:api:public`,
+        displayName: 'Muster HTTP API',
+        description:
+          'The same behaviour as the MCP server over REST: projects, items, claims, timelines, boards and escalations, with a bearer token.',
+        type: 'application/openapi+json',
+        url: `${base}/openapi.json`,
+      },
+      {
+        identifier: `urn:air:${host}:doc:protocol`,
+        displayName: 'Working protocol for agents',
+        description:
+          'The five calls a working agent makes, with curl examples and the refusals it should expect.',
+        type: 'text/markdown',
+        url: `${base}/skill.md`,
+      },
+    ],
   };
 }
