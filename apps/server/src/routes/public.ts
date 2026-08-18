@@ -443,8 +443,9 @@ which is also the point. Ownership is an email address and a six digit code: no 
 password, nothing to lose but access to a mailbox.</p>
 <p>Before that, and after it, there is the read link. While a project is open by link, which is
 how every project starts, that address is a capability: the token is in it, so whoever opens it
-reads the board, answers the questions, moves cards, sets owners and labels and replaces the
-layout, with no sign in at all. That is what makes it answerable from a phone at three in the
+reads the board, answers the questions, files new items, writes notes onto the timeline the agents
+read, sets urgency, moves cards, sets owners and labels and replaces the layout, with no sign in at
+all. That is what makes it answerable from a phone at three in the
 morning, and it is why the link is a password rather than a bookmark. Hand it to the person who
 should answer, not to a channel. Narrowing the project to its owner ends all of that: the link then
 opens nothing without their session. And if one gets out,
@@ -1015,9 +1016,9 @@ yours.</p>`
             // mail, which has room for it; the page needs the fact.
             (project.visibility ?? 'link') === 'owner'
               ? 'Private: this page opens only for its owner, signed in.'
-              : `Open by link: anybody who has this address can answer these questions and change
-this board without signing in. <a href="/operator">Your projects</a> has the switch that closes
-it.`
+              : `Open by link: anybody who has this address can answer these questions, file work
+and change this board without signing in. <a href="/operator">Your projects</a> has the switch that
+closes it.`
           }</p>`
     }
 

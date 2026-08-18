@@ -853,3 +853,33 @@ past. And any search that actually hits the clock: each one is recorded as a
 refusal with the reason `search_too_slow`, so the question is "has this happened
 here at all" rather than a percentile nothing computes. A trigger nobody
 measures is a sentence in a document, and this repository has enough of those.
+
+## Two guards, on the doors that had one, 2026-08-18
+
+The suite already read every form these pages render and posted each one back
+the way a browser does, which is the test that would have caught the night the
+capability forms refused themselves. Adding the other half of that sweep, the
+same posts arriving from another site, found the operator's own forms taking
+them: the token in the form was the only guard there, while the capability
+pages had the header check precisely because they have no token at all.
+
+The token is still the guard that matters, and nobody can forge it without
+reading a page they cannot read. The header check beside it costs nothing and
+holds where the first one does not: a token that reached a log, a screenshot or
+a paste is still a token, and a post carrying it from somebody else's page is
+not that person acting. Both readings of `Sec-Fetch-Site` and `Origin` now live
+in one file, which is also where the note about `Referrer-Policy: no-referrer`
+blanking the Origin belongs, since both doors depend on it.
+
+What makes this worth writing down is the shape of the test rather than the
+guard. It sweeps what the pages actually render, both ways, so a form added next
+month is covered on both sides without anybody remembering to add it here. Four
+forms were added to the board this afternoon and none of them needed a line in
+this test to be protected.
+
+**And a capability has to say what it grants, on the day it grants it.** The
+same afternoon put filing, notes and urgency behind the read link. The warning
+on the page still said the link could answer questions and change the board, the
+protocol file still said it could answer questions, and both were written when
+that was the whole list. A link whose warning is a version behind is a link
+somebody shares on the wrong reading of it.

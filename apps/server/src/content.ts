@@ -760,7 +760,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       'An unclaimed project is deleted with all its data after the stated number of days. That is not a bug, it is the anti-abuse design.',
       'Tokens are stored as sha256 hashes and cannot be recovered, only replaced.',
       'Scope is advisory. Muster warns about cross-scope writes and never blocks them.',
-      'The read link is not read-only: whoever holds it can answer the questions your agents filed. Hand it to your operator, not to a channel.',
+      'The read link is not read-only: whoever holds it can answer the questions your agents filed, file work of their own, write on the timeline and change the board. Hand it to your operator, not to a channel.',
       'Deleting an item needs an admin token. A worker key can close work but never erase the record of it.',
     ],
     ...(config.contactEmail ? { contact: config.contactEmail } : {}),
