@@ -1507,13 +1507,23 @@ Revisit if a second operator's boards need to see each other, or if a single
 board passes the point where a namespace filter stops being enough to work in.
 
 **What the namespace filter actually costs.** Measured on twenty thousand cards
-in one project, eight areas, with a neighbouring project of the same size
-beside it. `prefix=ops:` examines 2502 index keys and fetches 2500 documents.
-The same regex unanchored examines 20001 keys, because it has to walk the whole
-project's slugs, though it still only fetches what matches. `q=ops` examines
-20000 keys and fetches **20000 documents**, every card in the project, because a
-substring on two fields cannot be answered from the index.
+in one project, eight areas, one card in twenty still open, with both competing
+indexes present.
 
-So the honest sentence is not "prefix is indexed and q is not": both ride the
-same compound index on `{projectId, slug}`, and the difference is how much of it
-each one has to read. That is why `prefix=` has no time budget and `q=` has one.
+| query | keys | docs | index chosen |
+|---|---|---|---|
+| `prefix=ops:` | 2501 | 2500 | `{projectId, slug}` |
+| `q=ops` alone | 20000 | 20000 | `{projectId, status, priority, touchedAt}` |
+| `q=ops` with `status=open` | 1000 | 1000 | the same status index |
+| `q=card` with `prefix=ops:` | 2501 | 2500 | `{projectId, slug}` |
+
+Two things this corrects, both of which were published as guesses first. The
+queries do not ride the same index: an unhinted `q` takes the status index and
+reads the project, and adding `prefix=` is what moves the plan onto the slug
+index. And `q` does not always fetch everything: it fetches whatever the filters
+beside it have not already narrowed away, which is the whole project only when
+it stands alone.
+
+So the difference is not indexed against unindexed. A substring over two fields
+cannot be answered from an index at all, and `prefix=` can, which is why one of
+them has a time budget and the other does not.

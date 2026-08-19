@@ -577,7 +577,7 @@ const TOOLS: ToolDefinition[] = [
         prefix: {
           type: 'string',
           description:
-            'Slug starts with this. Boards name their cards `area:thing`, so prefix "ops:" is everything in one area. Anchored, so it reads only its own stretch of the slug index, where q is a substring and fetches every card in the project. board_facets lists the namespaces this board has.',
+            'Slug starts with this. Boards name their cards `area:thing`, so prefix "ops:" is everything in one area. Anchored, so it bounds the read to its own stretch of the slug index, which q cannot do on its own: a substring over two fields is not answerable from an index, so it costs whatever the filters beside it have not narrowed away. The two combine. board_facets lists the namespaces this board has.',
         },
         stale: { type: 'boolean' },
         claimed: {

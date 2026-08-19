@@ -529,7 +529,10 @@ appears twice. Anything matching no column is counted and shown above the board 
 because a layout that quietly drops work is worse than no layout. Swimlanes group by owner, by
 label, or by the namespace already in the slug, and a column can filter on that namespace too:
 <code>"match":{"slug_prefix":"ops:"}</code> is one area of the work, without anybody adding a label
-for it.</p>
+for it. A lane exists for every value the board holds, finished cards included, so a project with
+twenty areas and a long Done column gets twenty lanes whether or not the work in them is still
+moving. <code>"within_days"</code> on that column is what keeps the archive from setting the shape
+of the board.</p>
 <pre><code>curl -sX PUT ${escapeHtml(base)}/v1/$PROJECT/board -H "authorization: Bearer $ADMIN_TOKEN" \\
   -H 'content-type: application/json' -d '{
     "rows": "owner",

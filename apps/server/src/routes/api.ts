@@ -855,7 +855,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
               prefix: {
                 type: 'string',
                 description:
-                  'Slug starts with this. Boards name their cards `area:thing`, so `prefix=ops:` is everything in one area. Anchored, so it reads only its own stretch of the slug index: measured on twenty thousand cards, this examines the keys of one area while q=, a substring, fetches every card in the project.',
+                  'Slug starts with this. Boards name their cards `area:thing`, so `prefix=ops:` is everything in one area. Anchored, so it bounds the read to its own stretch of the slug index, which q= cannot do on its own: a substring over two fields is not answerable from an index, so it costs whatever the filters beside it have not narrowed away. The two combine, and prefix= is the cheaper half.',
               },
               stale: { type: 'boolean' },
               claimed: {
