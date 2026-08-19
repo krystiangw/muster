@@ -4,7 +4,7 @@ import { MongoClient } from 'mongodb';
 import { after, before, describe, it } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { flushEvents } from '../src/events.js';
-import { authed, createProject, startHarness, type Harness, type Project } from './helper.js';
+import { authed, createProject, signIn, startHarness, type Harness, type Project } from './helper.js';
 
 /**
  * The delete, watched.
@@ -38,6 +38,8 @@ const HERE = fileURLToPath(new URL('..', import.meta.url));
 let harness: Harness;
 let doomed: Project;
 let neighbour: Project;
+/** The project an RFC 7591 registration provisions, and the credential with it. */
+let registered: string;
 
 /** The script, run the way an operator runs it. */
 function purge(args: string[]): { code: number; out: string } {
@@ -81,17 +83,51 @@ async function traces(id: string): Promise<string[]> {
   }
 }
 
-/** A project with something in every corner of it. */
-async function fill(project: Project): Promise<void> {
+/**
+ * A project with something in every corner of it.
+ *
+ * Every request is checked, and that is not belt and braces. The first version
+ * of this file ignored the answers, two of the six were quietly 400 for a
+ * misspelled field, and the assertions downstream still passed on what the
+ * project had at creation. A fixture that silently stops writing is exactly how
+ * a test of a destructive script keeps passing while covering less every year.
+ */
+async function fill(project: Project, who: string): Promise<void> {
   const headers = authed(project);
-  const post = (path: string, payload: Record<string, unknown>) =>
-    harness.server.inject({ method: 'POST', url: `${project.api}${path}`, headers, payload });
+  const post = async (path: string, payload: Record<string, unknown>, want = 201) => {
+    const response = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}${path}`,
+      headers,
+      payload,
+    });
+    assert.equal(response.statusCode, want, `POST ${path} said ${response.statusCode}: ${response.body}`);
+  };
   await post('/agents', { handle: 'nightly', description: 'the one that sweeps' });
-  await post('/keys', { role: 'agent', label: 'a second door' });
+  await post('/keys', { role: 'write', name: 'a second door' });
   await post('/items', { slug: 'one', title: 'a card', owner: 'alex', labels: ['ops'] });
-  await post('/items/one/claim', { agent: 'nightly' });
-  await post('/items/one/timeline', { agent: 'nightly', message: 'started' });
+  await post('/items/one/claim', { agent: 'nightly' }, 200);
+  await post('/items/one/timeline', { actor: 'nightly', message: 'started' }, 200);
   await post('/escalations', { agent: 'nightly', question: 'is this the one?', priority: 'normal' });
+  // The two that only a person starts: a code emailed to somebody claiming the
+  // board, and an offer of the board to somebody else. Both leave a row keyed
+  // to the project, and both are credentials of a kind, which is why leaving
+  // one behind matters more than leaving a stale item behind.
+  await post('/claim', { email: `${who}@example.com` }, 200);
+  await post('/share', { email: `neighbour-${who}@example.com`, agent: 'nightly' });
+
+  // Asking for a board somebody else owns, which is the fourth collection and
+  // the only one that needs a signed-in person rather than a token.
+  const session = await signIn(harness, `stranger-${who}@example.com`);
+  const readToken = project.readUrl.split('/r/')[1];
+  const asked = await harness.server.inject({
+    method: 'POST',
+    url: `/r/${readToken}/handover`,
+    headers: { ...session.headers, 'content-type': 'application/x-www-form-urlencoded' },
+    payload: session.form({ note: 'may I take this one over' }),
+  });
+  assert.equal(asked.statusCode, 303, asked.body);
+
   // Telemetry is buffered and written on a timer, so without this the purge
   // would run before the funnel rows exist and this test would be quietly
   // checking a collection that happened to be empty.
@@ -102,8 +138,22 @@ before(async () => {
   harness = await startHarness();
   doomed = await createProject(harness, 'the smoke test that outstayed its welcome');
   neighbour = await createProject(harness, 'somebody real');
-  await fill(doomed);
-  await fill(neighbour);
+  await fill(doomed, 'doomed');
+  await fill(neighbour, 'neighbour');
+
+  // The ninth collection cannot be attached to a project that already exists:
+  // a client registers and is given a project of its own. It is purged beside
+  // the first one, because the credential left behind by forgetting it would
+  // be a live client secret for a project that is gone.
+  const client = await harness.server.inject({
+    method: 'POST',
+    url: '/oauth/register',
+    payload: { client_name: 'a client that outstayed its welcome', grant_types: ['client_credentials'] },
+  });
+  assert.equal(client.statusCode, 201, client.body);
+  registered = client.json().project;
+  assert.ok(registered, `the registration names its project: ${client.body}`);
+  await flushEvents();
 });
 
 after(async () => {
@@ -119,7 +169,17 @@ describe('purging a project', () => {
     // are the subject, not how many telemetry rows a round happens to write.
     assert.deepEqual(
       before.map((one) => one.split('=')[0]),
-      ['agents', 'apiKeys', 'escalations', 'events', 'items', 'projects'],
+      [
+        'agents',
+        'apiKeys',
+        'claimCodes',
+        'escalations',
+        'events',
+        'handoverRequests',
+        'items',
+        'projects',
+        'shares',
+      ],
     );
 
     const run = purge(['--ids', doomed.id]);
@@ -144,14 +204,19 @@ describe('purging a project', () => {
 
   it('leaves nothing of the project anywhere, and the neighbour untouched', async () => {
     const neighbourBefore = await traces(neighbour.id);
+    assert.ok(
+      (await traces(registered)).includes('oauthClients=1'),
+      'the registered project carries the credential this is here to remove',
+    );
 
-    const run = purge(['--ids', doomed.id, '--yes']);
+    const run = purge(['--ids', `${doomed.id},${registered}`, '--yes']);
     assert.equal(run.code, 0);
-    assert.match(run.out, /projects: 1 deleted/);
+    assert.match(run.out, /projects: 2 deleted/);
 
     // Not "every collection the script names is empty", which would only ever
     // re-state the list it was given. Every collection there is.
     assert.deepEqual(await traces(doomed.id), [], run.out);
+    assert.deepEqual(await traces(registered), [], run.out);
     assert.deepEqual(await traces(neighbour.id), neighbourBefore, 'the board next door is somebody’s');
   });
 
