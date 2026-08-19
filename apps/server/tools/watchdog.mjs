@@ -40,18 +40,20 @@ const read = (path) => (existsSync(path) ? readFileSync(path, 'utf8').trim() : n
 // version of this script is missing whatever was added since, and undefined + 1
 // is NaN, which counts as a miss forever and alerts never.
 const saved = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8')) : {};
-// Written before the backup check was split out of the outage latch, so its
-// `alerted` could mean either "production is down" or "the archives are old",
-// and there is no way to tell which from the file. Cleared rather than
-// carried: the cost of clearing it wrongly is one repeated outage mail, and
-// the cost of trusting it is the outage mail never going out at all.
+// Written before the backup check was split out of the outage latch, so both
+// its counter and its flag could mean either "production is down" or "the
+// archives are old", and there is no way to tell which from the file. Cleared
+// rather than carried, and both halves of it: keeping the flag would stop the
+// outage mail going out at all, and keeping the count would page on the first
+// transient miss after the upgrade, from failures that were never production's.
+// The cost of clearing wrongly is one round of waiting, once.
 const beforeTheSplit = saved.backupMisses === undefined;
 const state = {
   failures: 0,
   alerted: false,
   lastOk: null,
   ...saved,
-  ...(beforeTheSplit ? { alerted: false } : {}),
+  ...(beforeTheSplit ? { alerted: false, failures: 0 } : {}),
   // Read back through their own types rather than spread as they are: a state
   // written by an older version of this script has no counter at all, and
   // undefined + 1 is NaN, which JSON writes as null, counts as a miss forever

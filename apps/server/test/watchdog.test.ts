@@ -225,11 +225,12 @@ describe('the watchdog, watched', () => {
       JSON.stringify({ failures: 3, alerted: true, lastOk: null }),
     );
     state.landing = 500;
-    // The carried failure count is already past the two-miss rule, so this
-    // pages on the first round: the fixture is a machine that has been failing
-    // for a while and whose only reason for silence was the stale flag.
+    // Both halves of that file are ambiguous, so both are dropped. The count
+    // goes with the flag: three misses that may have been the archives cannot
+    // be allowed to page on the first transient miss of a real one.
+    assert.match(await round(), /^miss 1:/m, 'the carried count is not production\u2019s');
     const out = await round();
-    assert.match(out, /^down:/m, 'the outage pages rather than being latched shut');
+    assert.match(out, /^down:/m, 'and the second real miss pages, rather than being latched shut');
     assert.equal(saved().alerted, true);
   });
 
