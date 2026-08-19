@@ -51,6 +51,18 @@ export interface BoardCell {
   items: ItemDoc[];
   /** True when the column holds more than this response carries. */
   truncated: boolean;
+  /**
+   * Which swimlane a card moved into this column ends up in, when the column
+   * decides that itself.
+   *
+   * A column for one person's work assigns that person, so a move into it
+   * changes the row as well as the column on a board grouped by owner. The
+   * same column is drawn in every lane, so without this a drop onto it in
+   * somebody else's lane looks like it lands there and does not. Absent when
+   * the column leaves the row alone, which means the card stays in the lane it
+   * was already in.
+   */
+  lands?: string;
 }
 
 export interface BoardRow {
@@ -169,14 +181,28 @@ export function buildBoard(
     const row: BoardRow = {
       key,
       title,
-      columns: config.columns.map((column) => ({
-        key: column.key,
-        title: column.title,
-        ...(column.hint ? { hint: column.hint } : {}),
-        count: 0,
-        items: [],
-        truncated: false,
-      })),
+      columns: config.columns.map((column) => {
+        const apply = applyForColumn(column);
+        // Null is a lane too: a column that unassigns lands the card in the
+        // one `rowKeyFor` gives work nobody owns, which is the empty key.
+        const lands =
+          config.rows === 'owner'
+            ? apply.owner === undefined
+              ? undefined
+              : (apply.owner ?? '')
+            : config.rows === 'label'
+              ? apply.addLabels?.[0]
+              : undefined;
+        return {
+          key: column.key,
+          title: column.title,
+          ...(column.hint ? { hint: column.hint } : {}),
+          ...(lands === undefined ? {} : { lands }),
+          count: 0,
+          items: [],
+          truncated: false,
+        };
+      }),
     };
     lanes.set(key, row);
     return row;

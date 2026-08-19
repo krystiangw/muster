@@ -710,12 +710,14 @@ ${
 <div class="board">
 ${lanes
   .map(
-    (lane) => `<div class="lane">
+    (lane) => `<div class="lane" data-lane="${escapeHtml(lane.key)}">
   ${lane.title ? `<div class="lane-title">${escapeHtml(lane.title)}</div>` : ''}
   <div class="cols">
 ${lane.columns
   .map(
-    (cell) => `    <section class="col" data-column="${escapeHtml(cell.key)}">
+    (cell) => `    <section class="col" data-column="${escapeHtml(cell.key)}"${
+      cell.lands === undefined ? '' : ` data-lands="${escapeHtml(cell.lands)}"`
+    }>
       <header><h2>${escapeHtml(cell.title)}</h2><span class="n">${cell.count}</span></header>
       ${cell.hint ? `<p class="why">${escapeHtml(cell.hint)}</p>` : ''}
       ${

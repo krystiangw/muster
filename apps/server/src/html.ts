@@ -546,19 +546,31 @@ const SCRIPT = `(() => {
     clear();
   });
 
-  // A board can have swimlanes, and then the same column key appears in every
-  // one of them. The move form carries a column and nothing else, so a drop
-  // across lanes would change the column and leave the row where it was: the
-  // card would not land where the highlight said it would. The drag does what
-  // the form does or it does not happen, so a target in another lane is not a
-  // target. The button is still there for a move that means something else.
-  const sameLane = (card, column) => card.closest('.lane') === column.closest('.lane');
+  /**
+   * A drop is honest when the lane the card ends up in is the lane it was
+   * dropped on.
+   *
+   * A board can have swimlanes, and then the same column is drawn in every one
+   * of them. Usually a move changes the column and leaves the row alone, so
+   * the only honest target is a column in the card's own lane. But a column
+   * for one person's work assigns that person, and on a board grouped by owner
+   * that move changes the lane too: dropping such a column in its own lane is
+   * exactly right, and dropping the copy of it drawn in the card's lane is the
+   * misleading one. The server works out which columns decide the lane and
+   * says so on each of them, so this compares two strings and repeats none of
+   * the rule.
+   */
+  const laneOf = (element) => element.closest('.lane')?.dataset.lane ?? '';
+  const landsWhereDropped = (card, column) =>
+    column.dataset.lands === undefined
+      ? laneOf(card) === laneOf(column)
+      : column.dataset.lands === laneOf(column);
 
   board.addEventListener('dragover', (event) => {
     const column = event.target.closest('.col[data-column]');
     if (!dragging || !column) return;
     if (column.contains(dragging)) return;
-    if (!sameLane(dragging, column)) return;
+    if (!landsWhereDropped(dragging, column)) return;
     if (!optionFor(dragging, column.dataset.column)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
@@ -575,7 +587,7 @@ const SCRIPT = `(() => {
 
   board.addEventListener('drop', (event) => {
     const column = event.target.closest('.col[data-column]');
-    if (!dragging || !column || !sameLane(dragging, column)) return;
+    if (!dragging || !column || !landsWhereDropped(dragging, column)) return;
     const select = optionFor(dragging, column.dataset.column);
     if (!select) return;
     event.preventDefault();

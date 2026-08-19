@@ -370,6 +370,50 @@ describe('the board in the browser', () => {
     assert.ok(!readOnly.body.includes('draggable="true"'), 'no drag where there is no move form');
   });
 
+  it('says which lane a card lands in, for the columns that decide it', async () => {
+    // The same column is drawn in every swimlane. Usually a move changes the
+    // column and leaves the row alone, so the only honest drop target is a
+    // column in the card's own lane. A column for one person's work assigns
+    // that person, and on a board grouped by owner that move changes the lane
+    // too: then the honest target is that column in its own lane, and the copy
+    // drawn in the card's lane is the misleading one. The markup carries the
+    // answer so the page never has to work it out twice.
+    const project = await createProject(harness, 'swimlanes');
+    await post(project, '/items', { slug: 'alex-work', title: 'work', owner: 'alex', actor: 'a' });
+    await post(project, '/items', { slug: 'bob-work', title: 'more work', owner: 'bob', actor: 'a' });
+    await harness.server.inject({
+      method: 'PUT',
+      url: `${project.api}/board`,
+      headers: authed(project),
+      payload: {
+        rows: 'owner',
+        columns: [
+          { key: 'open', title: 'Open', match: { status: ['open'] } },
+          { key: 'alexs', title: "Alex's", match: { status: ['open'], owner: ['alex'] } },
+          { key: 'bobs', title: "Bob's", match: { status: ['open'], owner: ['bob'] } },
+        ],
+      },
+    });
+    const readToken = (await harness.store.projects.findOne({ _id: project.id }))!.readToken;
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+
+    assert.match(page.body, /<div class="lane" data-lane="alex"/);
+    assert.match(page.body, /<div class="lane" data-lane="bob"/);
+    // A column for one person says whose lane it lands in. A column for a
+    // status says nothing, because it leaves the row alone.
+    assert.match(page.body, /data-column="alexs" data-lands="alex"/);
+    assert.match(page.body, /data-column="bobs" data-lands="bob"/);
+    assert.ok(!/data-column="open" data-lands=/.test(page.body), 'a status column decides no lane');
+
+    // Every column that names a lane names one the board actually draws.
+    const lanes = new Set(
+      [...page.body.matchAll(/<div class="lane" data-lane="([^"]*)"/g)].map((match) => match[1]!),
+    );
+    for (const [, lands] of page.body.matchAll(/data-lands="([^"]*)"/g)) {
+      assert.ok(lanes.has(lands!), `a column lands in "${lands}", which is not a lane on this board`);
+    }
+  });
+
   it('gives every field on a card one box with its own name in it', async () => {
     // A caption above a box makes every row two rows and leaves the eye to work
     // out which caption belongs to which box. One component now: the name sits
