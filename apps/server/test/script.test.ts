@@ -36,6 +36,14 @@ describe('the script the board carries', () => {
       });
     await post(flat, { slug: 'one', title: 'a card', owner: 'alex', labels: ['ops'] });
     await post(flat, { slug: 'two', title: 'another' });
+    // A handle with something written beside it, because that note is the
+    // whole reason the agent list is readable.
+    await harness.server.inject({
+      method: 'POST',
+      url: `${flat.api}/agents`,
+      headers: { authorization: `Bearer ${flat.token}`, 'content-type': 'application/json' },
+      payload: { handle: 'nightly', description: 'runs the sweep after midnight' },
+    });
     const readToken = flat.readUrl.split('/r/')[1];
     board = (await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` })).body;
     // The fields on a card live in its sheet, which an address opens.
@@ -175,7 +183,8 @@ describe('the script the board carries', () => {
     input.dispatchEvent(new window.Event('focus', { bubbles: false }));
     assert.equal(list.hasAttribute('hidden'), false, 'open on focus');
     assert.equal(input.getAttribute('aria-expanded'), 'true');
-    const rows = () => [...list.querySelectorAll('li[role="option"]')].map((row) => row.textContent);
+    const rows = () =>
+      [...list.querySelectorAll('li[role="option"]')].map((row) => row.querySelector('.pick')?.textContent);
     assert.deepEqual(rows(), ['alex'], 'the values the board has');
 
     // Typing filters, and a word nothing matches says so rather than going
@@ -184,6 +193,23 @@ describe('the script the board carries', () => {
     input.dispatchEvent(new window.Event('input', { bubbles: true }));
     assert.deepEqual(rows(), []);
     assert.equal(list.querySelector('li.none')?.textContent, 'nothing matches');
+  });
+
+  it('keeps what is written beside a handle when it upgrades the list', async () => {
+    const window = page(board);
+    // A handle is a line number and the description is the name. The server
+    // writes one on every agent option; an upgrade that reads only the value
+    // takes back the thing that made the list worth opening.
+    const input = window.document.querySelector('#filter-agent') as HTMLInputElement;
+    assert.ok(input, 'the agent filter is there to upgrade');
+    input.dispatchEvent(new window.Event('focus', { bubbles: false }));
+    const row = input.closest('.field')!.querySelector('li[role="option"]') as HTMLElement;
+    assert.equal(row.querySelector('.pick')?.textContent, 'nightly');
+    assert.equal(row.querySelector('.note')?.textContent, 'runs the sweep after midnight');
+
+    // And taking it puts the handle in the box, not the handle and the note.
+    row.dispatchEvent(new window.MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+    assert.equal(input.value, 'nightly');
   });
 
   it('picks with the keyboard, and leaves a typed word alone', async () => {
@@ -198,7 +224,7 @@ describe('the script the board carries', () => {
 
     key('ArrowDown');
     const highlighted = input.closest('.field')!.querySelector('li[aria-selected="true"]');
-    assert.equal(highlighted?.textContent, 'alex');
+    assert.equal(highlighted?.querySelector('.pick')?.textContent, 'alex');
     assert.equal(input.getAttribute('aria-activedescendant'), highlighted?.id);
 
     assert.equal(key('Enter').defaultPrevented, true, 'Enter takes the highlighted one');

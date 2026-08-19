@@ -261,8 +261,14 @@ textarea { min-height:80px; font-family:var(--mono); font-size:13.5px; }
   background:var(--surface); border:1px solid var(--rule); border-radius:3px;
   box-shadow:0 6px 20px color-mix(in srgb, var(--ink) 14%, transparent); }
 .field .choices[hidden] { display:none; }
-.field .choices li { padding:6px 9px; border-radius:2px; font-size:14px; cursor:pointer;
-  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.field .choices li { display:flex; align-items:baseline; gap:8px; padding:6px 9px;
+  border-radius:2px; font-size:14px; cursor:pointer; }
+.field .choices li .pick { white-space:nowrap; }
+/* What the handle is for, beside the handle. It gives way first when the row
+   runs out of room, because the name it identifies must not. */
+.field .choices li .note { color:var(--muted); font-size:12px; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; }
+.field .choices li[aria-selected='true'] .note { color:var(--accent); }
 .field .choices li[aria-selected='true'] { background:var(--accent-soft); color:var(--accent); }
 .field .choices li.none { color:var(--muted); cursor:default; }
 /* One appearance for one meaning. A link that performs the page's action is a
@@ -403,15 +409,16 @@ button.ghost, .btn.ghost { background:transparent; color:var(--accent); }
    whole interaction: a field with the names behind it, and Enter applies the
    lot. No button to press after choosing, which is what the operator asked
    for, and the value in force is in the box rather than somewhere in a row. */
-.filters { display:flex; flex-direction:row; flex-wrap:wrap; align-items:flex-end;
+.filters { display:flex; flex-direction:row; flex-wrap:wrap; align-items:center;
   gap:8px 14px; margin:0 0 16px; max-width:none;
   border:1px solid var(--rule); border-radius:6px; padding:10px 12px; background:var(--surface); }
-.filters label { display:flex; flex-direction:column; gap:3px; font-family:var(--mono);
-  font-size:10.5px; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); }
-.filters input { font-size:13.5px; padding:5px 9px; font-family:var(--sans);
-  letter-spacing:normal; text-transform:none; color:var(--ink); }
-.filters input[type="search"] { min-width:180px; }
-.filters .hint { align-self:flex-end; font-size:12.5px; color:var(--muted); padding-bottom:5px; }
+/* The caption styling this bar used to need is gone with the captions. It set
+   mono, uppercase and a letter spacing on the label, which the name inside the
+   box then inherited and wore at fifteen pixels. A leftover rule for a shape
+   that no longer exists is not neutral: it dresses whatever moves in. */
+.filters .field input { font-size:14px; }
+.filters .field input[type="search"] { min-width:180px; }
+.filters .hint { align-self:center; font-size:12.5px; color:var(--muted); }
 .reset { font-family:var(--mono); font-size:12px; padding:5px 10px; border-radius:4px;
   border:1px solid var(--rule); color:var(--ink-2); text-decoration:none; margin-left:auto; }
 .reset:hover { border-color:var(--accent); color:var(--accent); }
@@ -634,7 +641,13 @@ const SCRIPT = `(() => {
     const field = input.closest('.field');
     const datalist = document.getElementById(input.getAttribute('list'));
     if (!field || !datalist) continue;
-    const values = [...datalist.options].map((option) => option.value).filter(Boolean);
+    // The value and whatever rides beside it. A handle is a line number and the
+    // description is the name, which is why the server puts one on each option;
+    // a list that shows only the handle takes back the thing that made the list
+    // worth opening.
+    const values = [...datalist.options]
+      .filter((option) => option.value)
+      .map((option) => ({ value: option.value, note: (option.textContent || '').trim() }));
     if (values.length === 0) continue;
     datalist.remove();
     input.removeAttribute('list');
@@ -669,7 +682,7 @@ const SCRIPT = `(() => {
 
     const draw = () => {
       const needle = typed();
-      const shown = values.filter((value) => value.toLowerCase().includes(needle));
+      const shown = values.filter((one) => one.value.toLowerCase().includes(needle));
       list.replaceChildren();
       if (shown.length === 0) {
         const empty = document.createElement('li');
@@ -677,12 +690,22 @@ const SCRIPT = `(() => {
         empty.textContent = 'nothing matches';
         list.append(empty);
       }
-      shown.forEach((value, index) => {
+      shown.forEach((one, index) => {
         const row = document.createElement('li');
         row.id = list.id + '-' + index;
         row.setAttribute('role', 'option');
         row.setAttribute('aria-selected', String(index === at));
-        row.textContent = value;
+        row.dataset.value = one.value;
+        const name = document.createElement('span');
+        name.className = 'pick';
+        name.textContent = one.value;
+        row.append(name);
+        if (one.note) {
+          const note = document.createElement('span');
+          note.className = 'note';
+          note.textContent = one.note;
+          row.append(note);
+        }
         list.append(row);
       });
       const active = at >= 0 && at < shown.length ? list.id + '-' + at : '';
@@ -743,7 +766,7 @@ const SCRIPT = `(() => {
           // submit it has always been, because a new label is a thing somebody
           // is allowed to invent.
           event.preventDefault();
-          choose(rows[at].textContent);
+          choose(rows[at].dataset.value);
         }
       }
     });
@@ -753,7 +776,7 @@ const SCRIPT = `(() => {
       const row = event.target.closest('li[role="option"]');
       if (!row) return;
       event.preventDefault();
-      choose(row.textContent);
+      choose(row.dataset.value);
     });
     input.addEventListener('blur', () => setTimeout(shut, 0));
   }
