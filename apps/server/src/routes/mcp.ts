@@ -825,7 +825,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
       const unreachable = storeUnreachable(error);
       const status = error instanceof ServiceError ? error.statusCode : unreachable ? 503 : 500;
       const text = unreachable
-        ? 'The database did not answer, so this is not something about your call. Retry a write named by a slug freely: it lands once however often you send it. A call that mints an id, a new project, a new question, a note on a timeline, may have landed already, so read before you send that one again.'
+        ? 'The database did not answer, so this is not something about your call. A write named by a slug cannot make a second card, and a claim you already hold stays yours, so those are safe to send again; each adds a line to the timeline. A call that mints an id, a new project, a new question, a note, may have landed before the answer was lost: read it back rather than sending it twice.'
         : error instanceof Error
           ? error.message
           : 'Unexpected error';

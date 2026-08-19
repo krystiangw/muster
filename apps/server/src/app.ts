@@ -530,6 +530,9 @@ ${rows
      * a guess dressed as a fact. Nor does it say "retry" flatly, which is the
      * advice that turns one lost answer into two projects: a slug is an
      * idempotency key and a minted id is not, so the sentence separates them.
+     * It does not call a slug free either. Sending an upsert or a claim again
+     * cannot make a second card or take the lease off you, and it does add a
+     * line to the timeline both times, which is worth one clause to say.
      */
     if (storeUnreachable(error)) {
       request.log.warn({ err: error }, 'store unreachable');
@@ -539,7 +542,7 @@ ${rows
         .send({
           error: 'store_unavailable',
           message:
-            'The database did not answer, so this is not something about your call. Retry a write named by a slug freely: it lands once however often you send it. A call that mints an id, a new project, a new question, a note on a timeline, may have landed already, so read before you send that one again.',
+            'The database did not answer, so this is not something about your call. A write named by a slug cannot make a second card, and a claim you already hold stays yours, so those are safe to send again; each adds a line to the timeline. A call that mints an id, a new project, a new question, a note, may have landed before the answer was lost: read it back rather than sending it twice.',
           retry_after: 5,
         });
     }

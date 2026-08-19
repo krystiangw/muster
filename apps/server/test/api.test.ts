@@ -1977,6 +1977,9 @@ describe('a database that does not answer', () => {
       // is not, and the message has to say which is which.
       assert.match(answer.json().message, /slug/);
       assert.match(answer.json().message, /mints an id/);
+      // Nor is a slug called free: sending an upsert again cannot make a
+      // second card, and it does add a second line to the timeline.
+      assert.match(answer.json().message, /timeline/);
     } finally {
       harness.store.items.find = real;
     }
@@ -1992,6 +1995,30 @@ describe('a database that does not answer', () => {
     const real = harness.store.items.find.bind(harness.store.items);
     harness.store.items.find = (() => {
       throw new MongoServerError({ message: 'interrupted at shutdown', code: 11600 });
+    }) as typeof harness.store.items.find;
+    try {
+      const answer = await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/items`,
+        headers: authed(project),
+      });
+      assert.equal(answer.statusCode, 503, answer.body);
+      assert.equal(answer.json().error, 'store_unavailable');
+    } finally {
+      harness.store.items.find = real;
+    }
+  });
+
+  it('reads the other half of a failover, the one no write label covers', async () => {
+    // Coming back up rather than going down: the new primary is elected and
+    // has not committed a majority yet, so a read asking for one is refused
+    // until it has. It is a read, so the driver's retryable-write label is
+    // never on it, and only the number says what it is.
+    const project = await createProject(harness);
+    const { MongoServerError } = await import('mongodb');
+    const real = harness.store.items.find.bind(harness.store.items);
+    harness.store.items.find = (() => {
+      throw new MongoServerError({ message: 'majority not available yet', code: 134 });
     }) as typeof harness.store.items.find;
     try {
       const answer = await harness.server.inject({

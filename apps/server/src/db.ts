@@ -186,6 +186,11 @@ const UNAVAILABLE_CODES = new Set([
   11602, // InterruptedDueToReplStateChange
   13435, // NotPrimaryNoSecondaryOk
   13436, // NotPrimaryOrSecondary
+  // A read, not a write, and the one a failover produces on the way back up:
+  // the new primary is elected but has not yet committed a majority, so a
+  // read concern that asks for one is refused until it has. The driver's
+  // retryable-write label is never on this, because it is not a write.
+  134, // ReadConcernMajorityNotAvailableYet
 ]);
 
 export function storeUnreachable(error: unknown): boolean {
