@@ -414,11 +414,20 @@ const run = async () => {
   check('while somebody who does not hold it is refused', notMine.result?.isError === true);
   const handed = await lease('release', { slug: `${SLUG}-mcp`, agent: 'probe_loop', note: 'walkthrough' });
   check('and handed back rather than left to lapse', handed.result?.structuredContent?.item?.claim === null);
-  const nameless = await lease('acknowledge', { id: 'e_nothing' });
+  // On the answered question from earlier, not on an id nobody has: a missing
+  // escalation is refused whether or not the guard exists, so checking that
+  // would have proved the guard was there while it was gone.
+  const nameless = await lease('acknowledge', { id: escalation.id });
   check(
     'acknowledging on behalf of nobody is refused',
-    nameless.result?.isError === true,
-    JSON.stringify(nameless.result?.content?.[0]?.text ?? '').slice(0, 120),
+    nameless.result?.isError === true &&
+      String(nameless.result?.content?.[0]?.text ?? '').includes('agent'),
+    JSON.stringify(nameless.result?.content?.[0]?.text ?? '').slice(0, 160),
+  );
+  const stillThere = await json(`${api}/inbox?agent=${AGENT}`, { headers: authed });
+  check(
+    'and the answer is still waiting for whoever it was for',
+    (stillThere.body?.answers ?? []).some((one) => one.id === escalation.id),
   );
 
   console.log(
