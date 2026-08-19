@@ -99,6 +99,17 @@ export interface Store {
   claimCodes: Collection<ClaimCodeDoc>;
   shares: Collection<ShareDoc>;
   handovers: Collection<HandoverRequestDoc>;
+  /**
+   * Whether the indexes and migrations this code expects are actually there.
+   *
+   * A connection is not readiness. Between the client connecting and the
+   * indexes being built there is a window where every query works and one of
+   * them is missing a unique constraint, and a write landing in it can both
+   * break an invariant and make the index build fail, leaving a deployment
+   * that looks healthy and is not. A mutable box because it is one process
+   * telling the rest of itself something that changes exactly twice.
+   */
+  ready: { ok: boolean; why: string | null };
   close(): Promise<void>;
 }
 
@@ -162,6 +173,7 @@ export function openStore(
     claimCodes: db.collection<ClaimCodeDoc>('claimCodes'),
     shares: db.collection<ShareDoc>('shares'),
     handovers: db.collection<HandoverRequestDoc>('handoverRequests'),
+    ready: { ok: false, why: 'the store has not finished starting' },
     close: () => client.close(),
   };
 
@@ -235,6 +247,7 @@ export async function createStore(uri: string, dbName: string): Promise<Store> {
   const store = await connectStore(uri, dbName);
   await ensureIndexes(store);
   await runMigrations(store);
+  store.ready = { ok: true, why: null };
   return store;
 }
 

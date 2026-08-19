@@ -1983,10 +1983,22 @@ describe('a database that was never there', () => {
       assert.equal(health.statusCode, 503, health.body);
       assert.equal(health.json().error, 'store_unavailable');
 
-      // And so does a call that needs the database.
-      const signup = await server.inject({ method: 'POST', url: '/p', payload: { name: 'nope' } });
-      assert.equal(signup.statusCode, 503, signup.body);
-      assert.equal(signup.json().error, 'store_unavailable');
+      // And so does everything that needs the database, on both doors, before
+      // a query is ever attempted: a connection is not readiness, and the gap
+      // between connecting and having the indexes is where a write can break
+      // the invariant an index is for and make the build fail with it.
+      for (const call of [
+        { method: 'POST' as const, url: '/p', payload: { name: 'nope' } },
+        { method: 'GET' as const, url: '/v1/p_whatever/items' },
+        { method: 'POST' as const, url: '/mcp', payload: { jsonrpc: '2.0', id: 1, method: 'tools/list' } },
+        { method: 'GET' as const, url: '/r/r_whatever/board' },
+        { method: 'GET' as const, url: '/operator' },
+      ]) {
+        const answer = await server.inject(call);
+        assert.equal(answer.statusCode, 503, `${call.method} ${call.url}: ${answer.body.slice(0, 120)}`);
+        assert.equal(answer.json().error, 'store_unavailable');
+        assert.equal(answer.headers['retry-after'], '5');
+      }
     } finally {
       limiter.stop();
       await server.close();

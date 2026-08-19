@@ -2,11 +2,13 @@ import type { FastifyBaseLogger } from 'fastify';
 import { flushEvents } from './events.js';
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
-import { ensureIndexes, openStore, runMigrations, type Store } from './db.js';
+import { ensureIndexes, openStore, runMigrations, storeUnreachable, type Store } from './db.js';
 import { sweepProject } from './hygiene.js';
 
 const SWEEP_INTERVAL_MS = 5 * 60_000;
 const SWEEP_BATCH = 50;
+/** How long the port waits for a store that is probably already there. */
+const READY_GRACE_MS = 10_000;
 
 /**
  * Bring the store up behind the port, and keep trying.
@@ -26,10 +28,28 @@ async function bringUp(store: Store, log: FastifyBaseLogger): Promise<void> {
       await store.client.connect();
       await ensureIndexes(store);
       await runMigrations(store);
+      store.ready = { ok: true, why: null };
       log.info('the store is up, with its indexes and migrations');
       return;
     } catch (error) {
-      log.error({ err: error }, `the store is not up; serving 503 and retrying in ${wait / 1000}s`);
+      // Two different failures, and they deserve different words. A store that
+      // cannot be reached will come back and this should keep asking. An index
+      // that will not build, because the data already breaks the constraint it
+      // is for, is a broken deployment: retrying it every thirty seconds for
+      // ever changes nothing, and the only honest thing is to keep saying so
+      // out loud while the routes that need it go on refusing.
+      const reachable = !storeUnreachable(error);
+      const why = error instanceof Error ? error.message : String(error);
+      store.ready = {
+        ok: false,
+        why: reachable ? `it will not start: ${why}` : 'the database is not answering',
+      };
+      log[reachable ? 'error' : 'warn'](
+        { err: error },
+        reachable
+          ? `the store connected and will not start; every board refuses until this is fixed, retrying in ${wait / 1000}s`
+          : `the store is not answering; serving 503 and retrying in ${wait / 1000}s`,
+      );
       await new Promise((resolve) => setTimeout(resolve, wait));
     }
   }
@@ -118,11 +138,20 @@ async function main(): Promise<void> {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
   process.on('SIGINT', () => void shutdown('SIGINT'));
 
+  // Given a moment to finish before the port opens, because the ordinary
+  // deploy takes about a quarter of a second and a 503 window nobody needed is
+  // worse than a boot a quarter of a second slower. Only a moment, though: the
+  // whole point is that a database which is not there cannot stop this
+  // serving, and past this the same work carries on behind the port.
+  const started = bringUp(store, server.log);
+  await Promise.race([started, new Promise((resolve) => setTimeout(resolve, READY_GRACE_MS))]);
+  void started;
+
   await server.listen({ port: config.port, host: config.host });
-  server.log.info({ baseUrl: config.baseUrl }, 'muster is up');
-  // After listening, deliberately: the port is what Heroku waits for, and a
-  // database that takes a minute to answer must not become a boot timeout.
-  void bringUp(store, server.log);
+  server.log.info(
+    { baseUrl: config.baseUrl, ready: store.ready.ok },
+    store.ready.ok ? 'muster is up' : 'muster is up, and refusing boards until the store is',
+  );
 }
 
 main().catch((error) => {

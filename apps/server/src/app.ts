@@ -313,6 +313,37 @@ export async function buildApp(
    * Form bodies only. A JSON array is an ordinary value on the API door, where
    * the schemas say which fields take one.
    */
+  /**
+   * Nothing that needs the database until the database is ready for it.
+   *
+   * A connection is not readiness. Between the client connecting and the
+   * indexes being built, every query works and one of them is missing its
+   * unique constraint: a write landing in that window can break the invariant
+   * the index is for and make the build fail, which leaves a deployment that
+   * looks healthy and is not. The process serves its static pages through it,
+   * because a protocol document and a landing page are worth serving whatever
+   * the database is doing, and answers everything else the way it would answer
+   * an unreachable store, which is what this is.
+   *
+   * Listed by prefix rather than by exclusion. Missing an entry here leaves a
+   * route answering the driver's own failure, which is where it was before;
+   * missing one the other way round would take a page down for no reason.
+   */
+  const NEEDS_THE_STORE = ['/v1/', '/p', '/mcp', '/r/', '/operator', '/oauth/'];
+  server.addHook('onRequest', async (request, reply) => {
+    if (store.ready.ok) return;
+    const path = request.url.split('?')[0] ?? '';
+    if (!NEEDS_THE_STORE.some((prefix) => path === prefix || path.startsWith(prefix))) return;
+    return reply
+      .code(503)
+      .header('retry-after', '5')
+      .send({
+        error: 'store_unavailable',
+        message: `This deployment is not ready to serve a board yet: ${store.ready.why ?? 'the store is still starting'}. Retry in a few seconds; nothing was written.`,
+        retry_after: 5,
+      });
+  });
+
   server.addHook('preValidation', async (request, reply) => {
     // Lowercased, because a media type is case insensitive and Fastify parses
     // `Application/X-Www-Form-Urlencoded` as a form body all the same: a check

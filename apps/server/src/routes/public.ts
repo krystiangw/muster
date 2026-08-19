@@ -293,6 +293,17 @@ export function registerPublic(app: FastifyInstance, deps: PublicDeps): void {
    * answer about different databases.
    */
   app.get('/health', { schema: { hide: true } }, async (_request, reply) => {
+    // Readiness before reachability. A store that answers but has not finished
+    // building its indexes is a deployment that will pass a ping and break an
+    // invariant, and the whole point of this endpoint is to say so.
+    if (!store.ready.ok) {
+      return reply.code(503).header('retry-after', '5').send({
+        ok: false,
+        error: 'store_unavailable',
+        message: `This deployment is not ready to serve a board yet: ${store.ready.why ?? 'the store is still starting'}.`,
+        retry_after: 5,
+      });
+    }
     const now = Date.now();
     const remembered = health.get(store);
     // A ping still in flight is always the one to wait for, whatever the clock
