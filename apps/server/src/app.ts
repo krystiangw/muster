@@ -69,6 +69,19 @@ const COMPRESS_MIN_BYTES = 1400;
 function schemaSays(request: FastifyRequest, error: FastifyError): string {
   const first = (error as { validation?: Array<Record<string, any>> }).validation?.[0];
   if (!first) return '';
+  // The field nobody has: "body must NOT have additional properties" is the
+  // one validation message that does not say which property, and this service
+  // publishes the opposite in as many words, so the name is read out of the
+  // error and put back into the sentence.
+  const extra = (first.params as { additionalProperty?: string } | undefined)?.additionalProperty;
+  if (extra) {
+    const where = (error as { validationContext?: string }).validationContext ?? 'body';
+    const schema = (request.routeOptions?.schema as Record<string, any> | undefined)?.[where];
+    const known = Object.keys((schema?.properties ?? {}) as Record<string, unknown>);
+    return `: "${extra}" is not a field this call has${
+      known.length > 0 ? `. It takes ${known.join(', ')}` : ''
+    }`;
+  }
   const field =
     (first.params as { missingProperty?: string } | undefined)?.missingProperty ??
     String(first.instancePath ?? '')

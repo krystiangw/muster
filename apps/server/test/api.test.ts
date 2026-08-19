@@ -1952,7 +1952,11 @@ describe('a field this service does not have', () => {
       payload: { label: 'not a field here', role: 'write' },
     });
     assert.equal(key.statusCode, 400);
-    assert.match(key.json().message, /additional propert/i);
+    // Named, because the promise is that a parameter this service does not
+    // have comes back 400 naming it, and "must NOT have additional
+    // properties" is the one message that says everything except which.
+    assert.match(key.json().message, /"label" is not a field this call has/);
+    assert.match(key.json().message, /It takes name, role/);
 
     const item = await harness.server.inject({
       method: 'POST',
