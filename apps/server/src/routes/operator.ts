@@ -739,7 +739,7 @@ lives on.${
             : ''
         }</p>
 <div class="scroll cards"><table class="cards">
-<thead><tr><th>Project</th><th>Item</th><th>State</th><th>Last touched</th></tr></thead>
+<thead><tr><th scope="col">Project</th><th scope="col">Item</th><th scope="col">State</th><th scope="col">Last touched</th></tr></thead>
 <tbody>
 ${mine
   .map((item) => {
@@ -786,7 +786,7 @@ ${
    and a ${count(config.demoTtlDays, 'day')} timer.</p>`
     }
 <div class="scroll cards"${projects.length === 0 ? ' hidden' : ''}><table class="cards">
-<thead><tr><th>Project</th><th class="mono">open</th><th class="mono">agents</th><th>Waiting</th><th></th></tr></thead>
+<thead><tr><th scope="col">Project</th><th scope="col" class="mono">open</th><th scope="col" class="mono">agents</th><th scope="col">Waiting</th><th scope="col"></th></tr></thead>
 <tbody>
 ${projects
   .map(
@@ -829,7 +829,7 @@ ${
 <p style="color:var(--ink-2)">Nobody has touched these, and no agent has claimed them. Hygiene
 flagged them rather than closing them, because deciding they are dead is your call.</p>
 <div class="scroll cards"><table class="cards">
-<thead><tr><th>Project</th><th>Item</th><th>Stale since</th></tr></thead>
+<thead><tr><th scope="col">Project</th><th scope="col">Item</th><th scope="col">Stale since</th></tr></thead>
 <tbody>
 ${staleItems
   .map(

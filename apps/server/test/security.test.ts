@@ -1021,6 +1021,75 @@ describe('a form that says two things', () => {
   });
 });
 
+describe('the shape a screen reader is handed', () => {
+  /**
+   * The report ends its accessibility section with ten items it says a machine
+   * cannot check, and nobody checked them. Three of them turned out to be
+   * checkable after all, and two of the three were wrong on the page a person
+   * actually uses. This walks the rendered HTML rather than the stylesheet: the
+   * outline, the header cells, and the one control that is deliberately
+   * invisible until it is not.
+   */
+  const headingsIn = (html: string): { level: number; text: string }[] =>
+    [...html.matchAll(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/g)].map((m) => ({
+      level: Number(m[1]),
+      text: m[2]!.replace(/<[^>]+>/g, '').trim().slice(0, 40),
+    }));
+
+  it('gives every page one h1 and no gap in the levels under it', async () => {
+    // The board went h1 straight to h3: every column title, the add form and
+    // the four help sections. A reader moving by heading level was told this
+    // page has no second tier, when the columns are exactly that.
+    const project = await createProject(harness);
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const pages = ['/', '/docs', '/docs/api', '/docs/keys', '/pricing', '/signup', `/r/${readToken}`, `/r/${readToken}/board`];
+
+    for (const page of pages) {
+      const rendered = await harness.server.inject({ method: 'GET', url: page, headers: { accept: 'text/html' } });
+      assert.equal(rendered.statusCode, 200, page);
+      const headings = headingsIn(rendered.body);
+      assert.equal(headings.filter((h) => h.level === 1).length, 1, `${page} has exactly one h1`);
+      let previous = 0;
+      for (const heading of headings) {
+        assert.ok(
+          previous === 0 || heading.level <= previous + 1,
+          `${page} jumps h${previous} to h${heading.level} at "${heading.text}"`,
+        );
+        previous = heading.level;
+      }
+    }
+  });
+
+  it('says which way every header cell points', async () => {
+    // 32 of them across the site and not one carried scope, so a reader landing
+    // in the middle of a row was told the value and not what it is a value of.
+    const project = await createProject(harness);
+    const readToken = project.readUrl.split('/r/')[1]!;
+    for (const page of ['/docs', '/docs/api', '/docs/keys', '/pricing', `/r/${readToken}/board`]) {
+      const rendered = await harness.server.inject({ method: 'GET', url: page, headers: { accept: 'text/html' } });
+      const cells = [...rendered.body.matchAll(/<th\b[^>]*>/g)].map((m) => m[0]);
+      for (const cell of cells) {
+        assert.match(cell, /scope="(col|row)"/, `${page} has a header cell with no scope: ${cell}`);
+      }
+    }
+  });
+
+  it('brings the invisible control back for whoever is tabbing', async () => {
+    // The filter form's submit is off the page on purpose, for a reader who
+    // hears it rather than sees it. It still takes focus like any other
+    // control, and the clip that hides it was hiding the focus ring too: one
+    // stop where the keyboard went quiet and nothing said where you were.
+    const page = await harness.server.inject({ method: 'GET', url: '/' });
+    const href = /<link rel="stylesheet" href="([^"]+)"/.exec(page.body)?.[1];
+    const sheet = (await harness.server.inject({ method: 'GET', url: href! })).body;
+    assert.match(sheet, /\.sr-only \{[^}]*clip:rect\(0 0 0 0\)/, 'it is hidden to begin with');
+    const focused = /\.sr-only:focus-visible[^{]*\{([^}]*)\}/.exec(sheet);
+    assert.ok(focused, 'and it has something to say about being focused');
+    assert.match(focused[1]!, /clip:auto/, 'the clip comes off');
+    assert.match(focused[1]!, /width:auto/, 'and it takes up room again');
+  });
+});
+
 describe('the colours these pages are read in', () => {
   /**
    * A page-speed report found one chip below the line at 4.32:1 where its two

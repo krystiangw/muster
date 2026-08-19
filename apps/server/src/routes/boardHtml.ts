@@ -199,7 +199,7 @@ function preview(
       <span class="slug">${escapeHtml(item.slug)}</span>
       <a class="close" href="${escapeHtml(close)}">close</a>
     </div>
-    <h3>${escapeHtml(item.title || '(no title)')}</h3>
+    <h2>${escapeHtml(item.title || '(no title)')}</h2>
     <div class="meta">
       ${chip(item.status, item.status)}
       ${whoChips(item, claimed, agents)}
@@ -627,7 +627,7 @@ ${lanes
 ${lane.columns
   .map(
     (cell) => `    <section class="col">
-      <header><h3>${escapeHtml(cell.title)}</h3><span class="n">${cell.count}</span></header>
+      <header><h2>${escapeHtml(cell.title)}</h2><span class="n">${cell.count}</span></header>
       ${cell.hint ? `<p class="why">${escapeHtml(cell.hint)}</p>` : ''}
       ${
         cell.items.length === 0
@@ -733,7 +733,7 @@ ${
       <span class="slug">new item</span>
       <a class="close" href="${escapeHtml(closeUrl)}">close</a>
     </div>
-    <h3>Add an item</h3>
+    <h2 class="minor">Add an item</h2>
     <form class="newitem" method="post" action="${escapeHtml(action)}/new">
       <label for="new-title">Title</label>
       <input id="new-title" name="title" maxlength="200" required placeholder="What needs doing">
@@ -918,7 +918,7 @@ function renderAgentMerge(facets: BoardFacets, action: string, keep: BoardFilter
           }>${escapeHtml(agent.handle)}${agent.registered ? '' : ' (seen, not registered)'}</option>`,
       )
       .join('');
-  return `<h3>Two names, one agent</h3>
+  return `<h2 class="minor">Two names, one agent</h2>
 <p class="why">Moves every item whose last writer was the first name, and any claim it holds, onto
 the second. The timelines keep what they said, because an agent calling itself that is what
 happened; the old name is kept on the agent so an old entry can still be read.</p>
@@ -988,7 +988,7 @@ every agent has to learn.</p>
   <div><button type="submit">Save layout</button></div>
 </form>
 
-<h3>Start from one of these</h3>
+<h2 class="minor">Start from one of these</h2>
 <div class="grid">
 ${Object.entries(BOARD_PRESETS)
   .map(
@@ -1005,9 +1005,9 @@ ${Object.entries(BOARD_PRESETS)
   .join('\n')}
 </div>
 
-<h3>What a filter can say</h3>
+<h2 class="minor">What a filter can say</h2>
 <div class="scroll"><table>
-<thead><tr><th>Key</th><th>Meaning</th></tr></thead>
+<thead><tr><th scope="col">Key</th><th scope="col">Meaning</th></tr></thead>
 <tbody>
 <tr><td class="mono">status</td><td>Any of <code>open</code>, <code>blocked</code>, <code>done</code>, <code>dropped</code>.</td></tr>
 <tr><td class="mono">claimed</td><td><code>true</code> for items somebody holds right now, <code>false</code> for free ones. An expired claim counts as free.</td></tr>
@@ -1022,7 +1022,7 @@ ${Object.entries(BOARD_PRESETS)
 <p>An item lands in the <b>first</b> column that matches, so order the columns the way you read them.
 Anything that matches nothing is reported above the board rather than hidden.</p>
 
-<h3>What a move does</h3>
+<h2 class="minor">What a move does</h2>
 <p>By default, the column's own filter read back at it: the one status it asks for, the first label
 it requires, every label it excludes, the one owner it names, a claim where it asks for held items,
 a release where it asks for free ones, and a touch where it asks for work that is not stale.
@@ -1031,7 +1031,7 @@ do, not only the part the filter got wrong. It also takes the column off the lis
 the declaration is the author's word on what belongs here, and where the filter still asks for more
 than the move can set, the reply says which column the card actually landed in.</p>
 <div class="scroll"><table>
-<thead><tr><th>Key</th><th>What moving a card here does</th></tr></thead>
+<thead><tr><th scope="col">Key</th><th scope="col">What moving a card here does</th></tr></thead>
 <tbody>
 <tr><td class="mono">status</td><td>Sets the status. The same four; a column cannot invent one.</td></tr>
 <tr><td class="mono">add_labels</td><td>Labels put on. Applied in the database, so a move never overwrites a label somebody else set meanwhile.</td></tr>

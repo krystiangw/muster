@@ -92,6 +92,12 @@ h1 { font-family:var(--serif); font-weight:600; font-size:clamp(30px,5vw,44px);
 h2 { font-family:var(--serif); font-weight:600; font-size:clamp(21px,3vw,27px);
   line-height:1.2; margin:38px 0 12px; text-wrap:balance; }
 h3 { font-size:15px; font-weight:640; margin:26px 0 8px; }
+/* A section heading that is a second tier by structure and a third by size.
+   Written as an override rather than left as an h3, because what a screen
+   reader is told about the outline and what an eye is told about the weight
+   are two different questions and only one of them is about the tag. */
+h2.minor { font-family:inherit; font-size:15px; font-weight:640; line-height:inherit;
+  letter-spacing:normal; margin:26px 0 8px; text-wrap:wrap; }
 p { margin:0 0 14px; }
 a { color:var(--accent); text-underline-offset:2px; }
 a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible,
@@ -241,7 +247,12 @@ button.ghost, .btn.ghost { background:transparent; color:var(--accent); }
   max-height:min(70vh,720px); overflow-y:auto; }
 .col > header { position:sticky; top:-10px; background:var(--surface-2); padding:2px 0 4px; z-index:1; }
 .col > header { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
-.col h3 { margin:0; font-size:14px; font-weight:640; }
+/* The columns are this page's sections, so they are h2 and not h3: the board
+   went h1 straight to h3, and a reader moving by heading level was told the
+   page has no second tier when the columns are exactly that. Semantics only,
+   which is why the size is written back here and nothing on screen moved. */
+.col h2 { margin:0; font-size:14px; font-weight:640; font-family:inherit;
+  line-height:inherit; letter-spacing:normal; text-wrap:wrap; }
 .col .n { font-family:var(--mono); font-size:12px; color:var(--muted); font-variant-numeric:tabular-nums; }
 .col .why { font-family:var(--mono); font-size:10.5px; color:var(--muted); line-height:1.35; margin:-4px 0 0; }
 /* Scoped to a column on purpose: an unscoped .card here would win over the page
@@ -283,6 +294,16 @@ button.ghost, .btn.ghost { background:transparent; color:var(--accent); }
 .col .card .move button:hover { border-color:var(--accent); color:var(--accent); }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
   clip:rect(0 0 0 0); white-space:nowrap; border:0; }
+/* Off the page for somebody who is listening is not off the page for somebody
+   who is tabbing. The submit button of the filter form takes focus like any
+   other control, and the clip that hides it was taking the focus ring too: the
+   keyboard went quiet for one stop, with nothing on the screen moving and
+   nothing to say where you were. It comes back into view while it holds focus, still out of
+   flow, so nothing below it jumps. */
+.sr-only:focus-visible, .sr-only:focus {
+  width:auto; height:auto; margin:0; padding:4px 9px; overflow:visible;
+  clip:auto; background:var(--surface); color:var(--ink);
+  border:1px solid var(--accent); border-radius:2px; z-index:20; }
 /* Anything holding one is positioned, and this is not tidiness.
    An absolutely positioned child whose ancestors are all static takes the page
    as its containing block, so it is laid out at its static position but
@@ -310,7 +331,8 @@ button.ghost, .btn.ghost { background:transparent; color:var(--accent); }
 .peeked .sheet-top { display:flex; align-items:baseline; justify-content:space-between; gap:12px; }
 .peeked .sheet-top .slug { font-family:var(--mono); font-size:12px; color:var(--muted);
   word-break:break-all; }
-.peeked .sheet h3 { margin:0; font-size:21px; line-height:1.25; text-wrap:balance; }
+.peeked .sheet h2 { margin:0; font-size:21px; line-height:1.25; text-wrap:balance;
+  font-family:inherit; font-weight:640; letter-spacing:normal; }
 .peeked .sheet .meta { display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
 .peeked .sheet .body { margin:0; white-space:pre-wrap; font-size:14.5px; line-height:1.55; }
 .peeked .sheet .why { font-family:var(--mono); font-size:11px; color:var(--muted); margin:0; }

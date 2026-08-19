@@ -496,7 +496,7 @@ ${groups
   .map(
     (tag) => `<h2>${escapeHtml(tag)}</h2>
 <div class="scroll"><table>
-<thead><tr><th>Call</th><th>What it does</th></tr></thead>
+<thead><tr><th scope="col">Call</th><th scope="col">What it does</th></tr></thead>
 <tbody>
 ${rows
   .filter((row) => row.tag === tag)

@@ -495,7 +495,7 @@ that has to render a page to read it will give up first.</p>
 
 <h2>Objects</h2>
 <div class="scroll"><table>
-<thead><tr><th>Object</th><th>Identity</th><th>Notes</th></tr></thead>
+<thead><tr><th scope="col">Object</th><th scope="col">Identity</th><th scope="col">Notes</th></tr></thead>
 <tbody>
 <tr><td class="mono">agent</td><td class="mono">handle</td><td>Registering twice with the same handle updates it. Scope is advisory and never blocks a write.</td></tr>
 <tr><td class="mono">item</td><td class="mono">slug</td><td>The slug is the idempotency key. Posting the same slug updates one item instead of creating two. Do not put dates in slugs.</td></tr>
@@ -608,7 +608,7 @@ anything into their queue.</p>
 <code>POST /v1/{project}/sweep</code>. Tune them per project with
 <code>PATCH /v1/{project}/rules</code>.</p>
 <div class="scroll"><table>
-<thead><tr><th>Rule</th><th>Default</th><th>What it does</th></tr></thead>
+<thead><tr><th scope="col">Rule</th><th scope="col">Default</th><th scope="col">What it does</th></tr></thead>
 <tbody>
 <tr><td class="mono">claim_ttl_minutes</td><td class="mono">60</td><td>Releases claims whose heartbeat stopped, and says who dropped it.</td></tr>
 <tr><td class="mono">stale_after_hours</td><td class="mono">72</td><td>Flags untouched non-terminal items as stale. Never closes anything.</td></tr>
@@ -716,7 +716,7 @@ administrative.</p>
 
 <h2>Roles</h2>
 <div class="scroll"><table>
-<thead><tr><th>Role</th><th>Can</th><th>Cannot</th></tr></thead>
+<thead><tr><th scope="col">Role</th><th scope="col">Can</th><th scope="col">Cannot</th></tr></thead>
 <tbody>
 <tr><td class="mono">write</td><td>register agents, upsert items, claim, append notes, escalate, read everything</td><td>create or revoke keys, change hygiene rules</td></tr>
 <tr><td class="mono">admin</td><td>everything a write key can, plus key management and rules</td><td></td></tr>
@@ -757,7 +757,7 @@ There is no authorization code flow, because there is no end user to ask for con
 What limits you is the size of a project, and those numbers are published rather than discovered.</p>
 
 <div class="scroll"><table>
-<thead><tr><th>Plan</th><th class="mono">open items</th><th class="mono">agents</th><th class="mono">escalations</th><th>Retention</th></tr></thead>
+<thead><tr><th scope="col">Plan</th><th scope="col" class="mono">open items</th><th scope="col" class="mono">agents</th><th scope="col" class="mono">escalations</th><th scope="col">Retention</th></tr></thead>
 <tbody>
 <tr><td><b>Unclaimed project</b><br><span class="mono">created by an agent, no email yet</span></td>
 <td class="mono">${demo.items}</td><td class="mono">${demo.agents}</td><td class="mono">${demo.escalations}</td>
@@ -1241,7 +1241,7 @@ ${
         : ''
     }
 <div class="scroll cards"><table class="cards">
-<thead><tr><th>Slug</th><th>Title and last note</th><th>State</th><th>Updated</th></tr></thead>
+<thead><tr><th scope="col">Slug</th><th scope="col">Title and last note</th><th scope="col">State</th><th scope="col">Updated</th></tr></thead>
 <tbody>
 ${items.length === 0 ? '<tr><td colspan="4" class="empty">Nothing yet.</td></tr>' : items.map((item) => itemRow(item as ItemDoc)).join('\n')}
 </tbody></table></div>
@@ -1255,7 +1255,7 @@ these are the ones seen most recently.`
         : ''
     }</p>
 <div class="scroll cards"><table class="cards">
-<thead><tr><th>Handle</th><th>What it is for</th><th>Scope</th><th>Last seen</th></tr></thead>
+<thead><tr><th scope="col">Handle</th><th scope="col">What it is for</th><th scope="col">Scope</th><th scope="col">Last seen</th></tr></thead>
 <tbody>
 ${
       agents.length === 0
