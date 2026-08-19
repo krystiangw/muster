@@ -825,7 +825,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
       const unreachable = storeUnreachable(error);
       const status = error instanceof ServiceError ? error.statusCode : unreachable ? 503 : 500;
       const text = unreachable
-        ? 'The database did not answer, so this is not something about your call. Retry in a few seconds: anything keyed on a slug lands once however often it is sent.'
+        ? 'The database did not answer, so this is not something about your call. Retry a write named by a slug freely: it lands once however often you send it. A call that mints an id, a new project, a new question, a note on a timeline, may have landed already, so read before you send that one again.'
         : error instanceof Error
           ? error.message
           : 'Unexpected error';
@@ -843,7 +843,9 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         id,
         result: {
           content: [{ type: 'text', text: `${status} ${code}: ${text}` }],
-          structuredContent: { error: text, code, status },
+          // The delay too, because a batch is many calls in one response and a
+          // per-call header cannot say which of them should wait.
+          structuredContent: { error: text, code, status, ...(unreachable ? { retry_after: 5 } : {}) },
           isError: true,
         },
       };

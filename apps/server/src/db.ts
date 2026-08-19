@@ -165,8 +165,43 @@ const UNREACHABLE = new Set([
   'MongoOperationTimeoutError',
 ]);
 
+/**
+ * Server codes that mean the node is going away, not that the query was wrong.
+ *
+ * A failover does not always arrive as a network error. The client reaches a
+ * node, the node answers, and what it answers is that it is no longer the
+ * primary or that it is shutting down: a MongoServerError, class for class
+ * identical to "unknown operator: $nope", which is a bug that will still be a
+ * bug in five seconds. The number is what separates them.
+ */
+const UNAVAILABLE_CODES = new Set([
+  6, // HostUnreachable
+  7, // HostNotFound
+  89, // NetworkTimeout
+  91, // ShutdownInProgress
+  189, // PrimarySteppedDown
+  9001, // SocketException
+  10107, // NotWritablePrimary
+  11600, // InterruptedAtShutdown
+  11602, // InterruptedDueToReplStateChange
+  13435, // NotPrimaryNoSecondaryOk
+  13436, // NotPrimaryOrSecondary
+]);
+
 export function storeUnreachable(error: unknown): boolean {
-  return UNREACHABLE.has((error as { name?: string } | null)?.name ?? '');
+  const thrown = error as
+    | { name?: string; code?: unknown; hasErrorLabel?: (label: string) => boolean }
+    | null
+    | undefined;
+  if (!thrown) return false;
+  if (UNREACHABLE.has(thrown.name ?? '')) return true;
+  // The driver's own answer to "is this worth sending again", attached the
+  // moment it works out that the topology moved under it. Asking it beats
+  // keeping a list of codes in step with a database we do not write.
+  if (typeof thrown.hasErrorLabel === 'function' && thrown.hasErrorLabel('RetryableWriteError')) {
+    return true;
+  }
+  return typeof thrown.code === 'number' && UNAVAILABLE_CODES.has(thrown.code);
 }
 
 export async function createStore(uri: string, dbName: string): Promise<Store> {

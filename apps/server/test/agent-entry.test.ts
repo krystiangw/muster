@@ -1139,6 +1139,9 @@ describe('the MCP surface', () => {
       assert.equal(result.structuredContent.code, 'store_unavailable');
       assert.equal(result.structuredContent.status, 503);
       assert.match(result.structuredContent.error, /slug/);
+      // The delay too: a batch is many calls in one response, and the header
+      // the HTTP door sets cannot say which of them should wait.
+      assert.equal(result.structuredContent.retry_after, 5);
     } finally {
       harness.store.items.find = real;
     }

@@ -527,9 +527,9 @@ ${rows
      * What it does not claim is that nothing happened. Server selection fails
      * before anything leaves this process, but a socket dropped mid-write may
      * have been written all the same, and a message saying otherwise would be
-     * a guess dressed as a fact. The retry advice is keyed to what the caller
-     * can know instead: a write named by a slug lands once however many times
-     * it is sent.
+     * a guess dressed as a fact. Nor does it say "retry" flatly, which is the
+     * advice that turns one lost answer into two projects: a slug is an
+     * idempotency key and a minted id is not, so the sentence separates them.
      */
     if (storeUnreachable(error)) {
       request.log.warn({ err: error }, 'store unreachable');
@@ -539,7 +539,7 @@ ${rows
         .send({
           error: 'store_unavailable',
           message:
-            'The database did not answer, so this is not something about your request. Retry in a few seconds: anything keyed on a slug lands once however often it is sent, and a lease is taken the same way.',
+            'The database did not answer, so this is not something about your call. Retry a write named by a slug freely: it lands once however often you send it. A call that mints an id, a new project, a new question, a note on a timeline, may have landed already, so read before you send that one again.',
           retry_after: 5,
         });
     }

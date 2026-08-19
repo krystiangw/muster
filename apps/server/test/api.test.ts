@@ -1972,8 +1972,35 @@ describe('a database that does not answer', () => {
       assert.equal(answer.json().error, 'store_unavailable');
       assert.equal(answer.headers['retry-after'], '5');
       // Not "nothing was written": a socket dropped mid-write may have been.
-      // What the caller can act on is that repeating a slug is safe.
+      // And not "retry", flatly, which is the advice that turns one lost
+      // answer into two projects. A slug is an idempotency key; a minted id
+      // is not, and the message has to say which is which.
       assert.match(answer.json().message, /slug/);
+      assert.match(answer.json().message, /mints an id/);
+    } finally {
+      harness.store.items.find = real;
+    }
+  });
+
+  it('reads a failover as the store, not as a query it got wrong', async () => {
+    // A failover does not always arrive as a network error: the client reaches
+    // a node and the node answers that it is no longer the primary. That is a
+    // MongoServerError, class for class the same as a bad query, and only the
+    // number tells them apart.
+    const project = await createProject(harness);
+    const { MongoServerError } = await import('mongodb');
+    const real = harness.store.items.find.bind(harness.store.items);
+    harness.store.items.find = (() => {
+      throw new MongoServerError({ message: 'interrupted at shutdown', code: 11600 });
+    }) as typeof harness.store.items.find;
+    try {
+      const answer = await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/items`,
+        headers: authed(project),
+      });
+      assert.equal(answer.statusCode, 503, answer.body);
+      assert.equal(answer.json().error, 'store_unavailable');
     } finally {
       harness.store.items.find = real;
     }
