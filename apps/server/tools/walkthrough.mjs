@@ -459,6 +459,7 @@ const run = async () => {
   const elsewhere = await html(`${board}/note`, {
     method: 'POST',
     headers: {
+      ...AS_US,
       'content-type': 'application/x-www-form-urlencoded',
       origin: 'https://not-this-service.example',
       'sec-fetch-site': 'cross-site',

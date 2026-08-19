@@ -1114,6 +1114,53 @@ describe('what taking a question back must not do', () => {
     assert.equal(taken.json().escalation.withdrawn_by, 'errors-loop');
   });
 
+  it('does not make two agents one by shortening their names', async () => {
+    // The handle is compared as an identity here. Cutting it to a length would
+    // make every pair of agents whose names agree for that many characters the
+    // same agent, and each could close the other's questions.
+    // Over MCP on both sides, because the HTTP schema caps the handle at 48 and
+    // a collision needs two that are longer.
+    const project = await createProject(harness);
+    const stem = 'a'.repeat(48);
+    const mcp = async (name: string, args: Record<string, unknown>) =>
+      harness.server.inject({
+        method: 'POST',
+        url: '/mcp',
+        headers: { ...authed(project), 'content-type': 'application/json' },
+        payload: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } },
+      });
+    const asked = await mcp('escalate', { agent: `${stem}-one`, question: 'mine', context: 'x' });
+    const id = asked.json().result.structuredContent.escalation.id;
+    // Stored whole. This is the line the rest of the test rests on: shorten it
+    // and the two handles below become the same handle, whatever the predicate
+    // then does.
+    assert.equal(asked.json().result.structuredContent.escalation.agent, `${stem}-one`);
+
+    const refused = await mcp('withdraw', {
+      id,
+      agent: `${stem}-two`,
+      reason: 'a different agent entirely',
+    });
+    assert.match(JSON.stringify(refused.json().result), /not_your_question/);
+    assert.equal(
+      (await get(project, '/escalations')).json().escalations[0].status,
+      'open',
+      'and the agent that asked is still waiting',
+    );
+  });
+
+  it('finds what it asked, under the handle it asked with', async () => {
+    // Every handle ingress normalises the same way, or a padded handle asks
+    // successfully and then reads back an empty inbox, which looks exactly
+    // like having asked nothing.
+    const project = await createProject(harness);
+    await raise(project, '  errors-loop  ', 'padded on the way in');
+    const waiting = (await get(project, '/inbox?agent=%20%20errors-loop%20%20')).json().waiting;
+    assert.equal(waiting.length, 1, 'the question it just asked');
+    const listed = (await get(project, '/escalations?agent=%20errors-loop%20')).json().escalations;
+    assert.equal(listed.length, 1);
+  });
+
   it('cannot then be acknowledged as though somebody had answered', async () => {
     const project = await createProject(harness);
     const id = await raise(project, 'errors-loop', 'Bridge?');

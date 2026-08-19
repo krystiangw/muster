@@ -572,7 +572,10 @@ export async function readInbox(
   if (options.agent !== undefined && typeof options.agent !== 'string') {
     throw badRequest('bad_agent', 'agent is the handle whose inbox this is.');
   }
-  const forAgent = options.agent ? { agent: options.agent } : {};
+  // Trimmed like every other place a handle arrives. Asking under a padded
+  // handle used to work and then find nothing waiting, because the question was
+  // stored under the trimmed form and read back under the padded one.
+  const forAgent = options.agent ? { agent: options.agent.trim() } : {};
   const [answers, waiting, handovers, offers] = await Promise.all([
     store.escalations
       .find({
@@ -2931,12 +2934,15 @@ export async function withdrawEscalation(
   // The same normalisation the question was stored with, or the two never
   // meet: one door caps the handle and the other passes whatever a model
   // produced, and a mismatch here reads as "not your question".
-  const who = input.agent.trim().slice(0, 48);
+  const who = input.agent.trim();
   const updated = await store.escalations.findOneAndUpdate(
     // The handle is in the predicate, not merely recorded afterwards. A fleet
     // shares one key, so without this any loop could close a question another
     // loop is waiting on, and the sentence at both doors promises it cannot.
-    { _id: id, projectId: project._id, status: 'open', agent: who },
+    // Either shape, because rows written before handles were normalised hold
+    // whatever the caller sent, padding and all, and a deployment must not
+    // strand a question its own asker can no longer take back.
+    { _id: id, projectId: project._id, status: 'open', agent: { $in: [who, input.agent] } },
     {
       $set: {
         status: 'wont_do' as EscalationStatus,
@@ -2949,7 +2955,7 @@ export async function withdrawEscalation(
         // stopped it and that no answer exists.
         answeredAt: now,
         withdrawnAt: now,
-        withdrawnBy: who,
+        withdrawnBy: who.slice(0, 48),
         withdrawnReason: reason,
         updatedAt: now,
       },
@@ -3029,11 +3035,15 @@ export async function createEscalation(
   const doc: EscalationDoc = {
     _id: newId('e'),
     projectId: project._id,
-    // Trimmed and cut here rather than at one door: the HTTP schema caps this
-    // at 48 and MCP arguments are whatever a model produced, so a question
-    // asked over MCP under a longer handle used to be stored in a shape no
-    // withdrawal could ever match.
-    agent: input.agent.trim().slice(0, 48),
+    // Trimmed here rather than at one door, because the HTTP schema caps this
+    // at 48 and MCP arguments are whatever a model produced, so the two doors
+    // used to store the same handle in two shapes and a question asked through
+    // one could not be taken back through the other.
+    //
+    // Trimmed and not cut. This value is compared as an identity when somebody
+    // takes a question back, and shortening an identity makes two agents whose
+    // names agree for forty eight characters into one agent.
+    agent: input.agent.trim(),
     question: input.question.slice(0, 2000),
     context: (input.context ?? '').slice(0, 8000),
     priority: input.priority ?? 'normal',
@@ -3101,7 +3111,9 @@ export async function listEscalations(
 ): Promise<EscalationDoc[]> {
   const query: Record<string, unknown> = { projectId };
   if (filter.status) query.status = filter.status;
-  if (filter.agent) query.agent = filter.agent;
+  // The last handle ingress. Listing under a padded handle used to answer with
+  // nothing, which reads as "you have asked nothing" rather than as a typo.
+  if (filter.agent) query.agent = filter.agent.trim();
   // Whether anybody acted on it, which is a different question from what the
   // human decided. A job asking "what is new for me" is asking this one.
   if (filter.acknowledged === true) query.acknowledgedAt = { $ne: null };

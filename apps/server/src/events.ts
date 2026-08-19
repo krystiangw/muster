@@ -798,7 +798,12 @@ export async function insights(store: Store): Promise<Insights> {
     }),
     store.events
       .aggregate<{ _id: string; count: number }>([
-        { $match: { kind: 'refused' } },
+        // Strangers only, the same condition the funnel above uses. The
+        // walkthrough posts a form from another origin every morning on
+        // purpose, to prove the guard is still there, and each run left a row
+        // that reads exactly like somebody probing us. A number whose comment
+        // says "worth a look" has to be a number worth looking at.
+        { $match: { kind: 'refused', ours: { $ne: true } } },
         { $group: { _id: '$detail', count: { $sum: 1 } } },
         { $sort: { count: -1 } },
       ])
