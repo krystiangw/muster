@@ -1428,6 +1428,18 @@ describe('the map every refusal points at', () => {
       headers: admin,
       payload: { agent: 'first' },
     });
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: admin,
+      payload: { slug: 'blocker', title: 'what has to happen first' },
+    });
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: admin,
+      payload: { slug: 'blocked', title: 'a card that waits', blocked_by: ['blocker'] },
+    });
 
     // Each row is one request and the code it is expected to come back with.
     // The document has to name that code for that operation.
@@ -1439,6 +1451,10 @@ describe('the map every refusal points at', () => {
       { method: 'POST', url: `${project.api}/escalations`, path: '/v1/{project}/escalations', payload: { question: 'well?' }, headers: admin, code: 201 },
       { method: 'POST', url: `${project.api}/keys`, path: '/v1/{project}/keys', payload: { name: 'a key' }, headers: admin, code: 201 },
       { method: 'POST', url: `${project.api}/items/held/claim`, path: '/v1/{project}/items/{slug}/claim', payload: { agent: 'second' }, headers: admin, code: 409 },
+      // The same code from the same endpoint in the other shape. Losing a
+      // lease to a holder and losing it to something unfinished are not the
+      // same news, and they do not arrive in the same envelope.
+      { method: 'POST', url: `${project.api}/items/blocked/claim`, path: '/v1/{project}/items/{slug}/claim', payload: { agent: 'third' }, headers: admin, code: 409 },
       { method: 'GET', url: `${project.api}/items/not-here`, path: '/v1/{project}/items/{slug}', headers: reading, code: 404 },
       { method: 'DELETE', url: `${project.api}/items/not-here`, path: '/v1/{project}/items/{slug}', headers: reading, code: 404 },
       { method: 'DELETE', url: `${project.api}/keys/k_not_here`, path: '/v1/{project}/keys/{id}', headers: reading, code: 404 },

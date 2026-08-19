@@ -617,9 +617,26 @@ export async function buildApp(
           ];
           for (const code of codes) responses[code] ??= refusal(code);
           if (CONFLICTS.has(key)) {
+            // Two shapes, because there are two ways to lose a lease and they
+            // are not the same news. Somebody holding it is described: the
+            // holder is named and the card comes back. Something unfinished in
+            // front of it is refused: it names what to finish first. anyOf and
+            // not oneOf, for the same reason as the OAuth pair: the shapes are
+            // open, and a keyword meaning "exactly one" turns any future
+            // overlap into a validator rejecting a body this service sends.
             responses['409'] ??= {
-              description: 'Somebody else holds the lease. The answer names them and returns the card.',
-              content: { 'application/json': { schema: { $ref: '#/components/schemas/Held' } } },
+              description:
+                'Somebody else holds the lease, and the answer names them and returns the card; or something the card waits on is unfinished, and the answer names that.',
+              content: {
+                'application/json': {
+                  schema: {
+                    anyOf: [
+                      { $ref: '#/components/schemas/Held' },
+                      { $ref: '#/components/schemas/Refusal' },
+                    ],
+                  },
+                },
+              },
             };
           }
 
