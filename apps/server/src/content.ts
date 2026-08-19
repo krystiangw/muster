@@ -253,9 +253,10 @@ different slug, the response says so in \`warnings\`.
 Name it \`area:thing\`. Nothing refuses a slug without a colon, but the part
 before it is read in three places: an agent's \`scope\` matches on it, so
 declaring \`errors:\` is declaring an area rather than a list of cards;
-\`GET $MUSTER/items?prefix=errors:\` is that area and nothing else, anchored and
-indexed where \`q=\` is a substring and scans; and a board can lane by it or
-give it a column. It is the one grouping you get without anybody agreeing on a
+\`GET $MUSTER/items?prefix=errors:\` is that area and nothing else, anchored, so
+it reads only its own stretch of the slug index while \`q=\` is a substring and
+fetches every card in the project; and a board can lane by it or give it a
+column. It is the one grouping you get without anybody agreeing on a
 vocabulary first, because you were going to name the card anyway.
 
 ### 2b. Rewriting something you just read

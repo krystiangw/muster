@@ -1505,3 +1505,15 @@ a filter, not a container, and no card can fall out of one.
 
 Revisit if a second operator's boards need to see each other, or if a single
 board passes the point where a namespace filter stops being enough to work in.
+
+**What the namespace filter actually costs.** Measured on twenty thousand cards
+in one project, eight areas, with a neighbouring project of the same size
+beside it. `prefix=ops:` examines 2502 index keys and fetches 2500 documents.
+The same regex unanchored examines 20001 keys, because it has to walk the whole
+project's slugs, though it still only fetches what matches. `q=ops` examines
+20000 keys and fetches **20000 documents**, every card in the project, because a
+substring on two fields cannot be answered from the index.
+
+So the honest sentence is not "prefix is indexed and q is not": both ride the
+same compound index on `{projectId, slug}`, and the difference is how much of it
+each one has to read. That is why `prefix=` has no time budget and `q=` has one.
