@@ -50,6 +50,8 @@ const state = {
   noticeMisses: Number(saved.noticeMisses) || 0,
   noticeAlerted: saved.noticeAlerted === true,
   lastNote: typeof saved.lastNote === 'string' ? saved.lastNote : null,
+  keyCheckedAt: typeof saved.keyCheckedAt === 'string' ? saved.keyCheckedAt : null,
+  keyAlerted: saved.keyAlerted === true,
 };
 
 if (process.argv.includes('--status')) {
@@ -140,8 +142,12 @@ if (readUrl) {
 const broken = checks.filter((check) => !check.ok);
 const now = new Date().toISOString();
 
+// One place the credential comes from, and an override, so the check below can
+// be shown failing without moving the only copy of the real one.
+const alertKey = process.env.MUSTER_RESEND_KEY || read(join(HOME, 'resend.key'));
+
 async function mail(subject, lines) {
-  const key = read(join(HOME, 'resend.key'));
+  const key = alertKey;
   if (!key) return 'no key';
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -371,6 +377,48 @@ if (broken.length === 0 && apiRead?.body && 'oldest_unannounced_at' in apiRead.b
     } else {
       say(`notice miss ${state.noticeMisses}: oldest waited ${waitedMin} min, last notice ${lastNotice}`);
     }
+  }
+}
+
+/**
+ * Whether the alarm can still ring, asked without ringing it.
+ *
+ * Every alert above ends in a mail, and the credential that sends it is a
+ * secret on this laptop. A key that has been rotated or revoked costs nothing
+ * until the night it is needed, and then costs this whole file. Finding the
+ * file is not the same as the provider still accepting what is in it.
+ *
+ * A body with no recipient is what asks. The provider authenticates before it
+ * validates the shape, so 422 means the credential is good and nothing left
+ * the machine. Daily, because a key does not rot in an hour, and reported on
+ * the board rather than by mail, because mail is the thing under suspicion.
+ */
+const KEY_CHECK_EVERY_MS = 24 * 60 * 60_000;
+const keyCheckIsDue = () =>
+  state.keyCheckedAt === null || Date.parse(now) - Date.parse(state.keyCheckedAt) >= KEY_CHECK_EVERY_MS;
+
+if (broken.length === 0 && keyCheckIsDue()) {
+  const answer = alertKey
+    ? await probe('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { authorization: `Bearer ${alertKey}`, 'content-type': 'application/json' },
+        body: '{}',
+      })
+    : { status: 0 };
+  state.keyCheckedAt = now;
+  if (answer.status === 422) {
+    if (state.keyAlerted) say('the alerting key is accepted again');
+    state.keyAlerted = false;
+  } else if (!state.keyAlerted) {
+    const said_ = alertKey ? `answered ${answer.status}` : 'is not on disk';
+    const filed = await fileOnTheBoard(
+      'The key this watchdog alerts with is no longer accepted, so an outage would be silent.',
+      `A request the provider answers with 422 when the credential is good ${said_}. Nothing was `
+        + 'sent. Rotate ~/.muster/resend.key and RESEND_API_KEY on the dyno together, because '
+        + 'production sends every claim code and every escalation notice with the same one.',
+    );
+    state.keyAlerted = filed === 'filed';
+    say(`the alerting key ${said_} | board ${filed}`);
   }
 }
 
