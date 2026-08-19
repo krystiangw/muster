@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
-import { authed, createProject, startHarness, type Harness } from './helper.js';
+import { authed, createProject, startHarness, type Harness, type Project } from './helper.js';
 
 /**
  * The protocol document, executed.
@@ -24,8 +24,28 @@ import { authed, createProject, startHarness, type Harness } from './helper.js';
  */
 let harness: Harness;
 
+/** Codes this deployment would have emailed, newest last. */
+const posted: string[] = [];
+
 before(async () => {
-  harness = await startHarness();
+  // The signup document ends in a claim, and a claim is two calls with a
+  // six digit code in between. Without a mailer the first of them answers 503
+  // and the second can only be run against a guess, which tests the guess.
+  harness = await startHarness(
+    {},
+    {
+      mailer: {
+        sendClaimCode: async (_to, code) => {
+          posted.push(code);
+          return 'sent';
+        },
+        sendOperatorCode: async () => 'sent',
+        sendBoardOffer: async () => 'sent',
+        sendQuietBoard: async () => 'sent',
+        sendEscalation: async () => 'sent',
+      },
+    },
+  );
 });
 
 after(async () => {
@@ -71,6 +91,36 @@ export function commandsIn(markdown: string): Command[] {
   return found;
 }
 
+/**
+ * Run one printed command and assert only what printing it promised.
+ *
+ * 409 is allowed on purpose, because several examples demonstrate a refusal;
+ * so is a 404 that names `not_accepting`, which is a deployment declining
+ * anonymous reports rather than a route that does not exist. Everything else
+ * in 400, 404 and 405 means the document sent a reader somewhere this service
+ * does not answer.
+ */
+async function runAsPrinted(
+  command: Command,
+  project: Project,
+  fill: (text: string) => string,
+): Promise<void> {
+  const url = fill(command.url);
+  const headers = url.startsWith('/v1/') ? authed(project) : { 'content-type': 'application/json' };
+  const answer = await harness.server.inject({
+    method: command.method as 'POST',
+    url,
+    headers,
+    ...(command.body ? { payload: JSON.parse(fill(command.body)) } : {}),
+  });
+  const code = answer.statusCode === 404 ? String(answer.json().error ?? '') : '';
+  if (code === 'not_accepting') return;
+  assert.ok(
+    ![400, 404, 405].includes(answer.statusCode),
+    `${command.method} ${url} answered ${answer.statusCode}: ${answer.body.slice(0, 200)}`,
+  );
+}
+
 describe('every curl the protocol prints', () => {
   it('reaches a route this service has, with a body it accepts', async () => {
     const project = await createProject(harness);
@@ -78,39 +128,51 @@ describe('every curl the protocol prints', () => {
     const commands = commandsIn(doc);
     assert.ok(commands.length >= 25, `the document has commands in it: found ${commands.length}`);
 
+    const fill = (text: string): string =>
+      text
+        .replace('$MUSTER', project.api)
+        .replace(harness.config.baseUrl, '')
+        .replace('$HANDLE', 'errors-loop')
+        .replace('$LAST_AS_OF', new Date().toISOString());
+
     let ran = 0;
     for (const command of commands) {
       // Placeholders the document tells the reader to fill in themselves. A
       // test that invented an escalation id would be testing its own guess.
       if (/[<>]/.test(command.url) || (command.body && /[<>]/.test(command.body))) continue;
-      const url = command.url
-        .replace('$MUSTER', project.api)
-        .replace(harness.config.baseUrl, '')
-        .replace('$HANDLE', 'errors-loop')
-        .replace('$LAST_AS_OF', new Date().toISOString());
-      // Signup and anonymous feedback are the two calls that carry no token,
-      // and both are answered by this deployment.
-      const headers = url.startsWith('/v1/') ? authed(project) : { 'content-type': 'application/json' };
-
-      const answer = await harness.server.inject({
-        method: command.method as 'POST',
-        url,
-        headers,
-        ...(command.body ? { payload: JSON.parse(command.body) } : {}),
-      });
+      await runAsPrinted(command, project, fill);
       ran += 1;
-      // A deployment that names no project for anonymous reports answers the
-      // documented call with `not_accepting`, which is a configuration and not
-      // a missing route: the code is what tells the two apart, so the code is
-      // what this reads.
-      const code = answer.statusCode === 404 ? String(answer.json().error ?? '') : '';
-      if (code === 'not_accepting') continue;
-      assert.ok(
-        ![400, 404, 405].includes(answer.statusCode),
-        `${command.method} ${url} answered ${answer.statusCode}: ${answer.body.slice(0, 200)}`,
-      );
     }
     assert.ok(ran >= 24, `most of the document is runnable as printed: ran ${ran}`);
+  });
+
+  it('runs the signup document too, including the claim it ends on', async () => {
+    // Same promise, a different page, and the one a stranger reads first. Its
+    // placeholders are angle brackets rather than shell variables, and the
+    // printed code is a placeholder as well: six digits nobody can guess,
+    // because only the server mints them.
+    const project = await createProject(harness, 'signup-doc');
+    const doc = (await harness.server.inject({ method: 'GET', url: '/agent-signup.md' })).body;
+    const commands = commandsIn(doc);
+    assert.ok(commands.length >= 4, `the signup document has commands in it: ${commands.length}`);
+
+    const fill = (text: string): string =>
+      text
+        .replace(harness.config.baseUrl, '')
+        .replace('<project>', project.id)
+        .replace('<admin token>', project.token)
+        .replace('<token>', project.token)
+        .replace(/"code":\s*"\d{6}"/, `"code":"${posted.at(-1) ?? '000000'}"`);
+
+    for (const command of commands) {
+      await runAsPrinted(command, project, fill);
+    }
+    // Not "nothing answered 404": the two calls the document ends on are a
+    // claim and its verification, so the project is owned afterwards or the
+    // page walked a reader through a sequence that does not finish.
+    assert.ok(posted.length > 0, 'the claim in the document actually asked for a code');
+    const after = await harness.store.projects.findOne({ _id: project.id });
+    assert.equal(after?.claimedBy, 'human@example.com', 'and the verification took');
   });
 
   it('signs up exactly as the first example on the page says', async () => {
@@ -129,4 +191,3 @@ describe('every curl the protocol prints', () => {
     assert.ok(answer.json().token, 'and it hands back a token');
   });
 });
-
