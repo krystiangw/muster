@@ -35,6 +35,9 @@ describe('a token from one project, at every door of another', () => {
   /** Ids in my own project, so no door can turn me away for a thing that is missing. */
   let myEscalation = '';
   let myKey = '';
+  /** And theirs, to try on my own doors. */
+  let theirEscalation = '';
+  let theirKey = '';
   /** What their board held before anybody knocked on it. */
   let atRest: Record<string, number> = {};
 
@@ -76,7 +79,9 @@ describe('a token from one project, at every door of another', () => {
     // sweep that accepts 404 would have counted that as protection. Every
     // placeholder below is a thing that exists in my project, so absent the
     // guard each of these doors would answer.
-    await fill(theirs, 'their');
+    const theirIds = await fill(theirs, 'their');
+    theirEscalation = theirIds.escalation;
+    theirKey = theirIds.key;
     const ids = await fill(mine, 'my');
     myEscalation = ids.escalation;
     myKey = ids.key;
@@ -173,7 +178,7 @@ describe('a token from one project, at every door of another', () => {
 
   /** Every project-scoped route the service publishes, with its parameters filled. */
   type Door = { method: string; url: string; body: Record<string, unknown> | undefined };
-  const doors = async (): Promise<Door[]> => {
+  const doors = async (at: string, whose: 'my' | 'their'): Promise<Door[]> => {
     const openapi = (await harness.server.inject({ method: 'GET', url: '/openapi.json' })).json();
 
     const out: Door[] = [];
@@ -186,11 +191,20 @@ describe('a token from one project, at every door of another', () => {
       // answer 404 for a thing that was never there, which is not the refusal
       // this is looking for.
       const url = route
-        .replace('{project}', theirs.id)
-        .replace('{slug}', 'my-card')
-        .replace('{handle}', 'my-agent')
-        .replace('{id}', route.includes('/keys/') ? myKey : myEscalation)
-        .replace('{key}', myKey);
+        .replace('{project}', at)
+        .replace('{slug}', `${whose}-card`)
+        .replace('{handle}', `${whose}-agent`)
+        .replace(
+          '{id}',
+          route.includes('/keys/')
+            ? whose === 'my'
+              ? myKey
+              : theirKey
+            : whose === 'my'
+              ? myEscalation
+              : theirEscalation,
+        )
+        .replace('{key}', whose === 'my' ? myKey : theirKey);
       assert.doesNotMatch(url, /[{}]/, `fill this parameter before trusting the sweep: ${route}`);
       for (const [method, operation] of Object.entries(methods)) {
         out.push({
@@ -204,7 +218,7 @@ describe('a token from one project, at every door of another', () => {
   };
 
   it('is turned away at every one of them', async () => {
-    const list = await doors();
+    const list = await doors(theirs.id, 'my');
     // A sweep that found nothing would pass in silence, which is the one
     // outcome this must not have.
     assert.ok(list.length >= 15, `the document listed the project routes: ${list.length}`);
@@ -268,6 +282,49 @@ describe('a token from one project, at every door of another', () => {
       }
     }
     assert.deepEqual(leaked, [], `a token reached somebody else's board:\n${leaked.join('\n')}`);
+  });
+
+  it('refuses their card, their question and their key at my own doors', async () => {
+    // The other direction, and the one an attacker takes. The first sweep asks
+    // somebody else's address with my token, which the check in front of every
+    // route settles. This one is a request that check is happy with: my token,
+    // my project in the path, and a reference to something on their board in
+    // the parameter. Nothing in front of the handler can catch that. It is
+    // caught, if it is caught, by every lookup carrying the project beside the
+    // id, and a lookup that forgets is invisible until somebody notices their
+    // question was answered by a stranger.
+    const list = (await doors(mine.id, 'their')).filter((door) => /(their-card|their-agent)/.test(door.url) || door.url.includes(theirEscalation) || door.url.includes(theirKey));
+    assert.ok(list.length >= 8, `the routes that take a reference: ${list.length}`);
+
+    const reached: string[] = [];
+    for (const door of list) {
+      const answer = await harness.server.inject(
+        door.body === undefined
+          ? { method: door.method as 'GET', url: door.url, headers: authed(mine) }
+          : {
+              method: door.method as 'POST',
+              url: door.url,
+              headers: { ...authed(mine), 'content-type': 'application/json' },
+              payload: door.body,
+            },
+      );
+      if (answer.statusCode < 400) reached.push(`${door.method} ${door.url} answered ${answer.statusCode}`);
+      if (answer.body.includes('their work') || answer.body.includes('their question')) {
+        reached.push(`${door.method} ${door.url} read it out`);
+      }
+    }
+    assert.deepEqual(reached, [], `a reference reached across boards:\n${reached.join('\n')}`);
+  });
+
+  it('leaves their key working after somebody tried to revoke it from another board', async () => {
+    // The effect, not the status code. A revoke that answers 404 and deletes
+    // the row anyway has done the damage and reported innocence.
+    const stored = await harness.store.keys.findOne({ projectId: theirs.id, _id: theirKey });
+    assert.equal(stored?.revokedAt ?? null, null, 'their key was not revoked');
+
+    const question = await harness.store.escalations.findOne({ projectId: theirs.id, _id: theirEscalation });
+    assert.equal(question?.status, 'open', 'and their question was not answered for them');
+    assert.equal(question?.acknowledgedAt ?? null, null, 'nor acknowledged');
   });
 
   /** Everything of theirs that a door could have made or unmade. */
