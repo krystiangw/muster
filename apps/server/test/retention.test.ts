@@ -30,24 +30,31 @@ describe('what the service promises to forget', () => {
     harness = await startHarness();
     project = await createProject(harness, 'a board with something in every corner');
 
-    const write = (path: string, payload: Record<string, unknown>) =>
-      harness.server.inject({
+    // Every answer checked. Both tests below are written so that a collection
+    // with nothing in it is quietly skipped, which is the right behaviour for
+    // a database that has not been used and the wrong one for a fixture that
+    // silently stopped writing: it would pass by protecting nothing.
+    const write = async (path: string, payload: Record<string, unknown>, want = 201) => {
+      const answer = await harness.server.inject({
         method: 'POST',
         url: `${project.api}${path}`,
         headers: authed(project),
         payload,
       });
+      assert.equal(answer.statusCode, want, `POST ${path} said ${answer.statusCode}: ${answer.body}`);
+    };
     await write('/agents', { handle: 'someone' });
     await write('/items', { slug: 'a-card', title: 'work', actor: 'someone' });
     await write('/escalations', { agent: 'someone', question: 'a question' });
     await write('/keys', { role: 'write', name: 'a second door' });
-    await write('/claim', { email: 'nobody@example.com' });
+    await write('/claim', { email: 'nobody@example.com' }, 200);
     await write('/share', { email: 'somebody@example.com', agent: 'someone' });
-    await harness.server.inject({
+    const client = await harness.server.inject({
       method: 'POST',
       url: '/oauth/register',
       payload: { client_name: 'a client', grant_types: ['client_credentials'] },
     });
+    assert.equal(client.statusCode, 201, client.body);
     await signIn(harness, 'a-person@example.com');
     await flushEvents();
   });
@@ -60,10 +67,18 @@ describe('what the service promises to forget', () => {
   const indexesOf = async (name: string): Promise<Array<Record<string, unknown>>> =>
     (await harness.store.db.collection(name).indexes()) as Array<Record<string, unknown>>;
 
+  /**
+   * Zero, not merely present.
+   *
+   * The date in `expiresAt` is the moment the document should go, so the index
+   * is told to wait no time at all beyond it. An index that still names the
+   * field but waits an hour, or a day, keeps everything past the point the
+   * page promises and looks identical to a working one from a distance.
+   */
   const expiresByItself = async (name: string): Promise<boolean> =>
     (await indexesOf(name)).some(
       (index) =>
-        index.expireAfterSeconds !== undefined &&
+        index.expireAfterSeconds === 0 &&
         Object.keys((index.key ?? {}) as Record<string, unknown>).includes('expiresAt'),
     );
 
@@ -133,6 +148,11 @@ describe('what the service promises to forget', () => {
     const after = await harness.store.projects.findOne({ _id: project.id });
     assert.equal(after?.expiresAt ?? null, null, 'the board is not going anywhere now');
     for (const name of ['items', 'agents', 'escalations', 'apiKeys'] as const) {
+      // There was something to clear, and then there was nothing dated. Only
+      // the second half was asserted at first, which an empty collection
+      // satisfies without anything having happened.
+      const held = await harness.store.db.collection(name).countDocuments({ projectId: project.id });
+      assert.ok(held > 0, `${name} had something under this board`);
       const stillDated = await harness.store.db
         .collection(name)
         .countDocuments({ projectId: project.id, expiresAt: { $type: 'date' } });
