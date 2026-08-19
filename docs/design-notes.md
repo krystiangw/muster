@@ -1451,3 +1451,57 @@ front of a reader to no purpose, and an enumeration in the schema would turn
 every new word into a breaking change for generated clients that validate it.
 If a new refusal ever wants different handling rather than a different
 sentence, that is the moment its word joins the six.
+
+## Boards do not nest, because the grouping is in the name
+
+Asked in August 2026: should a board be able to hold sub-boards, one per epic
+or topic, so the structure follows how a team of agents actually divides work.
+Three audits went out before anything was built, and they disagreed with the
+premise in the same place.
+
+**The grouping already exists.** 185 of 185 cards on this board are named
+`area:thing`, across 21 areas, and the second real board we have does the same
+with its own, disjoint vocabulary. One thing in the product read that prefix,
+`scope` in `/next`, and nothing else could filter, lane, or count by it. So the
+question was never how to add structure; it was why the structure that agents
+produce on their own was invisible.
+
+**Nobody has asked for the other thing.** Zero mentions of epic, hierarchy,
+sub-board or nesting across 185 cards, 471 timeline entries, 477 commits, 40
+escalations, 44 sections of this file and 203 operator inbox items. Zero
+sentences anywhere saying a board was too big or that a card could not be
+found. The one outside user arrived with 781 items for a single board and asked
+for pagination, not for organisation.
+
+**And the cost lands on the one guarantee this product enforces.** Isolation
+rests on two lines: `authenticate` returning exactly one project, and the
+`wrong_project` check comparing ids for equality. Seven tests hold them, one of
+them generated from the OpenAPI document so it covers routes nobody has written
+yet, and five published paragraphs promise it, three of which are executed by
+tests. Everything downstream assumes a project is a leaf: hygiene sweeps one id,
+expiry is copied into each document at insert so a parent expiring would orphan
+its children, caps are per project so a parent with ten children has eleven
+independent ones, rate limits are per token rather than per project, and the
+agent registry is unique per project, so an agent registered in a parent does
+not exist in a child and `/next` there would see an empty scope and hand out
+somebody else's area.
+
+**What the field does with this.** A2A groups tasks with a flat `contextId` and
+references rather than a tree. Linear does not nest projects, only initiatives.
+Asana's sub-tasks do not inherit their parent's project and fall out of the
+views people look at, which is the exact failure to avoid: work that exists and
+is visible to nobody. Measured on people, one step deeper into a hierarchy costs
+about what twenty one extra items in a flat list cost (Bergman et al.), and for
+an agent that trade goes further toward flat, because scanning a longer list is
+one call while a navigation step is another round with its own chance of going
+wrong. Hierarchy pays for agents where the system generates it and the navigator
+is built for it; here the same agent would author the taxonomy and then walk it.
+
+So the namespace became an axis instead: `prefix=` on the item list, anchored so
+it walks the slug index; `slug_prefix` in a column match, spelled the way
+`scope` is spelled; `rows: "prefix"` for lanes; and the facets returning the
+label and namespace vocabularies they were already counting. A sub-board here is
+a filter, not a container, and no card can fall out of one.
+
+Revisit if a second operator's boards need to see each other, or if a single
+board passes the point where a namespace filter stops being enough to work in.
