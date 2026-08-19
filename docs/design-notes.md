@@ -1303,3 +1303,50 @@ copies, and every one of them had already started to differ or was one edit
 from it. Where a sentence is load bearing, it gets one home and both doors
 import it.
 
+
+## The layer that reads what was stored, 2026-08-19
+
+An entry above records fixing this once already: "a filter that read the stored
+field rather than the meaning", where the list filter compared `claim` to null
+so an item with no holder listed as held between a lease running out and the
+next sweep. That was the query. The same fault was one layer further out and
+survived it, in the serializer, and it had been there the whole time.
+
+Everything that decides asks the question live. The board compares `expiresAt`
+with now, the query behind `claimed` does the same, and `/next` will not offer a
+card whose lease is still good. `itemJson` did not, so one answer could filter a
+card out as free and describe it as held in the same breath, and reading that
+card on its own said held until hygiene happened to run.
+
+The first fix was to sweep before the single-card read, on both doors, for
+consistency with every other read path. That was wrong twice over. The sweep is
+fire and forget and throttled to fifteen seconds, so the request it precedes can
+still be the one that lands early; and the other read paths are not correct
+*because* they sweep, they are correct because they ask. Reaching for
+consistency with neighbours is a good instinct that here copied the wrong
+property of them.
+
+This changes what the hygiene note further up means. Expiry stays on the read
+path for the reason given there, that a poller asking with `since` never learns
+about a row nothing has touched. It is no longer what makes an answer true. The
+answer is true because the serializer asks the same question the board asks, and
+the sweep now only does what it says: eventually clears the stored claim.
+
+The pattern generalises, and looking for it deliberately found the next one
+within the hour. `blocked_by` is a declaration and rightly stays true after the
+cards it names are finished, because it records what this work came after. The
+card face on the board asked the live map of what is genuinely waiting; the
+sheet on the same page printed the declaration. One page, two answers about one
+card, and the sentence a person read was "Waiting on ops:bridge" about work that
+was free to take.
+
+The fix for that one had its own version of the same mistake in it. Absence from
+the live map means two different things, because the map is asked about work
+that is not finished: a done or dropped card is missing from it whatever its
+blockers are doing, and a card parked as `blocked` is missing once they are done
+while still not being offered. Reading an empty answer as "nothing is holding
+this up" was false in both directions.
+
+So: when a fact is derived, find every place that states it, and check they all
+derive it rather than one of them reading a copy. And when a check comes back
+empty, ask what else being empty could mean.
