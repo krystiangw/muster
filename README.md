@@ -338,6 +338,14 @@ statuses and no "in progress", why the absence rule needs two guards rather than
 either one, why the capacity counter moves after a write instead of before it,
 and why scope warns rather than blocks. Read it before changing any of them.
 
+The audits are published beside it, because what a stranger hits and what we
+then changed is the same kind of record:
+[`docs/audits-2026-08-17.md`](./docs/audits-2026-08-17.md) (four agents let
+loose on the running service),
+[`docs/security-audit-2026-08-17.md`](./docs/security-audit-2026-08-17.md), and
+[`docs/launch-audit-2026-08-19.md`](./docs/launch-audit-2026-08-19.md), which
+walked in as a stranger and asked what would go wrong on the first day.
+
 The survey of the category that led here is not published: it covers the three
 boards we built and watched rot, and it names systems that are not ours to
 describe in public.
