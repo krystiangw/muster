@@ -215,6 +215,35 @@ describe('the watchdog, watched', () => {
   // just before 03:17 on the second night would page about a run that had not
   // had its turn yet. Forty seven and a half hours rounds to forty eight and
   // has to still be fine.
+  // The upgrade path. Before the split, a stale archive set the shared latch,
+  // and a state file written then cannot say which of the two conditions set
+  // it. Trusting it would suppress the outage mail on the first bad night
+  // after the upgrade, which is the exact failure the split was for.
+  it('does not trust an alerted flag written before the backup check was split out', async () => {
+    writeFileSync(
+      join(home, 'watchdog.state.json'),
+      JSON.stringify({ failures: 3, alerted: true, lastOk: null }),
+    );
+    state.landing = 500;
+    // The carried failure count is already past the two-miss rule, so this
+    // pages on the first round: the fixture is a machine that has been failing
+    // for a while and whose only reason for silence was the stale flag.
+    const out = await round();
+    assert.match(out, /^down:/m, 'the outage pages rather than being latched shut');
+    assert.equal(saved().alerted, true);
+  });
+
+  // An outage says nothing either way about the archives, and this branch files
+  // on a board that is very likely down while claiming the service is fine.
+  it('says nothing about backups while production is failing', async () => {
+    backupWritten(Date.now() - 50 * 3_600_000);
+    state.landing = 500;
+    await round();
+    const out = await round();
+    assert.doesNotMatch(out, /backup/i);
+    assert.equal(saved().backupMisses, 0, 'and a bad afternoon does not count as a night');
+  });
+
   it('waits the full two nights, not the rounded ones', async () => {
     backupWritten(Date.now() - 47.6 * 3_600_000);
     await round();

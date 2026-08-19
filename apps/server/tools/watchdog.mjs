@@ -40,11 +40,18 @@ const read = (path) => (existsSync(path) ? readFileSync(path, 'utf8').trim() : n
 // version of this script is missing whatever was added since, and undefined + 1
 // is NaN, which counts as a miss forever and alerts never.
 const saved = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8')) : {};
+// Written before the backup check was split out of the outage latch, so its
+// `alerted` could mean either "production is down" or "the archives are old",
+// and there is no way to tell which from the file. Cleared rather than
+// carried: the cost of clearing it wrongly is one repeated outage mail, and
+// the cost of trusting it is the outage mail never going out at all.
+const beforeTheSplit = saved.backupMisses === undefined;
 const state = {
   failures: 0,
   alerted: false,
   lastOk: null,
   ...saved,
+  ...(beforeTheSplit ? { alerted: false } : {}),
   // Read back through their own types rather than spread as they are: a state
   // written by an older version of this script has no counter at all, and
   // undefined + 1 is NaN, which JSON writes as null, counts as a miss forever
@@ -449,7 +456,15 @@ if (broken.length === 0 && apiRead?.body && 'swept_at' in apiRead.body) {
  * this reads, and mail is the fallback, the same order the hygiene check uses
  * and for the same reason.
  */
-if (backupsFresh) {
+// Only while production is answering, the same gate the hygiene branch uses.
+// During an outage this would file on a board that is very likely down and
+// send mail saying the service is answering normally, and the filing has no
+// timeout of its own, so it would sit in front of writing the outage latch.
+if (broken.length > 0) {
+  // Nothing said and nothing counted: an outage is not evidence either way
+  // about the archives, and counting a miss here would reach two on a bad
+  // afternoon rather than after two nights.
+} else if (backupsFresh) {
   if (state.backupAlerted) say('backups are being written again');
   state.backupMisses = 0;
   state.backupAlerted = false;
