@@ -257,6 +257,10 @@ function keptParams(form: KeptFilter): Record<string, string> {
   return kept;
 }
 
+/** What the store last said about itself, and when. See `/health`. */
+const health = new WeakMap<object, { at: number; ok: boolean }>();
+const HEALTH_CACHE_MS = 1_000;
+
 export function registerPublic(app: FastifyInstance, deps: PublicDeps): void {
   const { store, config, limiter, mailer } = deps;
   const base = config.baseUrl;
@@ -264,7 +268,37 @@ export function registerPublic(app: FastifyInstance, deps: PublicDeps): void {
   // from somewhere.
   const ourHost = new URL(base).host;
 
-  app.get('/health', { schema: { hide: true } }, async () => ({ ok: true }));
+  /**
+   * Whether this can serve, rather than whether the process is running.
+   *
+   * `{ok: true}` unconditionally is a health check that cannot fail. It would
+   * have stayed green through a database nobody could reach, which is the one
+   * outage worth having an endpoint for: the dyno answers, every page renders
+   * its shell, and every call behind them is a 503. So it asks the store, and
+   * says the same thing the API would.
+   *
+   * Cached for a second, because a health endpoint is the thing that gets
+   * polled and a ping per poll spends the budget the board needs. Keyed by
+   * store rather than kept in a module variable, because two harnesses in one
+   * test file share this module and would otherwise share an answer about
+   * different databases.
+   */
+  app.get('/health', { schema: { hide: true } }, async (_request, reply) => {
+    const now = Date.now();
+    const remembered = health.get(store);
+    const fresh =
+      remembered && now - remembered.at < HEALTH_CACHE_MS
+        ? remembered
+        : { at: now, ok: await store.db.command({ ping: 1 }).then(() => true, () => false) };
+    health.set(store, fresh);
+    if (fresh.ok) return { ok: true, store: 'ok' };
+    return reply.code(503).header('retry-after', '5').send({
+      ok: false,
+      error: 'store_unavailable',
+      message: 'The database did not answer, so this deployment cannot serve a board right now.',
+      retry_after: 5,
+    });
+  });
 
   // ------------------------------------------------------------- landing
 

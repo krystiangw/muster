@@ -1952,6 +1952,34 @@ describe('a refusal that clears by waiting', () => {
 });
 
 describe('a database that does not answer', () => {
+  it('makes the health check say so, instead of reporting the process', async () => {
+    // A health endpoint that cannot fail is decoration: it would have stayed
+    // green through the one outage worth having an endpoint for, because the
+    // dyno answers and every page renders its shell while every call behind
+    // them is a 503.
+    const before = await harness.server.inject({ method: 'GET', url: '/health' });
+    assert.equal(before.statusCode, 200);
+    assert.equal(before.json().store, 'ok');
+
+    const real = harness.store.db.command.bind(harness.store.db);
+    harness.store.db.command = (() =>
+      Promise.reject(new Error('no primary reachable'))) as typeof harness.store.db.command;
+    try {
+      // Cached first, which is the reason the endpoint is safe to poll: the
+      // store is already broken here and the answer is a second old.
+      const cached = await harness.server.inject({ method: 'GET', url: '/health' });
+      assert.equal(cached.statusCode, 200, 'a fresh answer is reused rather than pinged again');
+
+      await new Promise((resolve) => setTimeout(resolve, 1_100));
+      const answer = await harness.server.inject({ method: 'GET', url: '/health' });
+      assert.equal(answer.statusCode, 503, answer.body);
+      assert.equal(answer.json().error, 'store_unavailable');
+      assert.equal(answer.headers['retry-after'], '5');
+    } finally {
+      harness.store.db.command = real;
+    }
+  });
+
   it('says later rather than "something broke", and says it is not your request', async () => {
     // 5xx is the class this protocol tells an agent to retry, so a bug and an
     // outage answered the same way meant a fleet retried the bug at full speed

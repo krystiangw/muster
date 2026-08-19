@@ -384,6 +384,15 @@ const run = async () => {
   });
   check('and the same form posted from another site is refused', elsewhere.status === 403, elsewhere.status);
 
+    // The endpoint an outside monitor watches. It used to answer {ok:true} come
+  // what may, so it is worth asking whether it now says what the store says.
+  const health = await fetch(`${BASE}/health`).then((r) => r.json().then((body) => ({ status: r.status, body })));
+  check(
+    'the health check reports the database, not the process',
+    health.status === 200 && health.body?.store === 'ok',
+    JSON.stringify(health),
+  );
+
   console.log('\nthe same board over MCP');
   const tools = await mcp(token, 'tools/list', {});
   check('the tools are listed', (tools.result?.tools ?? []).length > 0);
