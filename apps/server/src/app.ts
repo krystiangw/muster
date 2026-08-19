@@ -230,6 +230,24 @@ export async function buildApp(
          * query string already behaved this way; the body did not.
          */
         removeAdditional: false,
+        /**
+         * A value of the wrong shape is refused, not reshaped.
+         *
+         * Fastify's default is `coerceTypes: 'array'`, which exists for query
+         * strings, where one repeated parameter arrives as a scalar and has to
+         * become a list of one. On a JSON body it means something else: an
+         * agent that sent `"blocked_by": "ops:cutover"` instead of a list got
+         * 200 and a card waiting on one thing, having been told nothing. That
+         * is the same silent repair as dropping an unknown field, which this
+         * service refuses in as many words and publishes a promise about.
+         *
+         * `true` rather than `false`, because the query strings do depend on
+         * coercion: `?limit=200` and `?include_closed=true` arrive as text and
+         * the schemas say number and boolean. Nothing here declares an array
+         * in a query string, so the only behaviour this gives up is the one
+         * that was hiding a mistake.
+         */
+        coerceTypes: true,
       },
     },
   });

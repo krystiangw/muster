@@ -2291,6 +2291,54 @@ describe('a database that does not answer', () => {
   });
 });
 
+describe('a value of the wrong shape', () => {
+  it('is refused rather than reshaped into the right one', async () => {
+    // Fastify coerces a scalar into a list by default, which is right for a
+    // query string and wrong for a body: an agent that sent one slug instead
+    // of a list of them got 200 and a card waiting on one thing, having been
+    // told nothing. This service refuses an unknown field in as many words;
+    // quietly repairing a wrong type is the same surprise wearing a hat.
+    const project = await createProject(harness);
+    const refused = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'ops:cutover', blocked_by: 'ops:bridge-or-wait' },
+    });
+    assert.equal(refused.statusCode, 400, refused.body);
+    assert.equal(refused.json().error, 'invalid_request');
+    assert.match(refused.json().message as string, /blocked_by must be array/);
+
+    // A list of one is what it wanted, and that still works.
+    const listed = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'ops:cutover', blocked_by: ['ops:bridge-or-wait'] },
+    });
+    assert.equal(listed.statusCode, 201, listed.body);
+  });
+
+  it('still reads a number and a flag out of a query string', async () => {
+    // The coercion that was turned off is the array one. Everything a query
+    // string depends on arrives as text and has to become what the schema
+    // says, and every documented read uses it.
+    const project = await createProject(harness);
+    const listed = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/items?limit=5&stale=false&order=id`,
+      headers: authed(project),
+    });
+    assert.equal(listed.statusCode, 200, listed.body);
+    const board = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/board?items=false&include_closed=true`,
+      headers: authed(project),
+    });
+    assert.equal(board.statusCode, 200, board.body);
+  });
+});
+
 describe('a value outside a closed set', () => {
   it('names the values it does take, and the one nobody has', async () => {
     // "must be equal to one of the allowed values" is the refusal that does
