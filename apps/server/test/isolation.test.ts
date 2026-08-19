@@ -31,24 +31,58 @@ describe('a token from one project, at every door of another', () => {
   let mine: Project;
   let theirs: Project;
 
+  /** Ids in my own project, so no door can turn me away for a thing that is missing. */
+  let myEscalation = '';
+  let myKey = '';
+  /** What their board held before anybody knocked on it. */
+  let atRest: Record<string, number> = {};
+
   before(async () => {
     harness = await startHarness();
     mine = await createProject(harness, 'my board');
     theirs = await createProject(harness, 'somebody else');
 
-    // Their board, with something on it to find: a route that leaks would
-    // otherwise answer "nothing here" and look like a refusal.
-    const write = (path: string, payload: Record<string, unknown>) =>
-      harness.server.inject({
-        method: 'POST',
-        url: `${theirs.api}${path}`,
-        headers: authed(theirs),
-        payload,
-      });
-    await write('/agents', { handle: 'their-agent', description: 'not yours' });
-    await write('/items', { slug: 'their-card', title: 'their work', actor: 'their-agent' });
-    await write('/items/their-card/claim', { agent: 'their-agent' });
-    await write('/escalations', { agent: 'their-agent', question: 'their question' });
+    const fill = async (project: Project, prefix: string) => {
+      const write = (path: string, payload: Record<string, unknown>) =>
+        harness.server.inject({
+          method: 'POST',
+          url: `${project.api}${path}`,
+          headers: authed(project),
+          payload,
+        });
+      await write('/agents', { handle: `${prefix}-agent`, description: 'someone' });
+      await write('/items', { slug: `${prefix}-card`, title: `${prefix} work`, actor: `${prefix}-agent` });
+      await write(`/items/${prefix}-card/claim`, { agent: `${prefix}-agent` });
+      const asked = await write('/escalations', { agent: `${prefix}-agent`, question: `${prefix} question` });
+      const key = await write('/keys', { role: 'write', name: `${prefix} key` });
+      return { escalation: asked.json().escalation?.id ?? '', key: key.json().key?.id ?? '' };
+    };
+
+    // Both boards, furnished the same way. Their board so that a door which
+    // leaks has something to name, and mine because of what the guard does
+    // when it is missing: authentication resolves my project, so a route
+    // looking for a card or a question finds nothing and answers 404, and a
+    // sweep that accepts 404 would have counted that as protection. Every
+    // placeholder below is a thing that exists in my project, so absent the
+    // guard each of these doors would answer.
+    await fill(theirs, 'their');
+    const ids = await fill(mine, 'my');
+    myEscalation = ids.escalation;
+    myKey = ids.key;
+    // Answered, because acknowledging one that has no answer is refused on its
+    // own merits and that refusal would hide whether the door was reached.
+    await harness.server.inject({
+      method: 'PATCH',
+      url: `${mine.api}/escalations/${myEscalation}`,
+      headers: { ...authed(mine), 'content-type': 'application/json' },
+      payload: { status: 'answered', answer: 'so that ack has something to do' },
+    });
+    assert.ok(myEscalation && myKey, 'the fixtures for my own board were made');
+
+    // Counted rather than assumed: a bootstrap token is a key too, and a
+    // hardcoded one here would only ever be a note about how the fixture
+    // looked on the day it was written.
+    atRest = await counts();
   });
 
   after(async () => {
@@ -58,63 +92,89 @@ describe('a token from one project, at every door of another', () => {
   /**
    * A body this route would accept, built from the schema it publishes.
    *
-   * The first version of this sweep sent one body with every field in it, and
-   * every schema here refuses a field it does not have, so most doors were
-   * turning it away for the shape of the body rather than for the token. A
-   * test that cannot tell those apart is a test that would have watched this
-   * leak. Only the required fields, filled by type, so the request is valid
-   * and the only thing left to refuse is who is asking.
+   * The first version sent one body carrying every field, and every schema
+   * here refuses a field it does not have, so most doors were turning it away
+   * for the shape of the body rather than for the token. The second version
+   * sent only required fields but ignored what those fields require of
+   * themselves: an empty array where one item is the minimum, a thirteen
+   * character string where the code is six. Fastify refuses both before the
+   * check being tested ever runs, which reads as protection and is not.
    */
-  const bodyFor = (schema: Record<string, any> | undefined): Record<string, unknown> | undefined => {
+  const valueFor = (name: string, field: Record<string, any>): unknown => {
+    if (Array.isArray(field.enum) && field.enum.length > 0) return field.enum[0];
+    if (field.type === 'array') {
+      // The one place the document cannot describe what the handler wants: a
+      // board column is published as an open object with no properties at all,
+      // so a generator reading the schema builds `{}` and is refused for a
+      // missing title. Named here rather than guessed, and named once.
+      const one =
+        name === 'columns'
+          ? { key: 'todo', title: 'To do', match: { status: ['open'] } }
+          : (bodyFor(field.items) ?? valueFor(name, field.items ?? { type: 'string' }));
+      return Array.from({ length: Math.max(field.minItems ?? 1, 1) }, () => one);
+    }
+    if (field.type === 'object') return bodyFor(field, true) ?? {};
+    if (field.type === 'integer' || field.type === 'number') return field.minimum ?? 1;
+    if (field.type === 'boolean') return true;
+    if (name === 'email') return 'nobody@example.com';
+    // Long enough to be accepted, short enough to be allowed. A field that
+    // pins both to the same number, as the six digit code does, gets exactly
+    // that many characters.
+    const wanted =
+      name === 'slug'
+        ? 'my-card'
+        : name === 'handle'
+          ? 'my-agent'
+          : // A column key this board has. Free text in the schema, closed in
+            // the handler, and a name it does not know is refused before the
+            // check being tested.
+            name === 'column'
+            ? 'done'
+            : `taken-${name}`;
+    const min = field.minLength ?? 0;
+    const max = field.maxLength ?? Math.max(wanted.length, min);
+    const padded = wanted.length < min ? wanted.padEnd(min, '1') : wanted;
+    return padded.slice(0, Math.max(max, min));
+  };
+
+  function bodyFor(
+    schema: Record<string, any> | undefined,
+    everything = false,
+  ): Record<string, unknown> | undefined {
     if (!schema || schema.type !== 'object') return undefined;
     const props = (schema.properties ?? {}) as Record<string, any>;
+    // Required fields at the top, every declared field inside a nested object.
+    // A board column declares only `key` as required and is refused without a
+    // title, which is the schema being looser than the handler: filling what
+    // the object declares gets past the door rather than around it.
+    const wanted = everything ? Object.keys(props) : ((schema.required ?? []) as string[]);
     const body: Record<string, unknown> = {};
-    for (const name of (schema.required ?? []) as string[]) {
-      const field = props[name] ?? {};
-      if (Array.isArray(field.enum) && field.enum.length > 0) {
-        body[name] = field.enum[0];
-      } else if (field.type === 'array') {
-        body[name] = [];
-      } else if (field.type === 'integer' || field.type === 'number') {
-        body[name] = field.minimum ?? 1;
-      } else if (field.type === 'boolean') {
-        body[name] = true;
-      } else if (field.type === 'object') {
-        body[name] = {};
-      } else if (name === 'email') {
-        body[name] = 'nobody@example.com';
-      } else {
-        body[name] = name === 'slug' ? 'their-card' : `taken-by-${name}`;
-      }
+    for (const name of wanted) {
+      body[name] = valueFor(name, props[name] ?? { type: 'string' });
     }
     return body;
-  };
+  }
 
   /** Every project-scoped route the service publishes, with its parameters filled. */
   type Door = { method: string; url: string; body: Record<string, unknown> | undefined };
   const doors = async (): Promise<Door[]> => {
     const openapi = (await harness.server.inject({ method: 'GET', url: '/openapi.json' })).json();
-    const asked = await harness.server.inject({
-      method: 'GET',
-      url: `${theirs.api}/escalations`,
-      headers: authed(theirs),
-    });
-    const escalationId = asked.json().escalations?.[0]?.id ?? 'e_nothing';
 
     const out: Door[] = [];
     for (const [route, methods] of Object.entries(
       openapi.paths as Record<string, Record<string, any>>,
     )) {
       if (!route.startsWith('/v1/{project}')) continue;
+      // Resolved per route, because two different resources are both called
+      // `{id}` here: sending an escalation id to the key door made that door
+      // answer 404 for a thing that was never there, which is not the refusal
+      // this is looking for.
       const url = route
         .replace('{project}', theirs.id)
-        .replace('{slug}', 'their-card')
-        .replace('{handle}', 'their-agent')
-        .replace('{id}', escalationId)
-        .replace('{key}', 'k_nothing');
-      // Anything still in braces is a parameter this sweep does not know how
-      // to fill, and guessing would test the guess. Better to fail loudly than
-      // to skip quietly.
+        .replace('{slug}', 'my-card')
+        .replace('{handle}', 'my-agent')
+        .replace('{id}', route.includes('/keys/') ? myKey : myEscalation)
+        .replace('{key}', myKey);
       assert.doesNotMatch(url, /[{}]/, `fill this parameter before trusting the sweep: ${route}`);
       for (const [method, operation] of Object.entries(methods)) {
         out.push({
@@ -135,6 +195,26 @@ describe('a token from one project, at every door of another', () => {
 
     const leaked: string[] = [];
     for (const door of list) {
+      // Before each one, because the sweep contains a delete: with the guard
+      // absent that delete lands on my own card, and every later item route
+      // then answers "no such item", which reads as protection and is the
+      // sweep tripping over its own feet. Upserted on my board with my token,
+      // which is not the request being measured.
+      await harness.server.inject({
+        method: 'POST',
+        url: `${mine.api}/items`,
+        headers: { ...authed(mine), 'content-type': 'application/json' },
+        payload: { slug: 'my-card', title: 'my work', actor: 'my-agent' },
+      });
+      // And the answer, for the same reason: the sweep also carries a PATCH
+      // that puts a question back to open, and the door after it acknowledges
+      // one, which is refused when there is nothing to acknowledge.
+      await harness.server.inject({
+        method: 'PATCH',
+        url: `${mine.api}/escalations/${myEscalation}`,
+        headers: { ...authed(mine), 'content-type': 'application/json' },
+        payload: { status: 'answered', answer: 'so that ack has something to do' },
+      });
       const answer = await harness.server.inject(
         door.body === undefined
           ? { method: door.method as 'GET', url: door.url, headers: authed(mine) }
@@ -158,6 +238,14 @@ describe('a token from one project, at every door of another', () => {
     assert.deepEqual(leaked, [], `a token reached somebody else's board:\n${leaked.join('\n')}`);
   });
 
+  /** Everything of theirs that a door could have made or unmade. */
+  const counts = async (): Promise<Record<string, number>> => ({
+    items: await harness.store.items.countDocuments({ projectId: theirs.id }),
+    agents: await harness.store.agents.countDocuments({ projectId: theirs.id }),
+    escalations: await harness.store.escalations.countDocuments({ projectId: theirs.id }),
+    keys: await harness.store.keys.countDocuments({ projectId: theirs.id }),
+  });
+
   it('changes nothing on the board it could not reach', async () => {
     // The half a status code cannot show: a route that refuses after writing
     // answered correctly and did the damage anyway. Counts rather than
@@ -169,9 +257,6 @@ describe('a token from one project, at every door of another', () => {
     assert.equal(card?.title, 'their work', 'the title is theirs');
     assert.equal(card?.claim?.agent, 'their-agent', 'and so is the lease');
     assert.equal(card?.status, 'open', 'and it was not moved');
-    assert.equal(await harness.store.items.countDocuments({ projectId: theirs.id }), 1);
-    assert.equal(await harness.store.agents.countDocuments({ projectId: theirs.id }), 1);
-    assert.equal(await harness.store.escalations.countDocuments({ projectId: theirs.id }), 1);
-    assert.equal(await harness.store.keys.countDocuments({ projectId: theirs.id }), 1);
+    assert.deepEqual(await counts(), atRest, 'nothing was made or unmade on their board');
   });
 });
