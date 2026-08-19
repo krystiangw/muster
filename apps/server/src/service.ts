@@ -572,12 +572,8 @@ export async function readInbox(
   if (options.agent !== undefined && typeof options.agent !== 'string') {
     throw badRequest('bad_agent', 'agent is the handle whose inbox this is.');
   }
-  // Either shape. Handles are trimmed on the way in now, and rows written
-  // before that hold whatever arrived, so asking under a padded handle has to
-  // keep finding what it asked: an empty inbox reads as "you asked nothing".
-  const forAgent = options.agent
-    ? { agent: { $in: [options.agent.trim(), options.agent] } }
-    : {};
+  // One shape, because a migration made every stored handle the trimmed one.
+  const forAgent = options.agent ? { agent: options.agent.trim() } : {};
   const [answers, waiting, handovers, offers] = await Promise.all([
     store.escalations
       .find({
@@ -2941,10 +2937,7 @@ export async function withdrawEscalation(
     // The handle is in the predicate, not merely recorded afterwards. A fleet
     // shares one key, so without this any loop could close a question another
     // loop is waiting on, and the sentence at both doors promises it cannot.
-    // Either shape, because rows written before handles were normalised hold
-    // whatever the caller sent, padding and all, and a deployment must not
-    // strand a question its own asker can no longer take back.
-    { _id: id, projectId: project._id, status: 'open', agent: { $in: [who, input.agent] } },
+    { _id: id, projectId: project._id, status: 'open', agent: who },
     {
       $set: {
         status: 'wont_do' as EscalationStatus,
@@ -3144,8 +3137,8 @@ export async function listEscalations(
 ): Promise<EscalationDoc[]> {
   const query: Record<string, unknown> = { projectId };
   if (filter.status) query.status = filter.status;
-  // The last handle ingress, and the same two shapes as the inbox above.
-  if (filter.agent) query.agent = { $in: [filter.agent.trim(), filter.agent] } as never;
+  // The last handle ingress, normalised like the others.
+  if (filter.agent) query.agent = filter.agent.trim();
   // Whether anybody acted on it, which is a different question from what the
   // human decided. A job asking "what is new for me" is asking this one.
   if (filter.acknowledged === true) query.acknowledgedAt = { $ne: null };

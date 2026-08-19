@@ -260,6 +260,24 @@ export async function createStore(uri: string, dbName: string): Promise<Store> {
  * one, which is precisely the bug the field was added to fix.
  */
 export async function runMigrations(store: Store): Promise<void> {
+  /**
+   * A handle is trimmed now, wherever it came in.
+   *
+   * It was not always, and the two doors disagreed: the HTTP schema capped it
+   * while MCP passed whatever a model produced. Every reader that compares a
+   * handle then had to look for two shapes, and defending that invariant
+   * instead of establishing it cost three rounds of review, each finding a
+   * different place the raw shape had leaked into: an inbox that came back
+   * empty, a card whose timeline named an agent nobody had registered.
+   *
+   * Measured before writing this: zero rows in production hold an untrimmed
+   * handle. It exists for a deployment that upgrades with older rows, so that
+   * every reader downstream can compare one shape and mean it.
+   */
+  await store.escalations.updateMany({ $expr: { $ne: ['$agent', { $trim: { input: '$agent' } }] } }, [
+    { $set: { agent: { $trim: { input: '$agent' } } } },
+  ]);
+
   await store.escalations.updateMany({ priorityRank: { $exists: false } }, [
     {
       $set: {

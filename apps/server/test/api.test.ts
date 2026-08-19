@@ -1167,7 +1167,7 @@ describe('what taking a question back must not do', () => {
     assert.equal(asked.json().escalation.agent, emoji);
   });
 
-  it('lets a handle written before any of this still take its question back', async () => {
+  it('brings a handle written before any of this into the one shape', async () => {
     // Rows from before handles were trimmed hold whatever arrived. The service
     // looks for both shapes; the MCP door used to trim the handle away before
     // the service could, which stranded exactly those rows.
@@ -1181,7 +1181,13 @@ describe('what taking a question back must not do', () => {
         item_slug: 'ops:asked',
       })
     ).json().escalation.id;
+    // A row from before handles were trimmed. Defending against this shape at
+    // every reader is what cost three rounds of review, each finding another
+    // place the raw form had leaked to. A migration makes it not exist.
     await harness.store.escalations.updateOne({ _id: id }, { $set: { agent: '  errors-loop  ' } });
+    const { runMigrations } = await import('../src/db.js');
+    await runMigrations(harness.store);
+    assert.equal((await harness.store.escalations.findOne({ _id: id }))?.agent, 'errors-loop');
 
     const taken = await harness.server.inject({
       method: 'POST',
@@ -1193,7 +1199,7 @@ describe('what taking a question back must not do', () => {
         method: 'tools/call',
         params: {
           name: 'withdraw',
-          arguments: { id, agent: '  errors-loop  ', reason: 'the shape it was stored in' },
+          arguments: { id, agent: '  errors-loop  ', reason: 'padded on the way in, trimmed on the way through' },
         },
       },
     });
