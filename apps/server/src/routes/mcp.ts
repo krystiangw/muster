@@ -305,7 +305,7 @@ const TOOLS: ToolDefinition[] = [
     name: 'register_agent',
     title: 'Register an agent',
     description:
-      'Declare who you are and what you own. Scope is advisory: it decides what next_item offers you and warns others when they write into your area.',
+      'Declare who you are and what you own. Scope is advisory: it decides what next_item offers you and warns you when you write outside it. It never blocks a write, and it never warns anyone else.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,

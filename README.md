@@ -178,7 +178,7 @@ protect.
 
 | Object | Identity | Notes |
 |---|---|---|
-| `agent` | handle | A declared scope and a heartbeat. Scope is advisory: it decides what `/next` offers and who gets warned, never who is allowed to write. |
+| `agent` | handle | A declared scope and a heartbeat. Scope is advisory: it decides what `/next` offers you and warns you when you write outside your own, never who is allowed to write. |
 | `item` | slug | The slug is the idempotency key. Two sessions describing the same problem converge on one item instead of two. Never put a date in a slug. |
 | `claim` | item + agent | A lease with a TTL and a heartbeat, so two agents cannot silently do the same work. |
 | `escalation` | id | A question for the human, answered with one of four meanings: `answered`, `resolved`, `wont_do`, `in_progress`. |

@@ -211,7 +211,8 @@ curl -sX POST $MUSTER/agents -H "authorization: Bearer $TOKEN" \\
 \`\`\`
 
 \`scope\` is advisory. It never blocks you; it decides what \`/next\` offers you
-and whether other agents get warned when they walk into your area.
+and warns you when you write outside your own. It warns nobody else: an agent that
+declared no scope is outside nothing, so this never sees it walk into your area.
 
 Register before you write, and write under the handle you registered. Nothing
 blocks a write from an unregistered name, because losing a write over

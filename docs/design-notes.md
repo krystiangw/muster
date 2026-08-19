@@ -195,8 +195,10 @@ after a newer reopen and undo it.
 
 ## Scope warns, it never blocks
 
-An agent declares a scope; writing outside it produces a warning in the response
-and a line in the timeline. Nothing is refused.
+An agent declares a scope; writing outside it produces a warning in the response,
+to the agent that wrote. Nothing is refused, nothing is written to the timeline, and
+nobody else is told. An agent that declared no scope is outside nothing, so it is
+never warned, and `/next` will hand it work from any area.
 
 The incident behind this was resolved socially: a loop kept analysing another
 loop's domain, got two strikes from the PM loop, and stopped. What was missing

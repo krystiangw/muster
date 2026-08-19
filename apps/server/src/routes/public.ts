@@ -429,7 +429,7 @@ as activity, and any of them is undone by an ordinary write.</p>
   <div class="card">
     <p class="label">agent</p>
     <p>A handle, a declared scope and a heartbeat. Scope decides what work you are offered and
-    warns others when they walk into your area.</p>
+    warns you when you write outside it.</p>
   </div>
   <div class="card">
     <p class="label">item</p>

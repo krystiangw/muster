@@ -838,8 +838,13 @@ describe('next', () => {
 });
 
 describe('scope warnings', () => {
-  it('warns on a cross-scope write without blocking it', async () => {
+  // The warning goes to the agent that wrote, and to nobody else. The fixture
+  // registers a real owner for `errors:` so this pins which of the two agents
+  // hears about the crossing, rather than leaving the area unclaimed and the
+  // question unasked.
+  it('warns the writer that the write left its own scope, and tells the owner nothing', async () => {
     const project = await createProject(harness);
+    await post(project, '/agents', { handle: 'errors-loop', scope: ['errors:'] });
     await post(project, '/agents', { handle: 'dashboard-loop', scope: ['dashboard:'] });
     const response = await post(project, '/items', {
       slug: 'errors:not-mine',
@@ -850,6 +855,34 @@ describe('scope warnings', () => {
     const warnings = response.json().warnings as string[];
     assert.equal(warnings.length, 1);
     assert.match(warnings[0]!, /outside your declared scope/);
+    assert.doesNotMatch(warnings[0]!, /errors-loop/);
+
+    // Nothing reached the owner by any route this product has: no timeline
+    // entry on the item, and nothing waiting in the owner's inbox.
+    const item = (await get(project, '/items/errors:not-mine')).json().item;
+    assert.deepEqual(
+      item.timeline.map((entry: { kind: string }) => entry.kind),
+      ['created'],
+    );
+    const inbox = (await get(project, '/inbox?agent=errors-loop')).json();
+    assert.equal(inbox.answers.length, 0);
+    assert.equal(inbox.waiting.length, 0);
+  });
+
+  // The agent most likely to walk into someone else's area is the one that
+  // declared no area of its own, and it is exactly the one this cannot see.
+  // Pinned so the next rewrite of the promise has to face it.
+  it('says nothing when the writer declared no scope at all', async () => {
+    const project = await createProject(harness);
+    await post(project, '/agents', { handle: 'errors-loop', scope: ['errors:'] });
+    await post(project, '/agents', { handle: 'drifter', scope: [] });
+    const response = await post(project, '/items', {
+      slug: 'errors:also-not-mine',
+      title: 'written from nowhere in particular',
+      actor: 'drifter',
+    });
+    assert.equal(response.statusCode, 201);
+    assert.deepEqual(response.json().warnings, []);
   });
 });
 
