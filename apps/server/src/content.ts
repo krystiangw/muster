@@ -131,18 +131,24 @@ export function wrapped(text: string, indent = '', width = 78): string {
 }
 
 function wrapLine(text: string, indent: string, width: number): string {
+  // A line's own leading spaces are content once the text came from somebody
+  // else. An agent writing its context as a bulleted list means what the
+  // indentation says, and splitting on spaces turned "  - child" into
+  // "- child" by dropping the empty words in front of it. Kept where it was,
+  // and repeated on every line the sentence wraps onto.
+  const own = /^\s*/.exec(text)?.[0] ?? '';
   const lines: string[] = [];
   let line = '';
-  for (const word of text.split(' ')) {
+  for (const word of text.slice(own.length).split(' ')) {
     if (line === '') line = word;
-    else if (`${line} ${word}`.length + indent.length <= width) line = `${line} ${word}`;
+    else if (`${line} ${word}`.length + indent.length + own.length <= width) line = `${line} ${word}`;
     else {
       lines.push(line);
       line = word;
     }
   }
   if (line !== '') lines.push(line);
-  return lines.join(`\n${indent}`);
+  return lines.map((one) => `${own}${one}`).join(`\n${indent}`);
 }
 
 export function skillMd(config: Config): string {

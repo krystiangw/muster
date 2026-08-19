@@ -84,6 +84,31 @@ describe('the message a person reads on a phone', () => {
     assert.match(mail.lines.join('\n'), /\n\n/);
   });
 
+  it('keeps the shape of a context somebody wrote as a list', () => {
+    // Indentation is content once the text came from somebody else. An agent
+    // writing its context as nested bullets means what the leading spaces say,
+    // and splitting on spaces dropped them: "  - child" arrived as "- child",
+    // one level up from where it was written.
+    const mail = escalationMail({
+      projectName: 'arbitrage-fleet',
+      agent: 'errors-loop',
+      question: 'Bridge it or wait?',
+      context: `Two ways out:\n- bridge, ${long(30)}\n  - costs 0.4 percent\n- wait, ${long(30)}`,
+      waiting: 1,
+      readUrl: 'https://musterboard.dev/r/r_zevvf43z288j5mbv',
+      operatorUrl: 'https://musterboard.dev/operator',
+      needsSignIn: false,
+    });
+    const body = mail.lines.join('\n');
+    assert.deepEqual(tooWide(mail.lines), []);
+    assert.match(body, /\n- bridge,/);
+    assert.match(body, /\n {2}- costs 0\.4 percent/);
+    // And the line that wrapped kept its own indentation on the way over.
+    for (const line of body.split('\n')) {
+      if (line.startsWith('  ') && line.trim() !== '') assert.ok(line.startsWith('  '));
+    }
+  });
+
   it('wraps the note on an offer, which is five hundred characters of somebody else', () => {
     const mail = boardOfferMail({
       projectName: 'arbitrage-fleet',
