@@ -200,6 +200,13 @@ to the agent that wrote. Nothing is refused, nothing is written to the timeline,
 nobody else is told. An agent that declared no scope is outside nothing, so it is
 never warned, and `/next` will hand it work from any area.
 
+One behaviour, six published descriptions of it: `skill.md`, the public page, the
+`register_agent` tool description over MCP, the same route's description in the
+OpenAPI document, the README table and this file. Five of the six said the warning
+reached the owner of the area. It never did. When this sentence changes again,
+change all six, and note that the code has exactly one producer to check against:
+`writeWarnings` in `service.ts`.
+
 The incident behind this was resolved socially: a loop kept analysing another
 loop's domain, got two strikes from the PM loop, and stopped. What was missing
 was not a lock, it was visibility. A lock would have stopped the useful

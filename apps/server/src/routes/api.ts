@@ -583,7 +583,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           tags: ['agents'],
           summary: 'Register or update an agent',
           description:
-            'Idempotent on handle. Scope is advisory: it decides what /next offers and whether other agents get a cross-scope warning.',
+            'Idempotent on handle. Scope is advisory: it decides what /next offers you and warns you when you write outside it. It never blocks a write, and it never warns anyone else.',
           body: {
             type: 'object',
             required: ['handle'],
