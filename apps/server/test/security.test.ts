@@ -1059,15 +1059,10 @@ describe('the colours these pages are read in', () => {
       .join('')}`;
   };
 
-  it('gives every chip enough contrast to read, in both themes', async () => {
-    const page = await harness.server.inject({ method: 'GET', url: '/' });
-    const href = /<link rel="stylesheet" href="([^"]+)"/.exec(page.body)?.[1];
-    assert.ok(href, 'the page links a stylesheet');
-    const sheet = (await harness.server.inject({ method: 'GET', url: href })).body;
-
-    // The light block is written first and the dark one inside the media
-    // query, so the first value of a name is light and the second is dark.
-    const themes = [0, 1].map((which) => {
+  // The light block is written first and the dark one inside the media query,
+  // so the first value of a name is light and the second is dark.
+  const themesIn = (sheet: string): Map<string, string>[] =>
+    [0, 1].map((which) => {
       const found = new Map<string, string>();
       const seen = new Map<string, number>();
       for (const [, name, value] of sheet.matchAll(
@@ -1079,6 +1074,45 @@ describe('the colours these pages are read in', () => {
       }
       return found;
     });
+
+  it('gives every text colour enough contrast on every surface it sits on', async () => {
+    // The chip test below came from a report and only covered chips. The
+    // colour that actually failed next was --muted, at 4.48:1 against
+    // --surface-2, which is where the smallest text on a board sits: the
+    // column counts, the hint under a column title, the "and 124 more". Two
+    // hundredths under the line, on the type least able to afford it, and
+    // nothing was looking. The palette is nine colours; every text one has to
+    // read on every surface one, and asserting that is cheaper than finding
+    // out which pairs happen to occur today.
+    const page = await harness.server.inject({ method: 'GET', url: '/' });
+    const href = /<link rel="stylesheet" href="([^"]+)"/.exec(page.body)?.[1];
+    assert.ok(href, 'the page links a stylesheet');
+    const sheet = (await harness.server.inject({ method: 'GET', url: href })).body;
+
+    for (const [which, vars] of themesIn(sheet).entries()) {
+      const theme = which === 0 ? 'light' : 'dark';
+      for (const ink of ['ink', 'ink-2', 'muted']) {
+        for (const surface of ['surface', 'surface-2', 'bg']) {
+          const text = vars.get(ink);
+          const behind = vars.get(surface);
+          assert.ok(text && behind, `${theme} names --${ink} and --${surface}`);
+          const ratio = contrast(text, behind);
+          assert.ok(
+            ratio >= 4.5,
+            `--${ink} on --${surface} reads at ${ratio.toFixed(2)}:1 in the ${theme} theme, under 4.5:1`,
+          );
+        }
+      }
+    }
+  });
+
+  it('gives every chip enough contrast to read, in both themes', async () => {
+    const page = await harness.server.inject({ method: 'GET', url: '/' });
+    const href = /<link rel="stylesheet" href="([^"]+)"/.exec(page.body)?.[1];
+    assert.ok(href, 'the page links a stylesheet');
+    const sheet = (await harness.server.inject({ method: 'GET', url: href })).body;
+
+    const themes = themesIn(sheet);
 
     const rules = [
       ...sheet.matchAll(

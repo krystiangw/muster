@@ -22,7 +22,12 @@ export function escapeHtml(value: unknown): string {
 const CSS = `
 :root {
   --bg:#f5f7f5; --surface:#fff; --surface-2:#ecefec; --ink:#141917; --ink-2:#3c4643;
-  --muted:#61706c; --rule:#d6dcd8; --accent:#0e5f59; --accent-soft:#dcebe8;
+  /* --muted was #61706c, which reads 5.19:1 on white and 4.48:1 on --surface-2,
+     and --surface-2 is where the smallest text on the board actually sits: the
+     column counts, the hints under a column title, the "and 124 more". Under
+     the line by two hundredths, on the type least able to afford it. Same hue
+     and saturation, one step darker, which puts the worst pair at 4.83. */
+  --muted:#5c6b67; --rule:#d6dcd8; --accent:#0e5f59; --accent-soft:#dcebe8;
   /* --warn was #8a6410, and the one chip in the row that missed: 4.32:1 on its
      own tinted background where blocked reads 5.50 and done 5.18. Same hue and
      the same saturation, four steps darker, which puts it at 5.30 between its
@@ -75,7 +80,13 @@ header.top a.brand { font-family:var(--serif); font-size:22px; font-weight:600;
 /* Wrapping, because five links plus the wordmark are wider than a phone: the
    row did not wrap, so the document came out wider than the viewport and every
    page scrolled sideways by the width of the last link. */
-header.top nav { display:flex; flex-wrap:wrap; gap:8px 14px; font-family:var(--mono); font-size:12.5px; }
+header.top nav { display:flex; flex-wrap:wrap; gap:8px 16px; font-family:var(--mono); font-size:12.5px; }
+/* A finger is wider than a line of 12.5px mono. These links came out 20px tall
+   against the 24px a target is meant to be, and they sit in a row rather than
+   in a sentence, so the exception for a link inside running text does not cover
+   them. The padding is transparent and changes nothing anybody can see; it is
+   only the difference between hitting "docs" and hitting "skill.md". */
+header.top nav a, footer.bot a { padding-block:3px; }
 h1 { font-family:var(--serif); font-weight:600; font-size:clamp(30px,5vw,44px);
   line-height:1.08; letter-spacing:-.015em; margin:0 0 14px; text-wrap:balance; }
 h2 { font-family:var(--serif); font-weight:600; font-size:clamp(21px,3vw,27px);
