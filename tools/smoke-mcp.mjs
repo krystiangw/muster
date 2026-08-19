@@ -28,6 +28,16 @@ const base = (at === -1 ? 'https://musterboard.dev' : argv[at + 1]).replace(/\/+
 // line that decides where that memory lives.
 const HOME = process.env.MUSTER_HOME || join(homedir(), '.muster');
 const STATE = join(HOME, 'smoke.json');
+/**
+ * Which entry in that file is this script's.
+ *
+ * One file, three scripts, and two of them were writing to the same entry: this
+ * one and the SDK check both keyed by the address alone, so each run handed the
+ * other its board. Nothing broke, because they write different slugs, and that
+ * is the kind of coupling that is fine until the morning it explains nothing.
+ * The OAuth check had it right from the start.
+ */
+const key = `${base}#mcp`;
 
 /**
  * How this names itself to the service, on every request.
@@ -90,7 +100,7 @@ const step = async (name, run) => {
 const hello = await rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {} });
 console.log(`${hello.serverInfo.name} ${hello.serverInfo.version}, protocol ${hello.protocolVersion}`);
 
-const saved = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8'))[base] : null;
+const saved = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8'))[key] : null;
 let project = saved?.project;
 let token = saved?.token;
 if (project) {
@@ -115,7 +125,7 @@ if (!project) {
   token = created.token;
   mkdirSync(HOME, { recursive: true });
   const all = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8')) : {};
-  all[base] = { project, token };
+  all[key] = { project, token };
   writeFileSync(STATE, JSON.stringify(all, null, 1), { mode: 0o600 });
 }
 console.log(`board ${project} on ${base}`);

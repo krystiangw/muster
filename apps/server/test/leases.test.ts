@@ -66,23 +66,29 @@ describe('the lease under a race', () => {
   });
 
   it('lets only the holder extend it, release it or write to it', async () => {
-    const stored = await harness.store.items.findOne({ projectId: project.id, slug: 'the-one-card' });
-    const holder = stored!.claim!.agent;
-    const other = holder === 'loop-0' ? 'loop-1' : 'loop-0';
+    // Its own card, taken here. Reading the winner of the case above made this
+    // one fail for a reason that has nothing to do with what it is about the
+    // moment anybody ran it alone, which is how a suite teaches people not to
+    // run one test.
+    await write('/items', { slug: 'one-agent-holds-it', title: 'held work', actor: 'filer' });
+    const took = await write('/items/one-agent-holds-it/claim', { agent: 'the-holder' });
+    assert.equal(took.statusCode, 200, took.body);
+    const holder = 'the-holder';
+    const other = 'somebody-else';
 
-    const stolen = await write('/items/the-one-card/heartbeat', { agent: other });
+    const stolen = await write('/items/one-agent-holds-it/heartbeat', { agent: other });
     assert.equal(stolen.statusCode, 409, 'a heartbeat from somebody else is not an extension');
-    const refused = await write('/items/the-one-card/release', { agent: other });
+    const refused = await write('/items/one-agent-holds-it/release', { agent: other });
     assert.equal(refused.statusCode, 409, 'and nor is a release');
 
-    const kept = await harness.store.items.findOne({ projectId: project.id, slug: 'the-one-card' });
+    const kept = await harness.store.items.findOne({ projectId: project.id, slug: 'one-agent-holds-it' });
     assert.equal(kept?.claim?.agent, holder, 'the lease is where it was');
 
-    const extended = await write('/items/the-one-card/heartbeat', { agent: holder });
+    const extended = await write('/items/one-agent-holds-it/heartbeat', { agent: holder });
     assert.equal(extended.statusCode, 200);
-    const handedBack = await write('/items/the-one-card/release', { agent: holder });
+    const handedBack = await write('/items/one-agent-holds-it/release', { agent: holder });
     assert.equal(handedBack.statusCode, 200);
-    const free = await harness.store.items.findOne({ projectId: project.id, slug: 'the-one-card' });
+    const free = await harness.store.items.findOne({ projectId: project.id, slug: 'one-agent-holds-it' });
     assert.equal(free?.claim, null, 'and it is free again');
   });
 

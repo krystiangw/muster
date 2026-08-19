@@ -67,7 +67,15 @@ const step = async (name, run) => {
 // line that decides where that memory lives.
 const HOME = process.env.MUSTER_HOME || join(homedir(), '.muster');
 const STATE = join(HOME, 'smoke.json');
-const saved = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8'))[base] : null;
+/**
+ * Which entry in that file is this script's.
+ *
+ * Keyed like the other two rather than by the address alone, which this and the
+ * MCP check shared: each run handed the other its board, and the counts one of
+ * them printed were partly the other one's work.
+ */
+const key = `${base}#sdk`;
+const saved = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8'))[key] : null;
 
 /**
  * The name this smoke test goes by, added around the SDK rather than inside it.
@@ -90,7 +98,7 @@ const signUp = async () => {
   });
   mkdirSync(HOME, { recursive: true });
   const all = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8')) : {};
-  all[base] = { project: created.project, token: created.token };
+  all[key] = { project: created.project, token: created.token };
   // In a home directory rather than anywhere near a checkout, for the reason
   // every other token here lives there: a token file inside a repository is
   // eventually committed.
