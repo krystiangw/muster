@@ -297,6 +297,15 @@ const TOOLS: ToolDefinition[] = [
         handle: { type: 'string', description: 'Stable handle, e.g. errors-loop' },
         scope: { type: 'array', items: { type: 'string' }, description: 'Slug prefixes, labels or owner names you claim' },
         description: { type: 'string' },
+        // The HTTP door has taken this since the first day both doors existed,
+        // the published client sends it, and the read side returns it on every
+        // agent whichever door asks. A door that cannot write a field it hands
+        // back is a door that quietly loses whatever an agent put there.
+        meta: {
+          type: 'object',
+          additionalProperties: true,
+          description: 'Anything else this agent wants recorded about itself. Handed back as it was given.',
+        },
       },
     },
     requiresProject: true,
@@ -489,7 +498,7 @@ const TOOLS: ToolDefinition[] = [
     name: 'next_item',
     title: 'What to pick up next',
     description:
-      'The oldest unclaimed open item inside your declared scope. If there is none you are told so, rather than handed somebody else’s work.',
+      'A look by default: the oldest unclaimed open item inside your declared scope, offered and not held. Pass claim to take it in the same call, which is what a fleet wants. If there is none you are told so, rather than handed somebody else’s work.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -1130,6 +1139,10 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           handle: str(args.handle),
           scope: Array.isArray(args.scope) ? (args.scope as string[]) : undefined,
           description: str(args.description),
+          meta:
+            typeof args.meta === 'object' && args.meta !== null && !Array.isArray(args.meta)
+              ? (args.meta as Record<string, unknown>)
+              : undefined,
         });
         if (created) record(store, 'register', { door: 'mcp', projectId: project._id });
         return { handle: agent.handle, scope: agent.scope, created };

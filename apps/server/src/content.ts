@@ -338,6 +338,11 @@ of them spend a round trip losing the claim that follows. It is a POST because
 it writes: a GET that claims is a GET a proxy, a prefetch or a client retry can
 take a second item with.
 
+Over MCP this one call is \`next_item\` with \`"claim": true\`. Without that flag
+\`next_item\` is the look rather than the take, the same as \`GET /next\`: it
+offers the oldest item and holds nothing, which is the safe thing to poll and
+the losing thing for a fleet.
+
 A claim that gets \`"ok": false\` means somebody else is already on it; the
 holder is in the response. That answer arrives as **HTTP 409**, which is the
 normal case and not a fault: if you run curl with \`-f\`, handle it, or you will

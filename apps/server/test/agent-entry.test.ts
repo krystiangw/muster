@@ -1247,6 +1247,51 @@ describe('the MCP surface', () => {
     assert.match(String(missing.content[0].text), /"slug" is required here/);
   });
 
+  it('teaches the one call on both doors in the document a model actually reads', async () => {
+    // The catalogue already answers this for anybody who reads the catalogue.
+    // skill.md is the document a model reads before it does anything, and it
+    // taught the call as `POST $MUSTER/next` and nowhere mentioned the MCP
+    // spelling or the flag. A client arriving over MCP and following it landed
+    // on the branch the same page calls the losing one, and nothing in the
+    // page said so.
+    const skill = (await harness.server.inject({ method: 'GET', url: '/skill.md' })).body;
+    assert.match(skill, /next_item/, 'the MCP name for it is in the document');
+    assert.match(skill, /"claim": true/, 'and so is the flag that makes it the take');
+    // And that the flagless call is the look, not a broken take.
+    assert.match(skill, /GET \/next/, 'beside the HTTP call that does the same thing');
+  });
+
+  it('lets both doors write what both doors hand back', async () => {
+    // `meta` has been on the HTTP door since the day both doors existed, the
+    // published client sends it, and the read side returns it on every agent
+    // whichever door asks. The MCP schema never got it, so an agent could be
+    // handed a field it had no way to set.
+    const project = await createProject(harness, 'both doors');
+    const registered = await harness.server.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: { ...authed(project), 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      payload: {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'register_agent',
+          arguments: { handle: 'through-mcp', meta: { runs: 'on the night shift' } },
+        },
+      },
+    });
+    assert.notEqual(registered.json().result?.isError, true, registered.body);
+
+    const read = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/agents`,
+      headers: authed(project),
+    });
+    const agent = read.json().agents.find((one: { handle: string }) => one.handle === 'through-mcp');
+    assert.deepEqual(agent?.meta, { runs: 'on the night shift' }, 'what one door wrote, the other reads');
+  });
+
   it('says where the one call named on only one door lives on the other', async () => {
     // Every MCP tool already has to name an operation the catalogue publishes,
     // which the check further down enforces. The gap this leaves is the other

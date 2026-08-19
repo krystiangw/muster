@@ -2549,7 +2549,7 @@ export interface NextResult {
 /**
  * The same offer, held for whoever asked.
  *
- * `/next` deliberately does not claim, because reading what is next and taking
+ * `GET /next` deliberately does not claim, because reading what is next and taking
  * it are different decisions and an agent that only wants to look should not
  * have to release afterwards. The cost shows up on a fleet: ten loops asking at
  * once are all offered the same item, one wins the claim that follows and nine

@@ -2266,6 +2266,13 @@ describe('taking what is next, over MCP', () => {
         },
       });
       assert.notEqual(looked.json().result.isError, true, looked.body);
+      // And it is a look in the other sense too: nothing was taken. The
+      // default was only ever asserted here as "not charged as a write",
+      // which is a fact about the budget rather than about the lease, so
+      // turning the default around would not have failed anything.
+      const offered = JSON.parse(looked.json().result.content[0].text);
+      assert.equal(offered.claimed, undefined, 'a look does not report a claim');
+      assert.equal(offered.item?.claim ?? null, null, 'and leaves the item free');
     } finally {
       await isolated.stop();
     }
