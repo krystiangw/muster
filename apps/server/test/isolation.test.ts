@@ -327,6 +327,35 @@ describe('a token from one project, at every door of another', () => {
     assert.equal(question?.acknowledgedAt ?? null, null, 'nor acknowledged');
   });
 
+  it('refuses their question through a read link that is not theirs', async () => {
+    // The same reference, at the door a stranger reaches without a token at
+    // all. A read link is a URL somebody pastes into a chat, and the form
+    // behind it answers questions, so the id in that form is the one piece of
+    // it a reader can change. It resolves the board from the link and hands
+    // that board to the lookup, which is what makes the id harmless.
+    const myLink = mine.readUrl.split('/r/')[1]!;
+    const answered = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${myLink}/escalations/${theirEscalation}`,
+      payload: 'status=answered&answer=answered+from+the+wrong+board',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        // What a browser on our own page sends, so this is refused for the
+        // reference rather than for looking like a stranger's form.
+        origin: 'null',
+        'sec-fetch-site': 'same-origin',
+      },
+    });
+    assert.notEqual(answered.statusCode, 303, 'it did not go through');
+
+    const question = await harness.store.escalations.findOne({
+      projectId: theirs.id,
+      _id: theirEscalation,
+    });
+    assert.equal(question?.status, 'open', 'and their question is untouched');
+    assert.equal(question?.answer ?? '', '', 'with nothing written into it');
+  });
+
   /** Everything of theirs that a door could have made or unmade. */
   const counts = async (): Promise<Record<string, number>> => ({
     items: await harness.store.items.countDocuments({ projectId: theirs.id }),
