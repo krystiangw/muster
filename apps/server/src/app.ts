@@ -7,7 +7,7 @@ import { gzipSync } from 'node:zlib';
 import type { Config } from './config.js';
 import type { Store } from './db.js';
 import { createMailer, type Mailer } from './email.js';
-import { escapeHtml, setSiteVerification } from './html.js';
+import { escapeHtml, setContactEmail, setSiteVerification } from './html.js';
 import { createNotifier, type Notifier } from './notify.js';
 import { recordView } from './events.js';
 import { RateLimiter } from './rateLimit.js';
@@ -174,6 +174,7 @@ export async function buildApp(
   });
 
   setSiteVerification(config.siteVerification);
+  setContactEmail(config.contactEmail);
 
   const limiter = new RateLimiter();
   const mailer = overrides.mailer ?? createMailer(config, (message) => server.log.info(message));

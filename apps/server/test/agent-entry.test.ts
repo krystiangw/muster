@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { SERVER_SUMMARY } from '../src/content.js';
-import { escapeHtml } from '../src/html.js';
+import { escapeHtml, setContactEmail } from '../src/html.js';
 import { authed, createProject, startHarness, type Harness } from './helper.js';
 
 /**
@@ -230,7 +230,10 @@ describe('A. discovery', () => {
       ).json().result.protocolVersion as string;
 
     assert.equal(await ask('2025-06-18'), '2025-06-18', 'one we speak is answered as asked');
-    assert.equal(await ask('2024-11-05'), '2024-11-05', 'including an older one');
+    assert.equal(await ask('2025-03-26'), '2025-03-26', 'including an older one');
+    // Not this one: its transport is a long-lived SSE stream this route does
+    // not serve, so confirming it would be the same lie in a smaller font.
+    assert.equal(await ask('2024-11-05'), '2025-06-18');
     const invented = await ask('1999-01-01');
     assert.notEqual(invented, '1999-01-01');
     assert.equal(invented, '2025-06-18', 'and anything else gets the newest we have');
@@ -392,6 +395,29 @@ describe('A. discovery', () => {
       assert.ok(page.body.includes(escapeHtml(path)), `${path} is missing from the page`);
     }
     assert.doesNotMatch(page.body, /<script/i);
+  });
+
+  it('puts the address a person writes to on the pages a person reads', async () => {
+    // It was published in the agent files and nowhere else, so the machines
+    // were told who to write to and the people were not.
+    //
+    // The negative first, and the address put back afterwards: the footer
+    // reads it from a module the whole process shares, like the verification
+    // token beside it, so a harness built with one would otherwise leave it
+    // behind for every test after this.
+    const quiet = await harness.server.inject({ method: 'GET', url: '/' });
+    assert.doesNotMatch(quiet.body, /mailto:/, 'a deployment with nobody to write to says nothing');
+
+    const reachable = await startHarness({ CONTACT_EMAIL: 'hello@muster.test' });
+    try {
+      for (const url of ['/', '/docs', '/pricing']) {
+        const page = await reachable.server.inject({ method: 'GET', url });
+        assert.match(page.body, /mailto:hello@muster\.test/, url);
+      }
+    } finally {
+      await reachable.stop();
+      setContactEmail('');
+    }
   });
 
   it('renders every documentation page without JavaScript', async () => {

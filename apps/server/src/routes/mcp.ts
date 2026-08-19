@@ -59,7 +59,10 @@ import {
  * the client asked for when it is one we speak, and otherwise with the newest
  * we do, leaving the client to decide whether it can live with that.
  */
-const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05'] as const;
+// 2024-11-05 is deliberately not on this list: that revision's transport is
+// HTTP with a long-lived SSE stream, which this route does not implement and
+// answers 405 to, so confirming it would be the same lie in a smaller font.
+const PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26'] as const;
 const DEFAULT_PROTOCOL_VERSION = PROTOCOL_VERSIONS[0];
 
 /** How many JSON-RPC requests one batch may carry. */

@@ -401,6 +401,20 @@ export function setSiteVerification(token: string): void {
   siteVerification = token;
 }
 
+/**
+ * The address a person writes to, on the pages a person reads.
+ *
+ * It was published in the agent files and nowhere else, so the machines were
+ * told who to write to and the people were not. Set from the configuration at
+ * boot, like the verification token above, and absent from the footer on a
+ * deployment that has nobody to write to.
+ */
+let contactEmail = '';
+
+export function setContactEmail(address: string): void {
+  contactEmail = address;
+}
+
 export interface LayoutOptions {
   title: string;
   description?: string;
@@ -475,6 +489,7 @@ ${body}
        A person hunting for the API reference had the same problem. -->
   <a href="/docs/api">api reference</a>
   <a href="/docs/keys">keys</a>
+  ${contactEmail ? `<a href="mailto:${escapeHtml(contactEmail)}">${escapeHtml(contactEmail)}</a>` : ''}
   <a href="/llms.txt">llms.txt</a>
   <a href="/openapi.json">openapi.json</a>
   <a href="/.well-known/agent-access.json">agent-access.json</a>

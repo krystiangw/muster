@@ -466,10 +466,19 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         );
       }
 
-      const rule =
-        request.method === 'GET' ? config.rateLimits.read : config.rateLimits.write;
-      const verdict = limiter.check(`tok:${hashToken(token).slice(0, 16)}:${request.method === 'GET' ? 'r' : 'w'}`, rule);
-      if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds, 'requests for this token');
+      const reading = request.method === 'GET';
+      const rule = reading ? config.rateLimits.read : config.rateLimits.write;
+      const verdict = limiter.check(`tok:${hashToken(token).slice(0, 16)}:${reading ? 'r' : 'w'}`, rule);
+      // The two are counted apart and published apart, so the refusal says
+      // which: an agent told to slow down on writes has no reason to stop
+      // reading, and the MCP door already answers this way.
+      if (!verdict.ok) {
+        return tooMany(
+          reply,
+          verdict.retryAfterSeconds,
+          reading ? 'reads for this token' : 'writes for this token',
+        );
+      }
 
       const ctx = await authenticate(store, token);
       const params = request.params as { project?: string };
