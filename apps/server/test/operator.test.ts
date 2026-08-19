@@ -297,6 +297,85 @@ describe('the operator view', () => {
     assert.equal(attempt.statusCode, 403);
   });
 
+  it('refuses to accept an offer that was made to somebody else', async () => {
+    // The worst thing a signed in stranger could do on this page, because
+    // accepting an offer is how a board changes hands and ownership has no way
+    // back. The offer is addressed to an email; the door has to check that it
+    // is the address in the session rather than merely that the id exists.
+    // Unclaimed, because a board with an owner cannot be offered: taking one
+    // over is what the offer is for.
+    const theirs = await createProject(harness, 'a board being handed over');
+    const offered = await harness.server.inject({
+      method: 'POST',
+      url: `${theirs.api}/share`,
+      headers: authed(theirs),
+      payload: { email: 'the-intended@example.com', agent: 'x' },
+    });
+    assert.equal(offered.statusCode, 201, offered.body);
+    const share = await harness.store.shares.findOne({ projectId: theirs.id });
+    assert.ok(share, 'the offer was made');
+
+    const session = await signIn(harness, 'somebody-else@example.com');
+    const grabbed = await harness.server.inject({
+      method: 'POST',
+      url: `/operator/shares/${share!._id}`,
+      payload: session.form({ decision: 'accept' }),
+      headers: session.headers,
+    });
+    assert.notEqual(grabbed.statusCode, 303, `it did not go through: ${grabbed.statusCode}`);
+
+    // And the effect, which is the half a status code cannot show: the board
+    // still belongs to the person who had it, and the offer is still waiting
+    // for the address it was written to.
+    const project = await harness.store.projects.findOne({ _id: theirs.id });
+    assert.equal(project?.claimedBy ?? null, null, 'the board did not change hands');
+    const stillThere = await harness.store.shares.findOne({ _id: share!._id });
+    assert.equal(stillThere?.email, 'the-intended@example.com', 'and the offer is where it was');
+  });
+
+  it('refuses to ignore an offer that was made to somebody else', async () => {
+    // The quieter half of the same door. Declining somebody else's offer
+    // deletes it, and they never learn it existed.
+    const theirs = await createProject(harness, 'another board being handed over');
+    await harness.server.inject({
+      method: 'POST',
+      url: `${theirs.api}/share`,
+      headers: authed(theirs),
+      payload: { email: 'the-intended@example.com', agent: 'x' },
+    });
+    const share = await harness.store.shares.findOne({ projectId: theirs.id });
+
+    const session = await signIn(harness, 'somebody-else@example.com');
+    await harness.server.inject({
+      method: 'POST',
+      url: `/operator/shares/${share!._id}`,
+      payload: session.form({ decision: 'ignore' }),
+      headers: session.headers,
+    });
+    const stillThere = await harness.store.shares.findOne({ _id: share!._id });
+    assert.ok(stillThere, 'somebody else could not throw their offer away');
+  });
+
+  it('refuses to change the visibility of a board that is not yours', async () => {
+    // A board narrowed to its owner answers 404 to anybody without the cookie,
+    // so opening one is publishing it, and this is the door that does it.
+    const theirs = await createProject(harness, 'a private board');
+    await claimFor(theirs, 'them@example.com');
+    await harness.store.projects.updateOne({ _id: theirs.id }, { $set: { visibility: 'owner' } });
+
+    const session = await signIn(harness, 'somebody-else@example.com');
+    const opened = await harness.server.inject({
+      method: 'POST',
+      url: `/operator/projects/${theirs.id}/visibility`,
+      payload: session.form({ visibility: 'link' }),
+      headers: session.headers,
+    });
+    assert.notEqual(opened.statusCode, 303, `it did not go through: ${opened.statusCode}`);
+
+    const project = await harness.store.projects.findOne({ _id: theirs.id });
+    assert.equal(project?.visibility, 'owner', 'their board is still theirs alone');
+  });
+
   it('signs somebody in with a code, and out again', async () => {
     const project = await createProject(harness, 'sessions');
     await claimFor(project, 'owner@example.com');
