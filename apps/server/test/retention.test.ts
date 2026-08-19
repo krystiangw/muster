@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { authed, createProject, signIn, startHarness, type Harness, type Project } from './helper.js';
 import { flushEvents } from '../src/events.js';
+import { searchTooSlow } from '../src/service.js';
 
 /**
  * The promises that only an index keeps.
@@ -196,5 +197,59 @@ describe('what the service promises to forget', () => {
         .countDocuments({ projectId: project.id, expiresAt: { $type: 'date' } });
       assert.equal(stillDated, 0, `${name} under a claimed board carries no expiry`);
     }
+  });
+});
+
+/**
+ * The other promise only an index keeps.
+ *
+ * When a search runs out of its budget the refusal tells the caller which
+ * filters to put beside it. That sentence was measured wrong once: it named
+ * `label=`, and a board following it walks into the same refusal, because
+ * labels carry no index on purpose and the predicate runs on documents already
+ * fetched. Measured on twenty thousand cards, `label=` beside a search fetches
+ * every one of them, exactly as many as the bare search.
+ *
+ * So the advice is not prose. It is a claim about which fields an index can act
+ * on before a document is read, and it goes stale the moment somebody adds or
+ * drops one. This is the test that notices, in both directions.
+ */
+describe('the filters a slow search is told to use', () => {
+  let harness: Harness;
+  before(async () => {
+    harness = await startHarness();
+  });
+  after(async () => {
+    await harness?.stop();
+  });
+
+  it('names only fields an index can narrow on, and keeps naming label as the one that cannot', async () => {
+    const refusal = searchTooSlow(harness.store, { code: 50 });
+    assert.ok(refusal, 'a MaxTimeMSExpired is what this turns into a refusal');
+    const advice = refusal.message;
+
+    const keys = new Set<string>();
+    for (const index of await harness.store.db.collection('items').indexes()) {
+      for (const field of Object.keys((index as { key: Record<string, unknown> }).key)) {
+        keys.add(field);
+      }
+    }
+
+    // What the caller types, and the field it lands on.
+    const recommended: Array<[string, string]> = [
+      ['status=', 'status'],
+      ['owner=', 'owner'],
+      ['source=', 'source'],
+      ['prefix=', 'slug'],
+    ];
+    for (const [typed, field] of recommended) {
+      assert.ok(advice.includes(typed), `the refusal offers ${typed}`);
+      assert.ok(keys.has(field), `${typed} lands on ${field}, which an index covers`);
+    }
+
+    // The counterexample, and the reason it is one. If a labels index ever
+    // appears, this fails and the advice is the thing to change.
+    assert.ok(!keys.has('labels'), 'labels carry no index, which is why label= is not offered');
+    assert.match(advice, /neither does label=/);
   });
 });
