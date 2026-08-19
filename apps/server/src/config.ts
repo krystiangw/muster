@@ -56,6 +56,29 @@ function int(value: string | undefined, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+/**
+ * What a refusal calls the limit it met.
+ *
+ * A 429 names its bucket and points at `/.well-known/agent-access.json` for the
+ * numbers, so the name in the refusal and the name in that file have to be the
+ * same string or the pointer goes nowhere. They were two vocabularies until
+ * this existed: a caller refused for "new projects from this address" looked up
+ * a catalogue that only knew "project creation, per source address".
+ *
+ * Three of these share one rule and are still three names, because they protect
+ * different people: how often one board may be offered, how often one board may
+ * ask for a claim code, and how much mail one address receives.
+ */
+export const RATE_LIMIT_SCOPES = {
+  createProject: 'project creation, per source address',
+  write: 'writes, per token',
+  read: 'reads, per token',
+  feedback: 'unauthenticated feedback, per source address',
+  claimCode: 'claim codes, per project',
+  boardOffer: 'board offers, per project',
+  offerToAddress: 'board offers, per recipient address',
+} as const;
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const port = int(env.PORT, 4600);
   const baseUrl = (env.BASE_URL ?? `http://localhost:${port}`).replace(/\/+$/, '');

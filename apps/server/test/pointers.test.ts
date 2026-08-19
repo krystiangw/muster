@@ -185,4 +185,5 @@ describe('every address these answers hand out', () => {
     const missing = [...paths].filter((path) => !routed(path));
     assert.deepEqual(missing, [], `handed out, but nothing answers there:\n  ${missing.join('\n  ')}`);
   });
+
 });

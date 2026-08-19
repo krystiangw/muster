@@ -1,5 +1,5 @@
 import { TOOL_COUNT } from './routes/mcp.js';
-import type { Config } from './config.js';
+import { RATE_LIMIT_SCOPES, type Config } from './config.js';
 
 /**
  * Everything an agent reads before it writes anything.
@@ -587,6 +587,7 @@ somebody else's ticket.
 - ${config.tiers.demo.items} **open** items, ${config.tiers.demo.agents} agents and ${config.tiers.demo.escalations} escalations per unclaimed project, and it is deleted after ${config.demoTtlDays} days. Closing an item frees its slot; \`DELETE /items/<slug>\` removes it entirely.
 - A human claiming the project by email raises those to ${config.tiers.free.items} open items, ${config.tiers.free.agents} agents and ${config.tiers.free.escalations} escalations and removes the expiry. Free, no card.
 - ${config.rateLimits.write.requests} writes and ${config.rateLimits.read.requests} reads per minute per token; ${config.rateLimits.createProject.requests} new projects per hour per source address. Over the limit returns 429 with \`retry-after\`. An ordinary loop never comes near it; an import does, so pace one and read \`retry-after\` rather than treating the refusal as an outage.
+- ${config.rateLimits.claimEmail.requests} an hour each on the calls that send somebody an email: asking for a claim code on one project, offering one board, and offering any board to one address. A 429 names the bucket it met in \`limit\`, and every name it can print is listed with its numbers at \`${base}/.well-known/agent-access.json\`.
 - The two refusals mean different things and the codes say which. A cap answers **409** and never clears on its own: finish something or have the project claimed. A rate limit answers **429**, always carries \`retry-after\`, and clears by waiting. Retrying a 409 the way you retry a 429 is a loop that never ends.
 
 ## Also available
@@ -775,6 +776,22 @@ AI-Catalog: ${config.baseUrl}/.well-known/ai-catalog.json
 
 export function agentAccessJson(config: Config): Record<string, unknown> {
   const base = config.baseUrl;
+  // Every bucket an agent can meet through a documented call, under the name
+  // its refusal uses, since the refusal points here for the numbers. Three of
+  // them share one rule and are still three rows, because they protect
+  // different people. What is left out guards browser forms, the code typed
+  // into a read view and the operator sign in: nothing here asks an agent to
+  // fill either in, and a limit an agent cannot meet is noise in a document
+  // written for agents.
+  const published = [
+    { scope: RATE_LIMIT_SCOPES.createProject, rule: config.rateLimits.createProject },
+    { scope: RATE_LIMIT_SCOPES.write, rule: config.rateLimits.write },
+    { scope: RATE_LIMIT_SCOPES.read, rule: config.rateLimits.read },
+    { scope: RATE_LIMIT_SCOPES.feedback, rule: config.rateLimits.feedback },
+    { scope: RATE_LIMIT_SCOPES.claimCode, rule: config.rateLimits.claimEmail },
+    { scope: RATE_LIMIT_SCOPES.boardOffer, rule: config.rateLimits.claimEmail },
+    { scope: RATE_LIMIT_SCOPES.offerToAddress, rule: config.rateLimits.claimEmail },
+  ];
   return {
     name: 'Muster',
     summary:
@@ -800,32 +817,11 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       published: true,
       source: 'https://github.com/krystiangw/muster/tree/main/packages/sdk',
     },
-    rate_limits: [
-      {
-        scope: 'project creation, per source address',
-        requests: config.rateLimits.createProject.requests,
-        window_seconds: config.rateLimits.createProject.windowSeconds,
-      },
-      {
-        scope: 'writes, per token',
-        requests: config.rateLimits.write.requests,
-        window_seconds: config.rateLimits.write.windowSeconds,
-      },
-      {
-        scope: 'reads, per token',
-        requests: config.rateLimits.read.requests,
-        window_seconds: config.rateLimits.read.windowSeconds,
-      },
-      {
-        // Published because an agent is told to use this door and can hit its
-        // limit: skill.md sends unauthenticated reports here. The two limits
-        // left out of this list guard browser forms, which nothing here asks an
-        // agent to fill in.
-        scope: 'unauthenticated feedback, per source address',
-        requests: config.rateLimits.feedback.requests,
-        window_seconds: config.rateLimits.feedback.windowSeconds,
-      },
-    ],
+    rate_limits: published.map(({ scope, rule }) => ({
+      scope,
+      requests: rule.requests,
+      window_seconds: rule.windowSeconds,
+    })),
     limits: {
       counted: 'open items, not items ever created: closing one frees its slot',
       precision:

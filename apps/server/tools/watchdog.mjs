@@ -405,20 +405,31 @@ if (broken.length === 0 && keyCheckIsDue()) {
         body: '{}',
       })
     : { status: 0 };
-  state.keyCheckedAt = now;
+  // Three answers, not two. 422 is the credential working. 401 and 403 are the
+  // provider saying it does not know this key, which is the thing worth waking
+  // somebody for. Everything else, a 429 or a 500 or a request that never
+  // arrived, is the provider having a bad minute and says nothing about the
+  // key: treating that as a revocation would page about somebody else's blip.
+  // An inconclusive round does not spend the day's check either, so the next
+  // round asks again instead of waiting until tomorrow.
+  const rejected = answer.status === 401 || answer.status === 403 || !alertKey;
   if (answer.status === 422) {
+    state.keyCheckedAt = now;
     if (state.keyAlerted) say('the alerting key is accepted again');
     state.keyAlerted = false;
-  } else if (!state.keyAlerted) {
-    const said_ = alertKey ? `answered ${answer.status}` : 'is not on disk';
-    const filed = await fileOnTheBoard(
-      'The key this watchdog alerts with is no longer accepted, so an outage would be silent.',
-      `A request the provider answers with 422 when the credential is good ${said_}. Nothing was `
-        + 'sent. Rotate ~/.muster/resend.key and RESEND_API_KEY on the dyno together, because '
-        + 'production sends every claim code and every escalation notice with the same one.',
-    );
-    state.keyAlerted = filed === 'filed';
-    say(`the alerting key ${said_} | board ${filed}`);
+  } else if (rejected) {
+    state.keyCheckedAt = now;
+    if (!state.keyAlerted) {
+      const verdict = alertKey ? `answered ${answer.status}` : 'is not on disk';
+      const filed = await fileOnTheBoard(
+        'The key this watchdog alerts with is no longer accepted, so an outage would be silent.',
+        `A request the provider answers with 422 when the credential is good ${verdict}. Nothing `
+          + 'was sent. Rotate ~/.muster/resend.key and RESEND_API_KEY on the dyno together, because '
+          + 'production sends every claim code and every escalation notice with the same one.',
+      );
+      state.keyAlerted = filed === 'filed';
+      say(`the alerting key ${verdict} | board ${filed}`);
+    }
   }
 }
 

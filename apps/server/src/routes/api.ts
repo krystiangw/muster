@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import type { Config } from '../config.js';
+import { RATE_LIMIT_SCOPES, type Config } from '../config.js';
 import { READ_LINK_GRANTS } from '../content.js';
 import type { Store } from '../db.js';
 import { maybeExpireClaims, maybeSweep, sweepProject } from '../hygiene.js';
@@ -200,7 +200,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         `create:${clientIp(request)}`,
         config.rateLimits.createProject,
       );
-      if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds, 'new projects from this address');
+      if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds, RATE_LIMIT_SCOPES.createProject);
 
       const body = (request.body ?? {}) as {
         name?: string;
@@ -328,7 +328,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         });
       }
       const verdict = limiter.check(`feedback:${clientIp(request)}`, config.rateLimits.feedback);
-      if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds, 'reports from this address');
+      if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds, RATE_LIMIT_SCOPES.feedback);
 
       const project = await store.projects.findOne({ _id: config.feedbackProject });
       if (!project) {
@@ -476,7 +476,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         return tooMany(
           reply,
           verdict.retryAfterSeconds,
-          reading ? 'reads for this token' : 'writes for this token',
+          reading ? RATE_LIMIT_SCOPES.read : RATE_LIMIT_SCOPES.write,
         );
       }
 
@@ -1739,7 +1739,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         const { project } = requireAdmin(request);
         const body = request.body as { email: string; note?: string; agent?: string };
         const verdict = limiter.check(`share:${project._id}`, config.rateLimits.claimEmail);
-        if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds, 'offers of this board');
+        if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds, RATE_LIMIT_SCOPES.boardOffer);
         // Two buckets, because they protect different people. The project's
         // caps how often one board may be offered; this one caps how much mail
         // one address receives, and a project token costs nothing, so without
@@ -1748,7 +1748,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           `offer:${body.email.trim().toLowerCase()}`,
           config.rateLimits.claimEmail,
         );
-        if (!toThem.ok) return tooMany(reply, toThem.retryAfterSeconds, 'messages to this address');
+        if (!toThem.ok) return tooMany(reply, toThem.retryAfterSeconds, RATE_LIMIT_SCOPES.offerToAddress);
 
         const { alreadyOwned } = await shareProject(store, project, {
           email: body.email,
@@ -1814,7 +1814,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         const { project } = requireAdmin(request);
         const { email } = request.body as { email: string };
         const verdict = limiter.check(`claim:${project._id}`, config.rateLimits.claimEmail);
-        if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds, 'claim codes for this board');
+        if (!verdict.ok) return tooMany(reply, verdict.retryAfterSeconds, RATE_LIMIT_SCOPES.claimCode);
 
         const started = await startEmailClaim(store, project, email, config, mailer);
         if (started.alreadyClaimedBy) {
@@ -1861,11 +1861,12 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
 /**
  * The refusal that clears by waiting, and which of the buckets said so.
  *
- * "Too many requests" is true of six different limits here, and a caller that
+ * "Too many requests" is true of seven different limits here, and a caller that
  * cannot tell which one it met cannot pace itself: an agent told to slow down
  * on writes has no reason to stop reading, and a developer on a shared address
  * whose signups are capped will happily conclude the whole service is refusing
- * them. The name is the same one published in agent-access.json.
+ * them. The name comes from RATE_LIMIT_SCOPES, which is also what the
+ * published catalogue lists, so the pointer in the message resolves.
  */
 function tooMany(reply: FastifyReply, retryAfter: number, which: string): FastifyReply {
   return reply

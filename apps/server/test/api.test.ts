@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
+import { RATE_LIMIT_SCOPES } from '../src/config.js';
+import { agentAccessJson } from '../src/content.js';
 import { authed, createProject, startHarness, type Harness, type Project } from './helper.js';
 
 let harness: Harness;
@@ -1914,7 +1916,7 @@ describe('a question filed on a board nobody owns', () => {
 });
 
 describe('a refusal that clears by waiting', () => {
-  it('says which of the limits it was, since six of them answer the same way', async () => {
+  it('says which of the limits it was, since seven of them answer the same way', async () => {
     // An agent told only "too many requests" cannot pace itself: the read and
     // write budgets are counted apart and published apart, and a developer on
     // a shared address whose signups are capped would otherwise conclude the
@@ -1928,9 +1930,21 @@ describe('a refusal that clears by waiting', () => {
         payload: { name: 'second' },
       });
       assert.equal(refused.statusCode, 429);
-      assert.equal(refused.json().limit, 'new projects from this address');
-      assert.match(refused.json().message, /new projects from this address/);
+      assert.equal(refused.json().limit, RATE_LIMIT_SCOPES.createProject);
+      assert.match(refused.json().message, new RegExp(RATE_LIMIT_SCOPES.createProject));
       assert.ok(Number(refused.headers['retry-after']) > 0);
+
+      // The refusal names a bucket and sends the caller to a document for the
+      // numbers, so the name has to be in that document. It was not: these
+      // were two vocabularies, and a caller refused for "new projects from
+      // this address" looked up a catalogue that only knew "project creation,
+      // per source address" and found neither the name nor a number.
+      const catalogue = agentAccessJson(isolated.config).rate_limits as Array<{ scope: string }>;
+      const scopes = catalogue.map((row) => row.scope);
+      assert.match(refused.json().message, /agent-access\.json/);
+      for (const scope of Object.values(RATE_LIMIT_SCOPES)) {
+        assert.ok(scopes.includes(scope), `${scope} is refused with but never published`);
+      }
     } finally {
       await isolated.stop();
     }
