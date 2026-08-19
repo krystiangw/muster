@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
+import { flushEvents } from '../src/events.js';
 import { startHarness, type Harness } from './helper.js';
 
 /**
@@ -93,6 +94,46 @@ describe('the scripts that check production, run against a harness', () => {
     assert.match(out, /all good/, out);
     assert.match(out, /ok +the token writes/);
     assert.match(out, /ok +a wrong secret is refused/);
+  });
+
+  it('prints the report an operator reads, on a database with something in it', async () => {
+    // The report runs in its own process and reads the database directly, and
+    // telemetry is buffered on a timer in this one, so without this it would
+    // be handed a database where nothing has happened yet and would pass by
+    // agreeing with itself about zero.
+    await flushEvents();
+    const out = (
+      await run(process.execPath, ['--import', 'tsx', 'tools/insights.mts'], {
+        cwd: join(HERE, 'apps/server'),
+        encoding: 'utf8',
+        env: { ...process.env, MONGODB_URI: harness.config.mongoUri, MONGODB_DB: harness.config.mongoDb },
+      })
+    ).stdout;
+    assert.match(out, /The funnel, since events were first recorded/);
+    assert.match(out, /strangers\s+ours/);
+    assert.match(out, /marked as ours since \d{4}-\d{2}-\d{2}/, out);
+    assert.match(out, /created a project/);
+  });
+
+  it('says nothing has been marked rather than claiming a date it does not have', async () => {
+    // The branch nobody had run: a deployment where no check has identified
+    // itself yet has no date to print, and printing one would be a claim. It
+    // was written blind this afternoon, because production had marked events
+    // within a minute of the change landing.
+    const fresh = await startHarness();
+    try {
+      const out = (
+        await run(process.execPath, ['--import', 'tsx', 'tools/insights.mts'], {
+          cwd: join(HERE, 'apps/server'),
+          encoding: 'utf8',
+          env: { ...process.env, MONGODB_URI: fresh.config.mongoUri, MONGODB_DB: fresh.config.mongoDb },
+        })
+      ).stdout;
+      assert.match(out, /nothing has been marked as ours yet/);
+      assert.doesNotMatch(out, /marked as ours since/);
+    } finally {
+      await fresh.stop();
+    }
   });
 
   it('reuses what it kept, rather than signing up twice', async () => {
