@@ -2200,12 +2200,12 @@ describe('a board many agents write to', () => {
       method: 'GET',
       url: `/r/${readToken}/board?agent=gone-loop`,
     });
-    assert.match(
-      page.body,
-      /<input id="filter-agent" name="agent" list="filter-agent-list"[\s\S]*?value="gone-loop"/,
-      'so what turned it on can turn it off',
-    );
-    assert.match(page.body, /<option value="gone-loop">/, 'and it is still on the list');
+    // The fact, not the spelling: the box carries the value, whichever order
+    // the attributes are written in and whatever the list is called.
+    const agentBox = /<input id="filter-agent"[^>]*>/.exec(page.body)?.[0] ?? '';
+    assert.match(agentBox, /value="gone-loop"/, 'so what turned it on can turn it off');
+    assert.match(agentBox, /list="[^"]+"/, 'and it still offers the list');
+    assert.match(page.body, /<option value="gone-loop">/, 'which still holds it');
   });
 
   it('shows the filter it is filtering by, whatever the list holds', async () => {
@@ -2223,11 +2223,8 @@ describe('a board many agents write to', () => {
       method: 'GET',
       url: `/r/${readToken}/board?label=zz-last`,
     });
-    assert.match(
-      page.body,
-      /<input id="filter-label" name="label" list="filter-label-list"[\s\S]*?value="zz-last"/,
-      'the chosen label is in the box',
-    );
+    const labelBox = /<input id="filter-label"[^>]*>/.exec(page.body)?.[0] ?? '';
+    assert.match(labelBox, /value="zz-last"/, 'the chosen label is in the box');
     assert.match(page.body, /<option value="aa">/, 'and every name is behind the field');
   });
 

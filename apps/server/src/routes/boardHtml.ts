@@ -385,7 +385,7 @@ function priorityOptions(current: number): string {
  * arrive together. Without the script it is the input and datalist it has
  * always been, which is a browser's own picker and still works.
  */
-function field(
+function labelledField(
   options: {
     id: string;
     name: string;
@@ -393,25 +393,38 @@ function field(
     value?: string;
     placeholder?: string;
     size?: number;
-    /** Values to choose from. An empty list renders a plain input. */
-    choices?: readonly string[];
+    type?: string;
+    /**
+     * Values to choose from. An empty list renders a plain input. A note rides
+     * along beside the value, which is what a handle needs: the handle is a
+     * line number and the description is the name.
+     */
+    choices?: readonly (string | { value: string; note?: string })[];
     /** Space separated, so choosing replaces the word under the cursor. */
     many?: boolean;
   },
 ): string {
-  const { id, name, label, value = '', placeholder = '', size, choices = [], many } = options;
+  const { id, name, label, value = '', placeholder = '', size, type, many } = options;
+  const choices = (options.choices ?? []).map((choice) =>
+    typeof choice === 'string' ? { value: choice } : choice,
+  );
   const list = choices.length > 0 ? `list-${id}` : '';
   return `<label class="field${list ? ' pickable' : ''}"${many ? ' data-many="true"' : ''}>
       <input id="${escapeHtml(id)}" name="${escapeHtml(name)}"${
-        size ? ` size="${size}"` : ''
-      }${list ? ` list="${list}"` : ''} value="${escapeHtml(value)}" placeholder="${escapeHtml(
-        placeholder || ' ',
-      )}">
+        type ? ` type="${escapeHtml(type)}"` : ''
+      }${size ? ` size="${size}"` : ''}${
+        list ? ` list="${list}"` : ''
+      } value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder || ' ')}">
       <span>${escapeHtml(label)}</span>${
         list
           ? `
       <datalist id="${list}">${choices
-              .map((choice) => `<option value="${escapeHtml(choice)}"></option>`)
+              .map(
+                (choice) =>
+                  `<option value="${escapeHtml(choice.value)}">${
+                    choice.note ? escapeHtml(choice.note) : ''
+                  }</option>`,
+              )
               .join('')}</datalist>`
           : ''
       }
@@ -424,7 +437,7 @@ function editForms(item: ItemDoc, facets: BoardFacets, action: string, keep: Boa
   return `<div class="edit">
   <form class="row" method="post" action="${escapeHtml(action)}/owner">
     <input type="hidden" name="slug" value="${escapeHtml(item.slug)}">${keptFilter(keep)}
-    ${field({
+    ${labelledField({
       id: `own-${id}`,
       name: 'owner',
       label: 'Owner',
@@ -437,7 +450,7 @@ function editForms(item: ItemDoc, facets: BoardFacets, action: string, keep: Boa
   </form>
   <form class="row" method="post" action="${escapeHtml(action)}/labels">
     <input type="hidden" name="slug" value="${escapeHtml(item.slug)}">${keptFilter(keep)}
-    ${field({
+    ${labelledField({
       id: `lab-${id}`,
       name: 'add',
       label: 'Add label',
@@ -478,7 +491,7 @@ function editForms(item: ItemDoc, facets: BoardFacets, action: string, keep: Boa
   </details>
   <form class="row" method="post" action="${escapeHtml(action)}/waiting">
     <input type="hidden" name="slug" value="${escapeHtml(item.slug)}">${keptFilter(keep)}
-    ${field({
+    ${labelledField({
       id: `wait-${id}`,
       name: 'waiting',
       label: 'Waiting on',
@@ -923,24 +936,22 @@ export function renderBoardFilters(view: BoardView, facets: BoardFacets, action:
   ): string => {
     if (options.length === 0) return '';
     const id = `filter-${key}`;
-    return `  <label for="${id}">${escapeHtml(title)}
-    <input id="${id}" name="${key}" list="${id}-list" size="14"
-      value="${escapeHtml(filter[key] ?? '')}" placeholder="${escapeHtml(empty)}">
-  </label>
-  <datalist id="${id}-list">
-${options
-  .map(
-    (option) =>
-      `    <option value="${escapeHtml(option.value)}">${
-        option.note ? escapeHtml(option.note) : ''
-      }</option>`,
-  )
-  .join('\n')}
-  </datalist>${
-    omitted === 0
-      ? ''
-      : `\n  <span class="hint">${omitted} more ${key}s exist than this list holds.</span>`
-  }`;
+    // The same component the card sheet uses. This bar is the first thing on
+    // every board and it had the older shape: a caption over a box, and a list
+    // a browser hides. One of them was going to look like the mistake.
+    return `  ${labelledField({
+      id,
+      name: key,
+      label: title,
+      value: filter[key] ?? '',
+      placeholder: empty,
+      size: 14,
+      choices: options,
+    })}${
+      omitted === 0
+        ? ''
+        : `\n  <span class="hint">${omitted} more ${key}s exist than this list holds.</span>`
+    }`;
   };
 
   // Every field in one form, so Enter anywhere applies the lot and there is no
@@ -988,10 +999,15 @@ ${field(
     withCurrent(facets.labels, filter.label).map((value) => ({ value })),
     facets.omitted.labels,
   )}
-  <label for="filter-q">Find
-    <input id="filter-q" type="search" name="q" size="20"
-      value="${escapeHtml(filter.q ?? '')}" placeholder="slug or title">
-  </label>
+  ${labelledField({
+    id: 'filter-q',
+    name: 'q',
+    label: 'Find',
+    type: 'search',
+    value: filter.q ?? '',
+    placeholder: 'slug or title',
+    size: 20,
+  })}
   <span class="hint">Pick or type, then Enter.</span>
   ${
     // A form with several fields and no submit button does not submit on

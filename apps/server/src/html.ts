@@ -707,8 +707,11 @@ const SCRIPT = `(() => {
       input.value = input.value.slice(0, start) + value + (many && !tail.startsWith(' ') ? ' ' : '') + tail;
       const caret = start + value.length + (many ? 1 : 0);
       input.setSelectionRange(caret, caret);
-      shut();
+      // Focus first and close after. The other way round, focusing reopened
+      // the list through the handler that opens it on focus, so choosing a
+      // value shut the list and put it straight back.
       input.focus();
+      shut();
     };
 
     input.addEventListener('focus', open);
