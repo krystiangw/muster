@@ -1,4 +1,5 @@
 import type { Config } from './config.js';
+import { wrapped } from './content.js';
 
 /**
  * Resend over plain fetch. The SDK would add a dependency to send one message
@@ -118,7 +119,9 @@ export function boardOfferMail(offer: BoardOffer): { subject: string; lines: str
     lines: [
       `${offer.agent} created a board called "${offer.projectName}" and named this address as`,
       'the person it answers to.',
-      ...(note === '' ? [] : ['', `It said: ${note}`]),
+      // The agent's own words, wrapped like the rest: a note is up to five
+      // hundred characters and arrived as one line among lines of seventy.
+      ...(note === '' ? [] : ['', wrapped(`It said: ${note}`)]),
       '',
       'The board is here, and taking it is one click on that page:',
       offer.readUrl,
@@ -126,9 +129,14 @@ export function boardOfferMail(offer: BoardOffer): { subject: string; lines: str
       'Taking it removes the expiry, raises the limits and gives you a view of every',
       'board you own, with the questions the agents are waiting on you for.',
       '',
-      `Ignore this and nothing happens: an unclaimed board deletes itself, with all of`,
-      `its data, ${offer.expiresInDays} days after it was created. You are not subscribed to anything,`,
-      'and nothing was created in your name.',
+      // Wrapped here rather than written out, because the number in the middle
+      // is a setting: a deployment with a longer timer pushed this line past
+      // the width every other line in the message keeps to.
+      wrapped(
+        `Ignore this and nothing happens: an unclaimed board deletes itself, with all of its ` +
+          `data, ${offer.expiresInDays} days after it was created. You are not subscribed to ` +
+          'anything, and nothing was created in your name.',
+      ),
     ],
   };
 }
@@ -165,12 +173,16 @@ export function escalationMail(notice: EscalationNotice): { subject: string; lin
     lines: [
       `${notice.agent} stopped and asked:`,
       '',
-      notice.question,
+      // Wrapped, like every line written here. These two come from an agent
+      // and went out as one unbroken line however long they were, in the
+      // middle of a message hard wrapped at 78 everywhere else, and this is
+      // the field that exists so somebody can decide on a phone.
+      wrapped(notice.question),
       ...(context === ''
         ? []
         : [
             '',
-            cut ? `${context.slice(0, CONTEXT_IN_MAIL)}...` : context,
+            wrapped(cut ? `${context.slice(0, CONTEXT_IN_MAIL)}...` : context),
             ...(cut ? ['', '(the rest of the context is on the board)'] : []),
           ]),
       ...(notice.itemSlug ? ['', `It is about the card "${notice.itemSlug}".`] : []),

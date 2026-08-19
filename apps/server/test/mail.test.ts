@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import { loadConfig } from '../src/config.js';
-import { createMailer } from '../src/email.js';
+import { boardOfferMail, createMailer, escalationMail } from '../src/email.js';
 
 /**
  * What actually goes over the wire to the mail provider.
@@ -47,5 +47,51 @@ describe('the message that leaves', () => {
   it('leaves the reply address out when there is nobody to write to', async () => {
     const body = await captured({ EMAIL_FROM: 'Muster <muster@sends-only.example>' });
     assert.ok(!('reply_to' in body), 'an empty reply-to is worse than none');
+  });
+});
+
+describe('the message a person reads on a phone', () => {
+  // Every line written here is hard wrapped at 78. The two fields an agent
+  // supplies went out exactly as sent, so a question and a context written as
+  // one paragraph arrived as one line of several hundred characters in the
+  // middle of a message shaped for a narrow screen. The context is the field
+  // the protocol asks for in those words: enough that somebody can decide
+  // without opening anything else.
+  const long = (words: number): string =>
+    Array.from({ length: words }, (_, at) => `word${at}`).join(' ');
+
+  const tooWide = (lines: string[]): string[] =>
+    lines
+      .join('\n')
+      .split('\n')
+      // A bare URL is one word and cannot be broken; everything else can.
+      .filter((line) => line.length > 78 && line.includes(' '));
+
+  it('wraps what the agent wrote, in the question and in the context', () => {
+    const mail = escalationMail({
+      projectName: 'arbitrage-fleet',
+      agent: 'errors-loop',
+      question: long(40),
+      context: `${long(120)}\n\n${long(40)}`,
+      itemSlug: 'errors:venue-withdraw-stuck',
+      waiting: 3,
+      readUrl: 'https://musterboard.dev/r/r_zevvf43z288j5mbv',
+      operatorUrl: 'https://musterboard.dev/operator',
+      needsSignIn: false,
+    });
+    assert.deepEqual(tooWide(mail.lines), []);
+    // And a paragraph the writer put in survives being wrapped.
+    assert.match(mail.lines.join('\n'), /\n\n/);
+  });
+
+  it('wraps the note on an offer, which is five hundred characters of somebody else', () => {
+    const mail = boardOfferMail({
+      projectName: 'arbitrage-fleet',
+      agent: 'errors-loop',
+      note: long(90),
+      readUrl: 'https://musterboard.dev/r/r_zevvf43z288j5mbv',
+      expiresInDays: 7,
+    });
+    assert.deepEqual(tooWide(mail.lines), []);
   });
 });

@@ -117,8 +117,20 @@ export const READ_LINK_GRANTS =
  * terminal, in a diff, and by whatever an agent pipes it into. One interpolated
  * sentence three hundred characters long reads as a mistake in every one of
  * those, however well it renders in a browser nobody is using here.
+ *
+ * Exported for the mail, which is the other place text is read as text and the
+ * one where the reader is a person on a phone. Line by line, so a paragraph
+ * break somebody typed survives: this is called on prose an agent wrote, not
+ * only on sentences written here.
  */
-function wrapped(text: string, indent = '', width = 78): string {
+export function wrapped(text: string, indent = '', width = 78): string {
+  return text
+    .split('\n')
+    .map((paragraph) => wrapLine(paragraph, indent, width))
+    .join(`\n${indent}`);
+}
+
+function wrapLine(text: string, indent: string, width: number): string {
   const lines: string[] = [];
   let line = '';
   for (const word of text.split(' ')) {
