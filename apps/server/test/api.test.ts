@@ -2011,10 +2011,15 @@ describe('a database that was never there', () => {
       // Static pages keep serving, including the two a prefix match would
       // have taken down with the door beside them: /pricing starts with /p,
       // and the signup form is a page until somebody posts it.
-      for (const url of ['/pricing', '/signup', '/docs', '/llms.txt']) {
+      for (const url of ['/pricing', '/signup', '/signup/', '/docs', '/llms.txt']) {
         const page = await server.inject({ method: 'GET', url, headers: { accept: 'text/html' } });
         assert.equal(page.statusCode, 200, `${url} answered ${page.statusCode}`);
       }
+      // The same page asked for its size. This server ignores a trailing
+      // slash and answers HEAD from the GET handler, so both reach the page
+      // and both have to be read as the page here.
+      const head = await server.inject({ method: 'HEAD', url: '/signup' });
+      assert.equal(head.statusCode, 200, `HEAD /signup answered ${head.statusCode}`);
 
       // And the reason is the same sentence whatever the driver said, because
       // a duplicate key error quotes the value it tripped on, which here can

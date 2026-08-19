@@ -338,10 +338,15 @@ export async function buildApp(
   const NEEDS_THE_STORE = ['/p', '/v1', '/mcp', '/r', '/operator', '/oauth', '/signup'];
   server.addHook('onRequest', async (request, reply) => {
     if (store.ready.ok) return;
-    const path = request.url.split('?')[0] ?? '';
+    // Normalised the way the router normalises it: this server ignores a
+    // trailing slash, so `/signup/` reaches the same page and has to be read
+    // as the same path here or the exemption below misses it.
+    const path = (request.url.split('?')[0] ?? '').replace(/\/+$/, '') || '/';
     const wanted = NEEDS_THE_STORE.some((route) => path === route || path.startsWith(`${route}/`));
     if (!wanted) return;
-    if (request.method === 'GET' && path === '/signup') return;
+    // HEAD as well as GET: Fastify answers HEAD from the same handler, and a
+    // page that is fine to read is fine to ask the size of.
+    if ((request.method === 'GET' || request.method === 'HEAD') && path === '/signup') return;
     return reply
       .code(503)
       .header('retry-after', '5')
