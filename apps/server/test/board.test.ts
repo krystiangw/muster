@@ -194,6 +194,21 @@ describe('a project’s own layout', () => {
     // A slug with no colon has no namespace, rather than a namespace named
     // after the whole slug, which would give every such card a lane of its own.
     assert.equal(cell(view, 'open', '').items[0].slug, 'loose-end');
+
+    // And a card that lands in no column brings no lane either: the lane is
+    // read after the column is chosen, so an area whose only work matches
+    // nothing is counted above the board rather than given a row of its own.
+    // Published under the board editor, so it is held here.
+    // Blocked rather than done: a closed card is not scanned at all by default,
+    // so it could never have been unplaced and would prove nothing here.
+    await post(project, '/items', { slug: 'sec:waiting', title: 'waiting', actor: 'a' });
+    await post(project, '/items', { slug: 'sec:waiting', status: 'blocked', actor: 'a' });
+    const after = await board(project);
+    assert.equal(after.unplaced, 1, 'the blocked card is scanned and matches no column');
+    assert.ok(
+      !after.rows.some((row: { key: string }) => row.key === 'sec'),
+      'and brings no lane with it',
+    );
   });
 
   it('gives one namespace a column, without anybody adding a label for it', async () => {

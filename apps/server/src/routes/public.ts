@@ -529,11 +529,12 @@ appears twice. Anything matching no column is counted and shown above the board 
 because a layout that quietly drops work is worse than no layout. Swimlanes group by owner, by
 label, or by the namespace already in the slug, and a column can filter on that namespace too:
 <code>"match":{"slug_prefix":"ops:"}</code> is one area of the work, without anybody adding a label
-for it. A lane exists for every value among the cards the board actually scanned, finished ones
+for it. A lane exists for every value among the cards that landed in a column, finished ones
 included, so a project with twenty areas and a long Done column gets lanes for areas where nothing
-is moving. The scan stops at a thousand cards and says so with <code>partial</code>, which is the
-other half of the same thing: past that point an old area quietly has no lane at all.
-<code>"within_days"</code> on the archive column is what keeps either from happening.</p>
+is moving. Two things narrow that set rather than widen it: the scan stops at a thousand cards and
+says so with <code>partial</code>, so past that an old area quietly has no lane at all, and a card
+matching no column is counted above the board and brings no lane either.
+<code>"within_days"</code> on the archive column is what keeps the first from happening.</p>
 <pre><code>curl -sX PUT ${escapeHtml(base)}/v1/$PROJECT/board -H "authorization: Bearer $ADMIN_TOKEN" \\
   -H 'content-type: application/json' -d '{
     "rows": "owner",

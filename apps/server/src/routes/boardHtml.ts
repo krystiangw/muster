@@ -1174,8 +1174,9 @@ sent straight to the API is refused rather than quietly doing nothing.</p>
 <p><code>"rows"</code> sits beside <code>"columns"</code> and takes <code>none</code>, <code>owner</code>,
 <code>label</code> or <code>prefix</code>. <code>prefix</code> lanes by the namespace already in the slug,
 which on most boards is the grouping the agents wrote themselves. A lane appears for every value among
-the cards the board scanned, finished ones included, so <code>within_days</code> on the archive column
-is what stops old work setting the shape of the board.</p>
+the cards that landed in a column, finished ones included, so <code>within_days</code> on the archive
+column is what stops old work setting the shape of the board. Cards matching no column are counted
+above the board instead and bring no lane of their own.</p>
 <p class="mono" style="color:var(--muted)">Same thing over the API:
 PUT ${escapeHtml(project._id ? `/v1/${project._id}/board` : '/v1/{project}/board')}</p>
 </details>`;
