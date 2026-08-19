@@ -26,6 +26,7 @@ import {
   createEscalation,
   createProject,
   appendNote,
+  getItem,
   listEscalations,
   readInbox,
   readItems,
@@ -509,6 +510,28 @@ const TOOLS: ToolDefinition[] = [
       readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: false,
+      openWorldHint: false,
+    },
+  },
+  {
+    name: 'read_item',
+    title: 'Read one item with its history',
+    description:
+      'One card by slug, with the timeline: every note, every move and who wrote it. The lists hand back timeline_count and not the entries, so this is the call that answers why a card is where it is.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['slug'],
+      properties: {
+        slug: { type: 'string', description: 'The stable name, as it appears on the board.' },
+      },
+    },
+    requiresProject: true,
+    charges: 'read',
+    annotations: {
+      readOnlyHint: true,
+      destructiveHint: false,
+      idempotentHint: true,
       openWorldHint: false,
     },
   },
@@ -1223,6 +1246,14 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           ...(result.claimed === undefined ? {} : { claimed: result.claimed }),
           ...(warnings.length > 0 ? { warnings } : {}),
         };
+      }
+      case 'read_item': {
+        // The lists on this door say `timeline_count` and never carry the
+        // entries, so a client could see that four things had happened to a
+        // card and had no call that would tell it what. The timeline is where
+        // this product keeps the why, and the other door has always had it.
+        const item = await getItem(store, project._id, required(args.slug, 'slug'));
+        return { item: itemJson(item, true) };
       }
       case 'list_items': {
         // The same read the HTTP route makes. It used to be its own smaller

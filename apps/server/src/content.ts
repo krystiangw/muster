@@ -984,7 +984,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
         url: `${base}/v1/{project}/next`,
         request: { agent: '{handle}', ttl_minutes: 60 },
         notes:
-          'The same choice, taken: the selection and the lease are one write, so a fleet asking at once gets different items instead of all but one losing the claim that follows an offer. Answers with the item already held and "claimed": true.',
+          'The same choice, taken: the selection and the lease are one write, so a fleet asking at once gets different items instead of all but one losing the claim that follows an offer. Answers with the item already held and "claimed": true. Over MCP this is next_item with "claim": true rather than a tool of its own, which is the one name on this list that does not appear there.',
       },
       {
         name: 'read_item',

@@ -1247,6 +1247,63 @@ describe('the MCP surface', () => {
     assert.match(String(missing.content[0].text), /"slug" is required here/);
   });
 
+  it('says where the one call named on only one door lives on the other', async () => {
+    // Every MCP tool already has to name an operation the catalogue publishes,
+    // which the check further down enforces. The gap this leaves is the other
+    // way: `take_next_item` is a name in the catalogue and not a tool, because
+    // over MCP it is `next_item` with a flag. An agent that read the catalogue
+    // and went looking for it found nothing and had no way to learn why.
+    const catalogue = (
+      await harness.server.inject({ method: 'GET', url: '/.well-known/agent-access.json' })
+    ).json() as { endpoints: { name: string; notes?: string }[] };
+    const takeNext = catalogue.endpoints.find((endpoint) => endpoint.name === 'take_next_item');
+    assert.ok(takeNext, 'the catalogue still has the call this is about');
+    assert.match(String(takeNext!.notes), /next_item with "claim": true/);
+  });
+
+  it('can read the history the lists only count', async () => {
+    // Every list on this door hands back `timeline_count` and never the
+    // entries, so a client could see that four things had happened to a card
+    // and had no call that would tell it what. The timeline is where this
+    // product keeps the why, and the other door has always had it.
+    const project = await createProject(harness, 'the why');
+    let id = 700;
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const answer = await harness.server.inject({
+        method: 'POST',
+        url: '/mcp',
+        headers: { authorization: `Bearer ${project.token}` },
+        payload: { jsonrpc: '2.0', id: (id += 1), method: 'tools/call', params: { name, arguments: args } },
+      });
+      return answer.json().result;
+    };
+
+    await call('upsert_item', { slug: 'ops:why', title: 'a card with a history', actor: 'first' });
+    await call('append_note', { slug: 'ops:why', message: 'the venue answered on the second try', actor: 'first' });
+
+    const listed = await call('list_items', { q: 'ops:why' });
+    const fromList = listed.structuredContent.items[0];
+    assert.ok(fromList.timeline_count >= 2, 'the list counts them');
+    assert.equal(fromList.timeline, undefined, 'and does not carry them');
+
+    const read = await call('read_item', { slug: 'ops:why' });
+    assert.equal(read.isError, undefined);
+    const item = read.structuredContent.item;
+    assert.equal(item.slug, 'ops:why');
+    assert.equal(item.timeline.length, fromList.timeline_count, 'as many entries as the list counted');
+    assert.ok(
+      item.timeline.some((entry: { message?: string }) =>
+        String(entry.message ?? '').includes('the venue answered on the second try'),
+      ),
+      'and the words somebody actually wrote',
+    );
+
+    // A slug nobody filed is refused rather than answered with an empty card.
+    const missing = await call('read_item', { slug: 'ops:never-filed' });
+    assert.equal(missing.isError, true);
+    assert.equal(missing.structuredContent.code, 'not_found');
+  });
+
   it('says an argument arrived beside the envelope rather than inside it', async () => {
     // `{"name":"list_items","limit":1,"arguments":{...}}` answered 200 with
     // fifty items while the caller believed it had asked for one. The word was
