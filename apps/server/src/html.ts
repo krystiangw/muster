@@ -524,7 +524,8 @@ const SCRIPT = `(() => {
   const optionFor = (card, column) => {
     const select = formFor(card) && formFor(card).querySelector('select[name="column"]');
     if (!select) return null;
-    return [...select.options].some((option) => option.value === column) ? select : null;
+    const option = [...select.options].find((one) => one.value === column);
+    return option ? { select, option } : null;
   };
   const clear = () => {
     for (const marked of board.querySelectorAll('.drop-here')) marked.classList.remove('drop-here');
@@ -551,27 +552,22 @@ const SCRIPT = `(() => {
    * dropped on.
    *
    * A board can have swimlanes, and then the same column is drawn in every one
-   * of them. Usually a move changes the column and leaves the row alone, so
-   * the only honest target is a column in the card's own lane. But a column
-   * for one person's work assigns that person, and on a board grouped by owner
-   * that move changes the lane too: dropping such a column in its own lane is
-   * exactly right, and dropping the copy of it drawn in the card's lane is the
-   * misleading one. The server works out which columns decide the lane and
-   * says so on each of them, so this compares two strings and repeats none of
-   * the rule.
+   * of them. Where a card ends up after a move is a fact about the card and
+   * not about the column: a column that assigns an owner decides the lane for
+   * everybody in it, and a column that adds a label decides it only for a card
+   * that had none, or had ones sorting after the new one. So the server writes
+   * the answer onto each card's own options and this compares two strings,
+   * knowing none of the rule.
    */
   const laneOf = (element) => element.closest('.lane')?.dataset.lane ?? '';
-  const landsWhereDropped = (card, column) =>
-    column.dataset.lands === undefined
-      ? laneOf(card) === laneOf(column)
-      : column.dataset.lands === laneOf(column);
+  const landsWhereDropped = (option, column) => option.dataset.lands === laneOf(column);
 
   board.addEventListener('dragover', (event) => {
     const column = event.target.closest('.col[data-column]');
     if (!dragging || !column) return;
     if (column.contains(dragging)) return;
-    if (!landsWhereDropped(dragging, column)) return;
-    if (!optionFor(dragging, column.dataset.column)) return;
+    const target = optionFor(dragging, column.dataset.column);
+    if (!target || !landsWhereDropped(target.option, column)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
     if (!column.classList.contains('drop-here')) {
@@ -587,12 +583,12 @@ const SCRIPT = `(() => {
 
   board.addEventListener('drop', (event) => {
     const column = event.target.closest('.col[data-column]');
-    if (!dragging || !column || !landsWhereDropped(dragging, column)) return;
-    const select = optionFor(dragging, column.dataset.column);
-    if (!select) return;
+    if (!dragging || !column) return;
+    const target = optionFor(dragging, column.dataset.column);
+    if (!target || !landsWhereDropped(target.option, column)) return;
     event.preventDefault();
     clear();
-    select.value = column.dataset.column;
+    target.select.value = column.dataset.column;
     const form = formFor(dragging);
     dragging = null;
     // The same submit the button does, so the kept filter and the csrf token
