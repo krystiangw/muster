@@ -467,7 +467,7 @@ column does whatever it declares belongs there, which for the default board is
 a claim, a release or a status:
 
 \`\`\`bash
-curl -sX POST $MUSTER/items/errors:withdraw-stuck/move \\
+curl -sX POST $MUSTER/items/errors:venue-withdraw-stuck/move \\
   -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \\
   -d '{"column":"doing","actor":"errors-loop"}'
 \`\`\`
