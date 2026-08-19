@@ -124,6 +124,38 @@ describe('what the service promises to forget', () => {
     assert.deepEqual(orphans, [], orphans.join('\n'));
   });
 
+  it('has an index making unique the things that have to be', async () => {
+    // The sibling of the promise above, and the same kind of mechanism: an
+    // index nobody sees, holding a property everything else assumes. Losing
+    // one of these fails nothing either. It lets a second row exist, and the
+    // code carries on reading the first.
+    //
+    // The read token is the one that belongs with the isolation work: it is a
+    // URL somebody pastes into a chat, and two boards sharing one would mean a
+    // link opening the wrong board. Random ids make a collision unlikely and
+    // this index is what makes it impossible, which is a different thing.
+    const oneOf: Array<[string, string[], string]> = [
+      ['projects', ['readToken'], 'one link opens one board and no other'],
+      ['items', ['projectId', 'slug'], 'a slug is the idempotency key the protocol promises'],
+      ['agents', ['projectId', 'handle'], 'a handle names one agent on one board'],
+      ['apiKeys', ['hash'], 'two keys cannot hash to one row'],
+      ['shares', ['projectId', 'email'], 'offering a board twice refreshes the offer, it does not stack'],
+      ['handoverRequests', ['projectId', 'email'], 'and asking for one twice does not either'],
+      ['operatorAliases', ['email'], 'an address is one person here'],
+    ];
+    const missing: string[] = [];
+    for (const [name, fields, why] of oneOf) {
+      const found = (await indexesOf(name)).some(
+        (index) =>
+          index.unique === true &&
+          JSON.stringify(Object.keys((index.key ?? {}) as Record<string, unknown>)) ===
+            JSON.stringify(fields),
+      );
+      if (!found) missing.push(`${name} on ${fields.join(' + ')}: ${why}`);
+    }
+    assert.deepEqual(missing, [], `nothing is keeping these unique:\n${missing.join('\n')}`);
+  });
+
   it('stops a board expiring the moment somebody claims it', async () => {
     // The other half of the same promise, and the one that would lose
     // somebody's work rather than keep it too long: claiming a board clears
