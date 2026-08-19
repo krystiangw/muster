@@ -1083,6 +1083,37 @@ describe('what taking a question back must not do', () => {
     assert.equal(answers[0].answer, null, 'and no answer, because nobody gave one');
   });
 
+  it('can be taken back under the handle it was asked with, whatever the door did to it', async () => {
+    // The two doors used to store the handle differently: the HTTP schema caps
+    // it at 48, MCP arguments are whatever a model produced. A question asked
+    // over MCP under a longer handle was stored in a shape no withdrawal could
+    // ever match, so it could not be taken back at all.
+    const project = await createProject(harness);
+    const created = await harness.server.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: { ...authed(project), 'content-type': 'application/json' },
+      payload: {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'escalate',
+          arguments: { agent: '  errors-loop  ', question: 'asked over MCP', context: 'x' },
+        },
+      },
+    });
+    const id = created.json().result.structuredContent.escalation.id;
+    assert.equal(created.json().result.structuredContent.escalation.agent, 'errors-loop');
+
+    const taken = await post(project, `/escalations/${id}/withdraw`, {
+      agent: '  errors-loop  ',
+      reason: 'my mistake',
+    });
+    assert.equal(taken.statusCode, 200, taken.body);
+    assert.equal(taken.json().escalation.withdrawn_by, 'errors-loop');
+  });
+
   it('cannot then be acknowledged as though somebody had answered', async () => {
     const project = await createProject(harness);
     const id = await raise(project, 'errors-loop', 'Bridge?');

@@ -2928,7 +2928,10 @@ export async function withdrawEscalation(
   // Guarded on `open` inside the update rather than checked first, so a person
   // answering at the same moment wins and the withdrawal misses, rather than
   // both landing and the answer being lost.
-  const who = input.agent.slice(0, 48);
+  // The same normalisation the question was stored with, or the two never
+  // meet: one door caps the handle and the other passes whatever a model
+  // produced, and a mismatch here reads as "not your question".
+  const who = input.agent.trim().slice(0, 48);
   const updated = await store.escalations.findOneAndUpdate(
     // The handle is in the predicate, not merely recorded afterwards. A fleet
     // shares one key, so without this any loop could close a question another
@@ -3026,7 +3029,11 @@ export async function createEscalation(
   const doc: EscalationDoc = {
     _id: newId('e'),
     projectId: project._id,
-    agent: input.agent,
+    // Trimmed and cut here rather than at one door: the HTTP schema caps this
+    // at 48 and MCP arguments are whatever a model produced, so a question
+    // asked over MCP under a longer handle used to be stored in a shape no
+    // withdrawal could ever match.
+    agent: input.agent.trim().slice(0, 48),
     question: input.question.slice(0, 2000),
     context: (input.context ?? '').slice(0, 8000),
     priority: input.priority ?? 'normal',

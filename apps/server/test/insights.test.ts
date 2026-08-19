@@ -167,6 +167,41 @@ describe('what the service knows about its own use', () => {
     }
   });
 
+  it('leaves a question the agent took back out of how long people take to answer', async () => {
+    // `answeredAt` is stamped on a withdrawal, because every reader of closed
+    // questions orders by it. This report is the one place that reads it as "a
+    // person replied", so a loop taking its own question back four seconds
+    // after asking would drag the median toward zero and push real answers out
+    // of the sample.
+    await flushEvents();
+    const before = (await insights(harness.store)).behaviour.answersSampled;
+
+    const project = await createProject(harness, 'withdrawn out of the median');
+    await harness.store.projects.updateOne(
+      { _id: project.id },
+      { $set: { claimedBy: 'owner@example.com', claimedAt: new Date(), expiresAt: null } },
+    );
+    const raised = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/escalations`,
+      headers: { ...authed(project), 'content-type': 'application/json' },
+      payload: { agent: 'errors-loop', question: 'asked and taken straight back' },
+    });
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/escalations/${raised.json().escalation.id}/withdraw`,
+      headers: { ...authed(project), 'content-type': 'application/json' },
+      payload: { agent: 'errors-loop', reason: 'my mistake' },
+    });
+
+    await flushEvents();
+    assert.equal(
+      (await insights(harness.store)).behaviour.answersSampled,
+      before,
+      'nobody answered anything, so the sample did not grow',
+    );
+  });
+
   it('counts an indexer reading the protocol beside the agents, never among them', async () => {
     // Records are batched now, so a reading taken before they are written
     // measures the buffer rather than the board.

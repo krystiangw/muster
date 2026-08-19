@@ -774,7 +774,13 @@ export async function insights(store: Store): Promise<Insights> {
     // human take", and an agent answers in seconds.
     store.escalations
       .aggregate<{ createdAt: Date; answeredAt: Date }>([
-        { $match: { answeredAt: { $ne: null } } },
+        // `answeredAt` is stamped on a withdrawal too, because every reader of
+        // closed questions orders by it and one left null disappears behind the
+        // answers. This report is the one place that reads it as "a person
+        // replied", so it is the one place that has to say otherwise: an agent
+        // taking its own question back in four seconds would otherwise pull the
+        // median response time down and push real answers out of the sample.
+        { $match: { answeredAt: { $ne: null }, withdrawnAt: null } },
         ...answeredByPerson,
         { $match: { $expr: { $gte: ['$answeredAt', '$project.claimedAt'] } } },
         // Next to the limit, not before the join. Separated by a `$lookup` the

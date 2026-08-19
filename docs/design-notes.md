@@ -1559,3 +1559,52 @@ honest limit of measuring it this way. The largest board in production holds 187
 items against a threshold of fifty thousand. The search question stays deferred,
 and now says so out loud, with the window named: `tools/insights.mts` prints that
 row at zero as well, because a row that is simply absent reads as unreported.
+
+## Taking a question back, 2026-08-20
+
+An agent that files a question it should not have asked can now close it:
+`POST /escalations/{id}/withdraw`, on an ordinary worker key. The incident was
+ours. A monitor under test was pointed at production, filed three urgent
+questions on the operator's board, and mailed one of them at eleven at night.
+There was no way to take any of them back, so cleaning up meant answering as the
+operator through the admin door the product tells worker keys they should not
+have.
+
+**The mirror of acknowledging, refused on the opposite condition.** `ack` is
+refused while nobody has answered, because acting on an unanswered question is a
+guess. `withdraw` is refused the moment anybody has, because taking back an
+answered question throws away attention a person already spent, and then
+acknowledging is the verb. Between them the two cover the whole life of a
+question and neither can do the other's job.
+
+**Not a fifth status, for the reason acknowledging is not one either.** The four
+statuses carry the human's decision; this is a fact about the asker. It lands on
+`wont_do`, still true for anything reading it later, with `withdrawn_by` and
+`withdrawn_reason` beside it, and both pages a person reads say who took it back
+rather than the bare word. A fifth enum value would have touched nine published
+surfaces, the union type in the client and two OpenAPI schemas, and would unwind
+badly: rows keep a value that validating clients do not know, in both
+directions. This unwinds to three unread fields, which is the same shape as the
+`blockedBy` decision above.
+
+**Why an agent gets the verb at all.** Withdrawing before the notifier's sweep
+reaches the question stops the mail entirely, which is the only moment anybody
+can stop it. Pinned in `notify.test.ts`: three questions, one mailed, the second
+withdrawn, and the sweep goes straight past it to the third.
+
+**Two things the first version got wrong**, both caught in review and both
+exactly what the verb was supposed to prevent. The predicate checked project, id
+and status but not the handle, and a fleet shares one key, so any loop could
+close a question another loop was waiting on while both doors promised it could
+not. And a withdrawal left `answeredAt` null, while the inbox and both operator
+histories order closed questions by that field and take the first page, so on a
+board with fifty answers a withdrawal would have sorted last and vanished from
+the pages that exist to show it. It is stamped now, meaning "when it stopped
+being open", with `withdrawnAt` beside it saying who stopped it and that no
+answer exists.
+
+**Left alone on purpose:** the card. `skill.md` tells an agent to set `blocked`
+when it asks, and withdrawing does not unset it. Nothing here changes a status
+somebody else set, and the document says plainly that reopening is the agent's
+own job, because a card waiting on an answer that is no longer coming is the
+same false alarm one table over.
