@@ -614,22 +614,33 @@ export async function buildApp(
           // own schema check still refuses in the house shape, so a 400 there
           // is honestly one or the other and is written that way.
           if (path.startsWith('/oauth/')) {
-            for (const code of ['429', '503']) responses[code] ??= refusal(code);
-            if (path === '/oauth/register') responses['400'] ??= refusal('400');
-            if (path === '/oauth/token') {
-              responses['400'] ??= {
-                description: 'An unsupported grant, in the OAuth shape, or a malformed body, in this service\'s.',
-                content: {
-                  'application/json': {
-                    schema: {
-                      oneOf: [
-                        { $ref: '#/components/schemas/OauthError' },
-                        { $ref: '#/components/schemas/Refusal' },
-                      ],
-                    },
+            // Which shape a refusal wears here depends on who writes it, not on
+            // which endpoint it came from. What these handlers write themselves
+            // is the OAuth shape, one word and a description. What refuses them
+            // before they run is this service: the schema check, the media type
+            // parser and the readiness gate all speak the house shape. So a 400
+            // is honestly either, a 429 is always theirs, and 415 and 503 are
+            // always ours.
+            responses['400'] ??= {
+              description:
+                "Refused by this endpoint's own rules, in the OAuth shape, or by the schema check in front of them, in this service's.",
+              content: {
+                'application/json': {
+                  schema: {
+                    oneOf: [
+                      { $ref: '#/components/schemas/OauthError' },
+                      { $ref: '#/components/schemas/Refusal' },
+                    ],
                   },
                 },
-              };
+              },
+            };
+            responses['429'] ??= {
+              description: 'Over the rate limit, written by the endpoint itself and so in the OAuth shape.',
+              content: { 'application/json': { schema: { $ref: '#/components/schemas/OauthError' } } },
+            };
+            responses['503'] ??= refusal('503');
+            if (path === '/oauth/token') {
               responses['401'] ??= {
                 description: 'The client id and secret do not name a client here.',
                 content: { 'application/json': { schema: { $ref: '#/components/schemas/OauthError' } } },

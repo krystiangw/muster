@@ -1458,6 +1458,9 @@ describe('the map every refusal points at', () => {
       },
       { method: 'POST', url: '/oauth/token', path: '/oauth/token', payload: {}, headers: { 'content-type': 'application/json' }, code: 400 },
       { method: 'POST', url: '/oauth/register', path: '/oauth/register', payload: { redirect_uris: 'not-an-array' }, headers: { 'content-type': 'application/json' }, code: 400 },
+      // The same code from the same endpoint, in the other shape: this one is
+      // written by the handler rather than by the schema check in front of it.
+      { method: 'POST', url: '/oauth/register', path: '/oauth/register', payload: { grant_types: ['authorization_code'] }, headers: { 'content-type': 'application/json' }, code: 400 },
       // A body announced as something this service does not read, refused
       // before any of the endpoint's own rules run. Every operation that takes
       // a body can answer this, which is why the map derives it from having
@@ -1523,14 +1526,26 @@ describe('the map every refusal points at', () => {
       'share still documents the answer it gives an address that already owns the board',
     );
 
-    const oauth = paths['/oauth/token']?.post?.responses?.['401'] as {
-      content?: Record<string, { schema?: { $ref?: string } }>;
-    };
-    assert.equal(
-      oauth?.content?.['application/json']?.schema?.$ref,
-      '#/components/schemas/OauthError',
-      'and the one endpoint that answers in somebody else\'s shape says which shape',
-    );
+    // Which shape a refusal wears at the OAuth endpoints depends on who writes
+    // it. The handlers write the OAuth shape; the schema check, the media type
+    // parser and the readiness gate in front of them write this service's. A
+    // 400 is honestly either, a 429 is always theirs, 415 and 503 always ours.
+    const schemaOf = (path: string, code: string): { $ref?: string; oneOf?: { $ref: string }[] } =>
+      (paths[path]?.post?.responses?.[code] as { content?: Record<string, { schema?: never }> })?.content?.[
+        'application/json'
+      ]?.schema ?? {};
+
+    for (const path of ['/oauth/register', '/oauth/token']) {
+      assert.deepEqual(
+        schemaOf(path, '400').oneOf?.map((one) => one.$ref).sort(),
+        ['#/components/schemas/OauthError', '#/components/schemas/Refusal'],
+        `${path} says a 400 can be either shape`,
+      );
+      assert.equal(schemaOf(path, '429').$ref, '#/components/schemas/OauthError', `${path} 429`);
+      assert.equal(schemaOf(path, '503').$ref, '#/components/schemas/Refusal', `${path} 503`);
+      assert.equal(schemaOf(path, '415').$ref, '#/components/schemas/Refusal', `${path} 415`);
+    }
+    assert.equal(schemaOf('/oauth/token', '401').$ref, '#/components/schemas/OauthError');
 
     // Documenting a response must not start serializing it. A refusal carries
     // fields naming what was wrong, and those are exactly what a serializer
