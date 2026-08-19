@@ -1958,6 +1958,19 @@ describe('a field this service does not have', () => {
     assert.match(key.json().message, /"label" is not a field this call has/);
     assert.match(key.json().message, /It takes name, role/);
 
+    // And the object that refused, not the one at the top: several of these
+    // schemas have nested closed lists, and naming the body's fields when
+    // `expect` is what refused is true and useless.
+    const nested = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'guarded', title: 't', expect: { titel: 'typo' } },
+    });
+    assert.equal(nested.statusCode, 400);
+    assert.match(nested.json().message, /"titel" is not a field "expect" has/);
+    assert.match(nested.json().message, /It takes title, body/);
+
     const item = await harness.server.inject({
       method: 'POST',
       url: `${project.api}/items`,

@@ -76,9 +76,22 @@ function schemaSays(request: FastifyRequest, error: FastifyError): string {
   const extra = (first.params as { additionalProperty?: string } | undefined)?.additionalProperty;
   if (extra) {
     const where = (error as { validationContext?: string }).validationContext ?? 'body';
-    const schema = (request.routeOptions?.schema as Record<string, any> | undefined)?.[where];
-    const known = Object.keys((schema?.properties ?? {}) as Record<string, unknown>);
-    return `: "${extra}" is not a field this call has${
+    const root = (request.routeOptions?.schema as Record<string, any> | undefined)?.[where];
+    // Down to the object that actually refused, because several of these
+    // schemas have nested ones with their own closed lists: an unknown key
+    // inside `expect` was told the body takes slug, title, body and the rest,
+    // which is true of the body and useless about `expect`.
+    const at = String(first.instancePath ?? '')
+      .split('/')
+      .filter(Boolean);
+    let node: Record<string, any> | undefined = root;
+    for (const step of at) {
+      if (!node) break;
+      node = /^\d+$/.test(step) ? node.items : node.properties?.[step];
+    }
+    const known = Object.keys((node?.properties ?? {}) as Record<string, unknown>);
+    const whose = at.length > 0 ? `"${at.join('.')}"` : 'this call';
+    return `: "${extra}" is not a field ${whose} has${
       known.length > 0 ? `. It takes ${known.join(', ')}` : ''
     }`;
   }
