@@ -750,3 +750,102 @@ describe('counting the people, not the agents', () => {
     }
   });
 });
+
+/**
+ * Telling our own checks apart from the people the report is about.
+ *
+ * On 2026-08-19 the funnel said seventeen boards had signed up. Thirteen were
+ * ours: the walkthrough runs a stranger's whole journey against production
+ * every morning, the smoke tests register clients, and every one of them
+ * arrives exactly the way a newcomer does, which is what makes them worth
+ * running and what made the report useless. The number was about to be read as
+ * adoption in a decision about announcing this publicly.
+ *
+ * Deleting those boards was the obvious repair and the wrong one: `discover`
+ * and `view` carry no project, so a purge cleans the denominator and leaves the
+ * numerator, and reads per signup would have gone from 38 to 162, wrong in the
+ * direction the decision was being made in. The events are also true. What was
+ * wrong was the population in a report, not a record in a database.
+ *
+ * So the marking happens where the request is, and these hold the whole chain:
+ * the header, the context that carries it down to a write several layers below
+ * the route, and the two columns it produces.
+ */
+describe('our own traffic, kept out of the count', () => {
+  let harness: Harness;
+  const AS_US = { 'user-agent': 'muster-selftest walkthrough/1.0' };
+
+  before(async () => {
+    harness = await startHarness();
+  });
+
+  after(async () => {
+    await harness.stop();
+  });
+
+  it('counts a board we signed up ourselves in its own column', async () => {
+    // A stranger, and then us, doing the same three things: read the protocol,
+    // sign up, register an agent.
+    await harness.server.inject({ method: 'GET', url: '/skill.md' });
+    const theirs = await harness.server.inject({ method: 'POST', url: '/p', payload: { name: 'somebody' } });
+    const them = theirs.json();
+    await harness.server.inject({
+      method: 'POST',
+      url: `/v1/${them.project}/agents`,
+      headers: { authorization: `Bearer ${them.token}`, 'content-type': 'application/json' },
+      payload: { handle: 'theirs' },
+    });
+
+    await harness.server.inject({ method: 'GET', url: '/skill.md', headers: AS_US });
+    const ours = await harness.server.inject({
+      method: 'POST',
+      url: '/p',
+      payload: { name: 'our own check' },
+      headers: AS_US,
+    });
+    const us = ours.json();
+    await harness.server.inject({
+      method: 'POST',
+      url: `/v1/${us.project}/agents`,
+      headers: { ...AS_US, authorization: `Bearer ${us.token}`, 'content-type': 'application/json' },
+      payload: { handle: 'ours' },
+    });
+
+    await flushEvents();
+    const report = await insights(harness.store);
+
+    assert.equal(report.funnel.signups, 1, 'one stranger signed up');
+    assert.equal(report.funnel.withAnAgent, 1);
+    assert.equal(report.ourOwn.signups, 1, 'and one of the boards is ours');
+    assert.equal(report.ourOwn.withAnAgent, 1);
+
+    // The half a purge could never have cleaned: a read of the protocol has no
+    // project to work back from, so it has to be marked as it happens.
+    assert.equal(report.funnel.discovered, 1, 'one stranger read the protocol');
+    assert.equal(report.ourOwn.discovered, 1, 'and we read it once ourselves');
+  });
+
+  it('marks a write that happens several layers below the request', async () => {
+    // signup is recorded inside createProject, which never sees the request.
+    // If the context did not reach that far this would be counted as a
+    // stranger, silently, which is exactly how the report went wrong.
+    const stored = await harness.store.events.findOne({ kind: 'signup', ours: true });
+    assert.ok(stored, 'the signup carries the mark');
+    assert.equal(stored?.projectId !== null, true);
+  });
+
+  it('reads an unmarked event as somebody else, not as an unknown', async () => {
+    // Everything written before 2026-08-19 has no field at all, and a report
+    // that dropped those rows would quietly lose ninety days of history.
+    const before = await insights(harness.store);
+    // Every event, not only the signup: a board counts as ours when any event
+    // about it says so, so clearing one row leaves it ours and would have been
+    // this test lying rather than the code being right.
+    await harness.store.events.updateMany({ ours: true }, { $unset: { ours: '' } });
+    const after = await insights(harness.store);
+    assert.equal(after.ourOwn.signups, 0);
+    assert.equal(after.ourOwn.discovered, 0);
+    assert.equal(after.funnel.signups, before.funnel.signups + 1, 'it moved sides rather than vanishing');
+    assert.equal(after.funnel.discovered, before.funnel.discovered + 1);
+  });
+});

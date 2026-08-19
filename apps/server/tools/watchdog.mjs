@@ -75,7 +75,13 @@ async function probe(url, options = {}) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
+    const response = await fetch(url, {
+      ...options,
+      // Named on every request, so a quarter-hourly check does not read as a
+      // quarter-hourly stranger in a report about strangers.
+      headers: { 'user-agent': 'muster-selftest watchdog/1.0', ...(options.headers ?? {}) },
+      signal: controller.signal,
+    });
     const body = options.json
       ? await response.json().catch(() => null)
       : options.text
@@ -226,7 +232,11 @@ async function fileOnTheBoard(question, context) {
   try {
     const response = await fetch(`${base}/v1/${projectId}/escalations`, {
       method: 'POST',
-      headers: { authorization: `Bearer ${entry.token}`, 'content-type': 'application/json' },
+      headers: {
+        authorization: `Bearer ${entry.token}`,
+        'content-type': 'application/json',
+        'user-agent': 'muster-selftest watchdog/1.0',
+      },
       body: JSON.stringify({ agent: 'watchdog', question, context, priority: 'urgent' }),
     });
     return response.ok ? 'filed' : `refused ${response.status}`;

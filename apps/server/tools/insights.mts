@@ -110,21 +110,32 @@ const row = (label: string, value: string | number) =>
 console.log(`\nMuster, ${new Date().toISOString().slice(0, 16).replace('T', ' ')}\n`);
 
 const funnel = report.funnel;
+const mine = report.ourOwn;
+/** Two columns: strangers, then us, so neither can be mistaken for the other. */
+const both = (label: string, theirs: number, ours: number): void =>
+  console.log(`  ${label.padEnd(28)} ${String(theirs).padStart(7)} ${String(ours).padStart(9)}`);
 console.log('The funnel, since events were first recorded');
 // Said out loud, because the section below counts documents rather than
 // events, and the two disagree by construction: a project claimed before this
 // log existed is claimed on the board and absent from the funnel. Reading that
 // as a contradiction is how somebody ends up "fixing" a number that is right.
 console.log('  (events, not documents: anything that happened before this log started is missing)');
-row('reads of the protocol', funnel.discovered);
+// Our own checks in their own column, never folded into the first one. The
+// walkthrough signs up every week and the smoke tests register clients, and
+// on the day this column was added thirteen of the seventeen boards in
+// production were ours: a report about adoption that counts them is a report
+// about us. Subtracting them silently would have been worse than leaving them
+// in, because then nobody can tell whether the tools ran at all.
+console.log(`  ${''.padEnd(28)} ${'strangers'.padStart(7)} ${'ours'.padStart(9)}`);
+both('reads of the protocol', funnel.discovered, mine.discovered);
 // Beside it, never inside it. One of these says whether the files are being
 // indexed, the other says whether agents are reading them and walking away, and
 // added together they answer the first question twice.
 row('  and by crawlers, beside', funnel.discoveredByCrawlers);
-row('created a project', funnel.signups);
-row('  registered an agent', funnel.withAnAgent);
-row('  wrote something', funnel.withWork);
-row('  claimed by a person', funnel.claimed);
+both('created a project', funnel.signups, mine.signups);
+both('  registered an agent', funnel.withAnAgent, mine.withAnAgent);
+both('  wrote something', funnel.withWork, mine.withWork);
+both('  claimed by a person', funnel.claimed, mine.claimed);
 console.log(
   `  ${'reads per signup'.padEnd(28)} ${funnel.discovered === 0 ? '  n/a' : (funnel.discovered / Math.max(funnel.signups, 1)).toFixed(1).padStart(5)}`,
 );
@@ -133,7 +144,7 @@ console.log(`  ${'signup -> claimed'.padEnd(28)} ${rate(funnel.claimed, funnel.s
 // The boards the stages above cannot count, said out loud rather than left to
 // be rediscovered as a contradiction. Events are kept ninety days, so a board
 // that signed up before that is still writing here with nothing above it.
-row('boards signed up before this', funnel.outsideWindow);
+both('boards signed up before this', funnel.outsideWindow, mine.outsideWindow);
 // Beside the funnel, not in it: asking is not a stage every claim passes
 // through, and a stage that can exceed the one above it stops being believed.
 // It exists because "nobody claimed one" has two explanations, and this tells

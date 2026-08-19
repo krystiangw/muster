@@ -24,10 +24,20 @@ const at = argv.indexOf('--base');
 const base = (at === -1 ? 'https://musterboard.dev' : argv[at + 1]).replace(/\/+$/, '');
 const STATE = join(homedir(), '.muster', 'smoke.json');
 
+/**
+ * How this names itself to the service, on every request.
+ *
+ * A smoke test registers a client and writes to a board, which is the same
+ * shape as a stranger arriving, and the funnel counted it as one until the
+ * service learned to tell them apart. The string is read and thrown away.
+ */
+const AS_US = 'muster-selftest smoke-mcp/1.0';
+
 const rpc = async (method, params, token) => {
   const response = await fetch(`${base}/mcp`, {
     method: 'POST',
     headers: {
+      'user-agent': AS_US,
       'content-type': 'application/json',
       accept: 'application/json, text/event-stream',
       ...(token ? { authorization: `Bearer ${token}` } : {}),
@@ -80,7 +90,9 @@ let project = saved?.project;
 let token = saved?.token;
 if (project) {
   // A board this tool kept can have expired, and the token dies with it.
-  const alive = await fetch(`${base}/v1/${project}`, { headers: { authorization: `Bearer ${token}` } });
+  const alive = await fetch(`${base}/v1/${project}`, {
+    headers: { 'user-agent': AS_US, authorization: `Bearer ${token}` },
+  });
   if (alive.status === 404 || alive.status === 401) {
     console.log(`the saved board is gone (${alive.status}), signing up again`);
     project = undefined;
@@ -146,7 +158,11 @@ await step('answer over HTTP', async () => {
   if (!asked) return 'nothing was asked';
   const response = await fetch(`${base}/v1/${project}/escalations/${asked}`, {
     method: 'PATCH',
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    headers: {
+      'user-agent': AS_US,
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    },
     body: JSON.stringify({ status: 'resolved', answer: 'closed by the MCP smoke test' }),
   });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -155,7 +171,11 @@ await step('answer over HTTP', async () => {
   // `inbox` step reports a number that says nothing about anything.
   const acted = await fetch(`${base}/v1/${project}/escalations/${asked}/ack`, {
     method: 'POST',
-    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+    headers: {
+      'user-agent': AS_US,
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+    },
     body: JSON.stringify({ agent: 'mcp-smoke', note: 'read by the smoke test' }),
   });
   if (!acted.ok) throw new Error(`ack: HTTP ${acted.status}`);

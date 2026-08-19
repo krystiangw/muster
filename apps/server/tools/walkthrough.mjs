@@ -81,8 +81,20 @@ const saveState = () => {
   writeFileSync(STATE, `${JSON.stringify(state, null, 2)}\n`, { mode: 0o600 });
 };
 
+/**
+ * How this identifies itself to the service, on every request without exception.
+ *
+ * The walkthrough is a stranger's journey run by us, which is exactly what
+ * makes it worth running and exactly what makes it poison in a report about
+ * strangers: on 2026-08-19 thirteen of the seventeen boards in production were
+ * ours, and the funnel counted all seventeen. The service reads this string,
+ * marks the event, and throws the string away.
+ */
+const AS_US = { 'user-agent': 'muster-selftest walkthrough/1.0' };
+const ours = (options = {}) => ({ ...options, headers: { ...AS_US, ...(options.headers ?? {}) } });
+
 const json = async (path, options = {}) => {
-  const response = await fetch(`${BASE}${path}`, options);
+  const response = await fetch(`${BASE}${path}`, ours(options));
   const text = await response.text();
   let body = {};
   try {
@@ -93,7 +105,7 @@ const json = async (path, options = {}) => {
   return { status: response.status, body, headers: response.headers };
 };
 const html = async (path, options = {}) => {
-  const response = await fetch(`${BASE}${path}`, { redirect: 'manual', ...options });
+  const response = await fetch(`${BASE}${path}`, { redirect: 'manual', ...ours(options) });
   return { status: response.status, body: await response.text(), headers: response.headers };
 };
 
@@ -145,6 +157,7 @@ async function mcp(token, method, params) {
   const response = await fetch(`${BASE}/mcp`, {
     method: 'POST',
     headers: {
+      ...AS_US,
       authorization: `Bearer ${token}`,
       'content-type': 'application/json',
       accept: 'application/json, text/event-stream',
@@ -386,7 +399,7 @@ const run = async () => {
 
     // The endpoint an outside monitor watches. It used to answer {ok:true} come
   // what may, so it is worth asking whether it now says what the store says.
-  const health = await fetch(`${BASE}/health`).then((r) => r.json().then((body) => ({ status: r.status, body })));
+  const health = await fetch(`${BASE}/health`, ours()).then((r) => r.json().then((body) => ({ status: r.status, body })));
   check(
     'the health check reports the database, not the process',
     health.status === 200 && health.body?.store === 'ok',

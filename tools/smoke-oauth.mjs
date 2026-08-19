@@ -35,8 +35,14 @@ const step = async (name, run) => {
   }
 };
 
+/** Named on every request, so a smoke test is not counted as a newcomer. */
+const AS_US = 'muster-selftest smoke-oauth/1.0';
+
 const json = async (url, options = {}) => {
-  const response = await fetch(url.startsWith('http') ? url : `${base}${url}`, options);
+  const response = await fetch(url.startsWith('http') ? url : `${base}${url}`, {
+    ...options,
+    headers: { 'user-agent': AS_US, ...(options.headers ?? {}) },
+  });
   const body = await response.json().catch(() => null);
   return { status: response.status, body };
 };

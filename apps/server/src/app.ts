@@ -10,7 +10,7 @@ import { storeUnreachable, type Store } from './db.js';
 import { createMailer, type Mailer } from './email.js';
 import { escapeHtml, setContactEmail, setSiteVerification } from './html.js';
 import { createNotifier, type Notifier } from './notify.js';
-import { recordView } from './events.js';
+import { asReader, recordView } from './events.js';
 import { RateLimiter } from './rateLimit.js';
 import { registerAgentFiles } from './routes/agentfiles.js';
 import { registerApi } from './routes/api.js';
@@ -457,6 +457,18 @@ export async function buildApp(
    * posted yet, while the POST behind it creates a project and is exactly the
    * write this is here to hold back.
    */
+  /**
+   * The first thing every request does, so everything after it knows whether
+   * this is a stranger or one of our own checks.
+   *
+   * Callback style rather than async on purpose: the context has to be entered
+   * around the continuation, and returning a promise would leave it behind at
+   * the first await.
+   */
+  server.addHook('onRequest', (request, _reply, done) => {
+    asReader(request.headers['user-agent'], done);
+  });
+
   const NEEDS_THE_STORE = ['/p', '/v1', '/mcp', '/r', '/operator', '/oauth', '/signup'];
   server.addHook('onRequest', async (request, reply) => {
     if (store.ready.ok) return;

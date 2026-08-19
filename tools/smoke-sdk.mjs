@@ -64,12 +64,24 @@ const step = async (name, run) => {
 const STATE = join(homedir(), '.muster', 'smoke.json');
 const saved = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8'))[base] : null;
 
+/**
+ * The name this smoke test goes by, added around the SDK rather than inside it.
+ *
+ * Deliberately not a header the published client sends: somebody else's agent
+ * using this SDK is a stranger, and marking every SDK user as one of our own
+ * checks would break the very count this is here to keep honest. Ours is ours
+ * because this file says so.
+ */
+const asUs = (input, init = {}) =>
+  fetch(input, { ...init, headers: { ...(init.headers ?? {}), 'user-agent': 'muster-selftest smoke-sdk/1.0' } });
+
 const signUp = async () => {
   const { client, created } = await Muster.start({
     name: 'sdk smoke test',
     description: 'Created by tools/smoke-sdk.mjs. Unclaimed, so it expires on its own.',
     actor: 'sdk-smoke',
     baseUrl: base,
+    fetch: asUs,
   });
   mkdirSync(join(homedir(), '.muster'), { recursive: true });
   const all = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8')) : {};
@@ -82,7 +94,13 @@ const signUp = async () => {
 };
 
 const reuse = async () => {
-  const client = new Muster({ project: saved.project, token: saved.token, actor: 'sdk-smoke', baseUrl: base });
+  const client = new Muster({
+    project: saved.project,
+    token: saved.token,
+    actor: 'sdk-smoke',
+    baseUrl: base,
+    fetch: asUs,
+  });
   // The board expires on its own once nobody claims it, and the token dies with
   // it, so a saved one is a guess until it answers.
   await client.summary();

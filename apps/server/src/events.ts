@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Store } from './db.js';
 import { newId } from './ids.js';
 
@@ -120,6 +121,49 @@ const INDEXER = /bot\b|bot\/|crawler|spider|slurp|feedfetcher|scrapy/i;
  */
 const FETCHER = /curl\/|wget/i;
 
+/**
+ * Us, checking on ourselves.
+ *
+ * The walkthrough runs the whole agent journey against production every
+ * morning, the smoke tests register clients, the watchdog reads a board every
+ * quarter of an hour, and every one of those arrives at this service exactly
+ * the way a stranger would. On 2026-08-19 the funnel said seventeen projects
+ * had signed up and thirteen of them were ours, which is the one number a
+ * report about adoption must never get wrong.
+ *
+ * Marked here rather than worked out later, because the two kinds that matter
+ * most, `discover` and `view`, carry no project to work back from, and a
+ * project that expires takes any list of ids with it while its events stay for
+ * ninety days. The string is read and thrown away, like the crawler one.
+ *
+ * Not a security control: a stranger who sends this user agent is counted as
+ * us. That costs a row in a report only the operator reads, and buys the
+ * report the ability to tell our own traffic from the traffic it is about.
+ */
+const SELFTEST = /muster-selftest/i;
+
+/** Whether the caller said it was one of our own checks. */
+export function isOurs(userAgent: string | undefined): boolean {
+  return userAgent !== undefined && SELFTEST.test(userAgent);
+}
+
+/**
+ * Who is asking, for the length of one request.
+ *
+ * Twenty six places record an event and most of them are several calls below
+ * the request that caused them, so the honest choice was between threading a
+ * boolean through every layer or holding it beside the request. Threading it
+ * would also mean that the next event somebody adds is unmarked until they
+ * remember, and the failure is invisible: a report that quietly counts us as
+ * strangers again.
+ */
+const reader = new AsyncLocalStorage<{ ours: boolean }>();
+
+/** Runs the rest of a request knowing whether it came from one of our checks. */
+export function asReader<T>(userAgent: string | undefined, run: () => T): T {
+  return reader.run({ ours: isOurs(userAgent) }, run);
+}
+
 /** Not a person looking at a page: an indexer, or a tool somebody is driving. */
 export function isCrawler(userAgent: string | undefined): boolean {
   return userAgent !== undefined && (INDEXER.test(userAgent) || FETCHER.test(userAgent));
@@ -157,6 +201,13 @@ export interface EventDoc {
    * link came from our own pages, which is navigation rather than arrival.
    */
   from?: string | null;
+  /**
+   * Whether this was one of our own checks rather than somebody deciding
+   * whether to use us. Absent on everything written before 2026-08-19 and on
+   * anything with no request behind it, so absent reads as "not known to be
+   * ours", the same way `crawler` does.
+   */
+  ours?: boolean;
   expiresAt: Date;
 }
 
@@ -272,6 +323,7 @@ export function record(
     projectId?: string;
     crawler?: boolean;
     from?: string | null;
+    ours?: boolean;
   } = {
     door: 'http',
   },
@@ -287,6 +339,9 @@ export function record(
     projectId: options.projectId ?? null,
     ...(options.crawler === undefined ? {} : { crawler: options.crawler }),
     ...(options.from ? { from: options.from } : {}),
+    // Written only when true, so the field means "known to be ours" and its
+    // absence is not a claim about a request nobody was watching.
+    ...((options.ours ?? reader.getStore()?.ours) ? { ours: true } : {}),
     expiresAt: new Date(now.getTime() + KEEP_DAYS * 86_400_000),
   });
   pending.set(store, held);
@@ -417,6 +472,23 @@ export interface Insights {
     outsideWindow: number;
   };
   /**
+   * The same stages, for our own checks rather than for strangers.
+   *
+   * The walkthrough signs up every week, the smoke tests register clients, and
+   * on 2026-08-19 thirteen of the seventeen boards in production were ours.
+   * Kept beside the funnel rather than subtracted from it, because "nobody
+   * outside has signed up yet" and "four boards signed up" are different
+   * sentences and only the first one is true.
+   */
+  ourOwn: {
+    discovered: number;
+    signups: number;
+    withAnAgent: number;
+    withWork: number;
+    claimed: number;
+    outsideWindow: number;
+  };
+  /**
    * Projects where a person asked the agents to hand the board over.
    *
    * Beside the funnel, not inside it. Asking is not a stage every claim passes
@@ -527,6 +599,7 @@ export async function insights(store: Store): Promise<Insights> {
   });
   const cohortRows = store.events
     .aggregate<{
+      _id: boolean;
       signups: number;
       withAnAgent: number;
       withWork: number;
@@ -539,10 +612,21 @@ export async function insights(store: Store): Promise<Insights> {
           projectId: { $ne: null },
         },
       },
-      { $group: { _id: '$projectId', kinds: { $addToSet: '$kind' } } },
       {
         $group: {
-          _id: null,
+          _id: '$projectId',
+          kinds: { $addToSet: '$kind' },
+          // A board is ours if any event about it said so, which in practice
+          // means its signup did. Taken as a maximum rather than from the
+          // signup row alone so that a board we started and a stranger later
+          // wrote to still reads as ours, which is the honest direction to
+          // round in a report about strangers.
+          ours: { $max: { $cond: [{ $eq: ['$ours', true] }, true, false] } },
+        },
+      },
+      {
+        $group: {
+          _id: '$ours',
           signups: { $sum: { $cond: [stage('signup'), 1, 0] } },
           withAnAgent: { $sum: { $cond: [stage('signup', 'register'), 1, 0] } },
           withWork: { $sum: { $cond: [stage('signup', 'first_write'), 1, 0] } },
@@ -576,6 +660,7 @@ export async function insights(store: Store): Promise<Insights> {
   const [
     discovered,
     discoveredByCrawlers,
+    discoveredByUs,
     cohort,
     asked,
     doorRows,
@@ -596,8 +681,9 @@ export async function insights(store: Store): Promise<Insights> {
     // Absent reads as "not known to be one": everything written before this
     // split existed is counted where it has always been counted, and the two
     // numbers separate from the day the question was asked.
-    store.events.countDocuments({ kind: 'discover', crawler: { $ne: true } }),
-    store.events.countDocuments({ kind: 'discover', crawler: true }),
+    store.events.countDocuments({ kind: 'discover', crawler: { $ne: true }, ours: { $ne: true } }),
+    store.events.countDocuments({ kind: 'discover', crawler: true, ours: { $ne: true } }),
+    store.events.countDocuments({ kind: 'discover', ours: true }),
     // Every stage of the funnel, counted over one population of boards. Both
     // doors into ownership are in it: a board handed over by its agents and
     // accepted by a person is owned exactly as much as one claimed with a code,
@@ -686,13 +772,13 @@ export async function insights(store: Store): Promise<Insights> {
 
   // An empty database groups to no rows at all, which is a shape rather than a
   // number, so it is turned into zeroes once here instead of at every use.
-  const counted = cohort[0] ?? {
-    signups: 0,
-    withAnAgent: 0,
-    withWork: 0,
-    claimed: 0,
-    outsideWindow: 0,
-  };
+  const NONE = { signups: 0, withAnAgent: 0, withWork: 0, claimed: 0, outsideWindow: 0 };
+  // Two rows now, one per side, and either can be missing: a deployment nobody
+  // has checked has no row for us, and the one this was written for has no row
+  // for anybody else.
+  const side = (ours: boolean) => cohort.find((row) => row._id === ours) ?? NONE;
+  const counted = side(false);
+  const mine = side(true);
 
   const answerHours = answered
     .map((doc) => (doc.answeredAt.getTime() - doc.createdAt.getTime()) / 3_600_000)
@@ -708,6 +794,14 @@ export async function insights(store: Store): Promise<Insights> {
       withWork: counted.withWork,
       claimed: counted.claimed,
       outsideWindow: counted.outsideWindow,
+    },
+    ourOwn: {
+      discovered: discoveredByUs,
+      signups: mine.signups,
+      withAnAgent: mine.withAnAgent,
+      withWork: mine.withWork,
+      claimed: mine.claimed,
+      outsideWindow: mine.outsideWindow,
     },
     handoverRequests: asked[0]?.n ?? 0,
     doors: Object.fromEntries(doorRows.map((row) => [row._id, row.count])),
