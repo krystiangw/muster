@@ -230,6 +230,49 @@ describe('the operator view', () => {
     assert.match(board.body, /Bridge it, or wait\?/);
   });
 
+  it('names the card a question is about, the way the read view does', async () => {
+    // Two things on this page need a decision, and only one of them said what
+    // it was about. Blocked work linked its card; a question, which is the
+    // other half of the same page and the half that arrives by mail, gave the
+    // sentence and nothing else. The mail about that question names the card,
+    // and so does the read view, so this was the one surface where answering
+    // meant retyping a slug into a search box to see what the agent saw.
+    const project = await createProject(harness, 'arbitrage fleet');
+    await claimFor(project, 'me@example.com');
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'errors:venue-withdraw-stuck', title: 'Withdraws stuck', actor: 'errors-loop' },
+    });
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/escalations`,
+      headers: authed(project),
+      payload: {
+        agent: 'errors-loop',
+        question: 'Bridge it or wait for a direct withdraw?',
+        item_slug: 'errors:venue-withdraw-stuck',
+      },
+    });
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    const session = await signIn(harness, 'me@example.com');
+    const view = await harness.server.inject({
+      method: 'GET',
+      url: '/operator',
+      headers: { cookie: session.cookie },
+    });
+    const href = view.body.match(
+      new RegExp(`/r/${readToken}/board\\?card=[^"]*errors%3Avenue-withdraw-stuck[^"]*`),
+    )?.[0];
+    assert.ok(href, view.body.slice(view.body.indexOf('Bridge it'), 1200));
+
+    const board = await harness.server.inject({ method: 'GET', url: href });
+    assert.match(board.body, /class="peeked open"/, 'and the card is open when they arrive');
+    assert.match(board.body, /Withdraws stuck/);
+  });
+
   it('refuses to answer a question in somebody else’s project', async () => {
     const mine = await createProject(harness, 'mine');
     const theirs = await createProject(harness, 'theirs');

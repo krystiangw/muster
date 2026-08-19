@@ -493,6 +493,10 @@ and you can end that from the view itself.</p>
                     agent: 1,
                     priority: 1,
                     createdAt: 1,
+                    // The card it is about. Left out of this list, so the page
+                    // could not have named it however the card was rendered:
+                    // one slug is not what this projection is guarding against.
+                    itemSlug: 1,
                   },
                 },
               ],
@@ -577,12 +581,25 @@ and you can end that from the view itself.</p>
       agent: string,
       priority: string,
       at: Date,
+      itemSlug: string | null,
     ) => `
 <div class="card">
   <p class="label">${escapeHtml(names.get(projectId) ?? projectId)} &middot; ${escapeHtml(agent)}
      &middot; ${when(at)} ${priority === 'urgent' || priority === 'high' ? chip(priority, 'blocked') : ''}</p>
   <p style="font-size:17px"><b>${escapeHtml(text)}</b></p>
   ${context ? `<p style="color:var(--ink-2);white-space:pre-wrap">${escapeHtml(context)}</p>` : ''}
+  ${
+    // The card it is about, open, one click away. The read view learned this
+    // and this page did not, though this is the one an owner of several
+    // boards reads: a question without its card is a decision made from one
+    // sentence, with the timeline that explains it a search box away. The
+    // mail about the same question names the card too.
+    itemSlug && links.get(projectId)
+      ? `<p class="mono" style="font-size:12.5px"><a href="/r/${escapeHtml(
+          links.get(projectId)!,
+        )}/board?card=${encodeURIComponent(itemSlug)}">${escapeHtml(itemSlug)}</a></p>`
+      : ''
+  }
   <form method="post" action="/operator/escalations/${escapeHtml(id)}">
     ${csrfField(session)}
     <label>Your answer<textarea name="answer" placeholder="The decision, in your words."></textarea></label>
@@ -628,7 +645,16 @@ ${escapeHtml(session.email)}.</p>
 
 ${waiting
   .map((doc) =>
-    question(doc._id, doc.projectId, doc.question, doc.context, doc.agent, doc.priority, doc.createdAt),
+    question(
+      doc._id,
+      doc.projectId,
+      doc.question,
+      doc.context,
+      doc.agent,
+      doc.priority,
+      doc.createdAt,
+      doc.itemSlug ?? null,
+    ),
   )
   .join('')}
 
