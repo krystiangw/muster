@@ -187,6 +187,14 @@ function preview(
   edit: string,
   asked: string,
   close: string,
+  /**
+   * What this card is still waiting on, from the same live map the card face
+   * reads. Not `item.blockedBy`, which is the declaration and stays true after
+   * the cards it names are finished: this sheet said "Waiting on ops:bridge"
+   * about a card that was free to take, on the same page whose chip already
+   * knew better.
+   */
+  waiting: string[] = [],
 ): string {
   const claimed = item.claim !== null && new Date(item.claim.expiresAt) > now;
   // `open` beside `:target`, because the two mechanisms answer to different
@@ -228,11 +236,15 @@ function preview(
       // rather than as their statuses, because the person reading this wants
       // the names to look for on the board; whether each is finished is on the
       // card it belongs to.
-      (item.blockedBy ?? []).length > 0
-        ? `<p class="why">Waiting on ${(item.blockedBy ?? [])
+      waiting.length > 0
+        ? `<p class="why">Waiting on ${waiting
             .map((slug) => `<code>${escapeHtml(slug)}</code>`)
             .join(', ')}. An agent asking for work is not offered this one until they are done.</p>`
-        : ''
+        : (item.blockedBy ?? []).length > 0
+          ? `<p class="why">Was filed after ${(item.blockedBy ?? [])
+              .map((slug) => `<code>${escapeHtml(slug)}</code>`)
+              .join(', ')}, and every one of them is finished, so this card is free to take.</p>`
+          : ''
     }
     ${
       timeline.length > 0
@@ -694,6 +706,9 @@ ${sheets
             .join('\n')
         : '',
       closeUrl,
+      // The same live map the card face reads, so one page cannot say two
+      // things about one card.
+      options.waiting?.get(item.slug) ?? [],
     ),
   )
   .join('\n')}`;

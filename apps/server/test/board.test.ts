@@ -2635,6 +2635,62 @@ describe('a layout that would trap finished work', () => {
   });
 });
 
+describe('a card whose blockers are finished', () => {
+  /**
+   * `blocked_by` is a declaration and stays true after the cards it names are
+   * done, which is right: it records what this work came after. What is not
+   * right is reading it as a state. The card face already asked the live map
+   * and the sheet on the same page printed the declaration, so one page said
+   * "Waiting on ops:bridge" about a card that was free to take, beside a chip
+   * that knew better.
+   */
+  let harness: Harness;
+  before(async () => {
+    harness = await startHarness();
+  });
+  after(async () => {
+    await harness.stop();
+  });
+
+  it('stops saying it is waiting, on the sheet as well as the face', async () => {
+    const project = await createProject(harness, 'finished blockers');
+    const file = async (payload: Record<string, unknown>) =>
+      harness.server.inject({
+        method: 'POST',
+        url: `${project.api}/items`,
+        headers: authed(project),
+        payload,
+      });
+    await file({ slug: 'ops:first', title: 'the thing that has to happen first' });
+    await file({ slug: 'ops:after', title: 'the card that waits', blocked_by: ['ops:first'] });
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    const waiting = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?card=ops:after`,
+    });
+    assert.match(waiting.body, /Waiting on <code>ops:first<\/code>/, 'while it really is waiting');
+
+    await file({ slug: 'ops:first', status: 'done', note: 'finished' });
+
+    const free = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?card=ops:after`,
+    });
+    assert.ok(!free.body.includes('Waiting on <code>ops:first'), 'and not once it is not');
+    assert.match(free.body, /every one of them is finished, so this card is free to take/);
+
+    // The service agrees: it is offered and it can be claimed.
+    const offered = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/next`,
+      headers: authed(project),
+      payload: { agent: 'somebody' },
+    });
+    assert.equal(offered.json().item?.slug, 'ops:after', 'the same card the sheet now calls free');
+  });
+});
+
 describe('a card link that names nothing', () => {
   /**
    * The operator's page links straight to a card with `?card=<slug>`, and a
