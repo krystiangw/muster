@@ -346,6 +346,25 @@ describe('the typed SDK', () => {
       assert.equal(said.status, 200);
       return true;
     });
+
+    // Nothing at all counts as unreadable too. Every 2xx this service sends
+    // carries a body, down to `{"ok":true}` from a delete, so an empty one is
+    // never this service answering; treating it as an empty object let start()
+    // hand back a client with no project and no token and carry on.
+    await assert.rejects(
+      Muster.start({
+        name: 'answered with nothing',
+        baseUrl,
+        fetch: async () => new Response('', { status: 200 }),
+      }),
+      (error: unknown) => {
+        const said = error as { code?: string; name?: string; message?: string };
+        assert.equal(said.name, 'MusterError');
+        assert.equal(said.code, 'unreadable_answer');
+        assert.match(String(said.message), /empty/);
+        return true;
+      },
+    );
   });
 
   /**

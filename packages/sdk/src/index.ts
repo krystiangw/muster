@@ -273,14 +273,21 @@ export class MusterError extends Error {
  * so the status and the delay survive.
  */
 function readable<T>(response: { status: number; headers: Headers }, text: string): T {
-  if (!text) return {} as T;
   try {
+    // Nothing at all counts as unreadable, not as an empty object. Every 2xx
+    // this service sends carries a body, down to `{"ok":true}` from a delete,
+    // so an empty one is never this service answering. Handing back `{}` let
+    // `start()` build a client with no project and no token and carry on, which
+    // is the silent-invalid-result this whole function exists to refuse.
+    if (!text) throw new SyntaxError('empty');
     return JSON.parse(text) as T;
   } catch {
     throw new MusterError(
       response.status,
       'unreadable_answer',
-      'The answer said it worked and was not JSON. Something between you and the service rewrote it.',
+      text
+        ? 'The answer said it worked and was not JSON. Something between you and the service rewrote it.'
+        : 'The answer said it worked and was empty. Something between you and the service dropped it.',
       { body: text },
       retryAfterOf(response, {}),
     );
