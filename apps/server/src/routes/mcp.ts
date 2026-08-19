@@ -187,6 +187,64 @@ function texts(value: unknown, name: string): string[] | undefined {
   return value as string[];
 }
 
+/**
+ * `arguments` is an envelope, and a word that misses it is gone.
+ *
+ * `tools/call` with `{"name":"list_items","limit":1,"arguments":{...}}` answered
+ * 200 with fifty items while the caller believed it had asked for one: the
+ * argument landed one layer out, in the protocol's object rather than the
+ * tool's, and nothing said so. An argument the tool does not have at all fared
+ * no better, and there the two doors disagreed outright, because over HTTP the
+ * same word in a body is refused by name and told what the call does take.
+ *
+ * Narrower here than over HTTP, and deliberately: `params` belongs to the
+ * protocol, not to us, so `_meta` and whatever the spec adds next have to pass
+ * through untouched. Only a key that is a declared field of the tool being
+ * called is refused, because only then is there no doubt where it was meant to
+ * go.
+ */
+const PROTOCOL_KEYS = new Set(['name', 'arguments', '_meta']);
+
+function refuseArgumentsThisToolHasNot(
+  tool: ToolDefinition,
+  params: Record<string, unknown>,
+  args: Record<string, unknown>,
+): void {
+  const fields = Object.keys(
+    (tool.inputSchema as { properties?: Record<string, unknown> }).properties ?? {},
+  );
+  const takes = fields.length > 0 ? `It takes ${fields.join(', ')}.` : 'It takes none.';
+
+  const misplaced = Object.keys(params).filter(
+    (key) => !PROTOCOL_KEYS.has(key) && fields.includes(key),
+  );
+  if (misplaced.length > 0) {
+    const named = misplaced.map((key) => `"${key}"`).join(', ');
+    throw new ServiceError(
+      400,
+      'misplaced_argument',
+      `${named} ${misplaced.length === 1 ? 'is an argument' : 'are arguments'} of "${tool.name}", ` +
+        `and ${misplaced.length === 1 ? 'it arrived' : 'they arrived'} beside "arguments" instead of ` +
+        `inside it. Running the call anyway would answer 200 to a question nobody asked, with the ` +
+        `default in place of what you sent. Move ${misplaced.length === 1 ? 'it' : 'them'} into ` +
+        `params.arguments.`,
+      { misplaced, accepted: fields },
+    );
+  }
+
+  const unknown = Object.keys(args).filter((key) => !fields.includes(key));
+  if (unknown.length > 0) {
+    const named = unknown.map((key) => `"${key}"`).join(', ');
+    throw new ServiceError(
+      400,
+      'unknown_argument',
+      `${named} ${unknown.length === 1 ? 'is not a field' : 'are not fields'} "${tool.name}" has. ` +
+        `${takes} Dropping what you sent and answering anyway is the one thing this door will not do.`,
+      { unknown, accepted: fields },
+    );
+  }
+}
+
 const TOOLS: ToolDefinition[] = [
   {
     name: 'create_project',
@@ -825,6 +883,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
               error: { code: -32602, message: `Unknown tool "${name}".` },
             };
           }
+          refuseArgumentsThisToolHasNot(tool, (params ?? {}) as Record<string, unknown>, args);
           const output = await callTool(tool, args, request);
           return {
             jsonrpc: '2.0',

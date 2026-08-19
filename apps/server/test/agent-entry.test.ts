@@ -1159,8 +1159,17 @@ describe('the MCP surface', () => {
       return answer.json().result;
     };
 
-    for (const name of ['upsert_item', 'heartbeat', 'release', 'move']) {
-      const wrong = await call(name, { slug: 42, agent: 'a', column: 'doing' });
+    // Each tool gets the arguments it actually declares. One bag for all four
+    // was refused for naming a field two of them do not have, which is the
+    // guard below doing its job on the test rather than on the code.
+    const bags: Record<string, Record<string, unknown>> = {
+      upsert_item: { slug: 42 },
+      heartbeat: { slug: 42, agent: 'a' },
+      release: { slug: 42, agent: 'a' },
+      move: { slug: 42, column: 'doing' },
+    };
+    for (const [name, args] of Object.entries(bags)) {
+      const wrong = await call(name, args);
       assert.equal(wrong.isError, true, name);
       assert.match(
         String(wrong.content[0].text),
@@ -1173,6 +1182,68 @@ describe('the MCP surface', () => {
     const missing = await call('append_note', { message: 'something happened' });
     assert.equal(missing.isError, true);
     assert.match(String(missing.content[0].text), /"slug" is required here/);
+  });
+
+  it('says an argument arrived beside the envelope rather than inside it', async () => {
+    // `{"name":"list_items","limit":1,"arguments":{...}}` answered 200 with
+    // fifty items while the caller believed it had asked for one. The word was
+    // right and the layer was wrong, and nothing said so: the same silence the
+    // HTTP door was built to refuse, on the door that never got the guard.
+    const project = await createProject(harness, 'the wrong layer');
+    let id = 900;
+    const send = async (params: Record<string, unknown>) => {
+      const answer = await harness.server.inject({
+        method: 'POST',
+        url: '/mcp',
+        headers: { authorization: `Bearer ${project.token}` },
+        payload: { jsonrpc: '2.0', id: (id += 1), method: 'tools/call', params },
+      });
+      return answer.json().result;
+    };
+
+    const outside = await send({ name: 'list_items', limit: 1, arguments: { status: 'open' } });
+    assert.equal(outside.isError, true);
+    assert.equal(outside.structuredContent.code, 'misplaced_argument');
+    assert.match(String(outside.content[0].text), /"limit" is an argument of "list_items"/);
+    assert.match(String(outside.content[0].text), /Move it into params\.arguments/);
+
+    // Inside the envelope, the same call works, which is what makes the
+    // sentence above worth printing.
+    const inside = await send({ name: 'list_items', arguments: { limit: 1, status: 'open' } });
+    assert.equal(inside.isError, undefined);
+
+    // An argument no tool has is not silently dropped either, which is what
+    // the other door has always done with the same word in a body.
+    const invented = await send({
+      name: 'list_items',
+      arguments: { zupelnie_wymyslony: 'tak' },
+    });
+    assert.equal(invented.isError, true);
+    assert.equal(invented.structuredContent.code, 'unknown_argument');
+    assert.match(
+      String(invented.content[0].text),
+      /"zupelnie_wymyslony" is not a field "list_items" has\./,
+    );
+    assert.match(String(invented.content[0].text), /It takes status, owner, label/);
+
+    // `_meta` is the protocol's, not ours. A client sending a progress token
+    // beside the arguments is conforming, not guessing, and params is the one
+    // object here we do not own.
+    const meta = await send({
+      name: 'list_items',
+      arguments: { limit: 1 },
+      _meta: { progressToken: 'abc' },
+    });
+    assert.equal(meta.isError, undefined);
+
+    // And a key that is neither the protocol's nor the tool's is left alone
+    // for the same reason: there is no second place it could have meant.
+    const foreign = await send({
+      name: 'list_items',
+      arguments: { limit: 1 },
+      whateverTheClientAdded: true,
+    });
+    assert.equal(foreign.isError, undefined);
   });
 
   it('says the store is unreachable in the same words the other door uses', async () => {
