@@ -142,6 +142,12 @@ describe('what the service promises to forget', () => {
       ['shares', ['projectId', 'email'], 'offering a board twice refreshes the offer, it does not stack'],
       ['handoverRequests', ['projectId', 'email'], 'and asking for one twice does not either'],
       ['operatorAliases', ['email'], 'an address is one person here'],
+      // The three on the person's side of the door, which is where a second
+      // row is worst: every one of these is read as "the credential", singular,
+      // by the code that authenticates with it.
+      ['operatorTokens', ['hash'], 'a sign-in link is one link, not a family of them'],
+      ['operatorSessions', ['hash'], 'and a session cookie opens one session'],
+      ['operatorCodes', ['email'], 'one code in flight per address, so a second ask replaces it'],
     ];
     const missing: string[] = [];
     for (const [name, fields, why] of oneOf) {
