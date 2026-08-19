@@ -80,7 +80,7 @@ export function isValidSlug(slug: string): boolean {
   return slug.length > 0 && slug.length <= SLUG_MAX && /^[a-z0-9][a-z0-9:._-]*$/.test(slug);
 }
 
-const HANDLE_MAX = 48;
+export const HANDLE_MAX = 48;
 
 export function normalizeHandle(input: string): string {
   return input

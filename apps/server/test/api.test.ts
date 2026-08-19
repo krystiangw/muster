@@ -1129,19 +1129,20 @@ describe('what taking a question back must not do', () => {
         headers: { ...authed(project), 'content-type': 'application/json' },
         payload: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } },
       });
+    // Refused at the door rather than shortened into somebody else. Over MCP,
+    // because that is the door with no schema of its own to stop it, and the
+    // one where reconciling two shapes downstream went wrong three times.
     const asked = await mcp('escalate', { agent: `${stem}-one`, question: 'mine', context: 'x' });
-    const id = asked.json().result.structuredContent.escalation.id;
-    // Stored whole. This is the line the rest of the test rests on: shorten it
-    // and the two handles below become the same handle, whatever the predicate
-    // then does.
-    assert.equal(asked.json().result.structuredContent.escalation.agent, `${stem}-one`);
+    assert.match(JSON.stringify(asked.json().result), /bad_agent/);
+    assert.match(JSON.stringify(asked.json().result), /48 characters/);
+    assert.equal((await get(project, '/escalations')).json().escalations.length, 0);
 
-    const refused = await mcp('withdraw', {
-      id,
-      agent: `${stem}-two`,
-      reason: 'a different agent entirely',
-    });
-    assert.match(JSON.stringify(refused.json().result), /not_your_question/);
+    // And the same rule when taking one back, so the two sides cannot disagree
+    // about who anybody is.
+    const short = await mcp('escalate', { agent: 'errors-loop', question: 'mine', context: 'x' });
+    const id = short.json().result.structuredContent.escalation.id;
+    const refused = await mcp('withdraw', { id, agent: `${stem}-two`, reason: 'not me' });
+    assert.match(JSON.stringify(refused.json().result), /bad_agent/);
     assert.equal(
       (await get(project, '/escalations')).json().escalations[0].status,
       'open',

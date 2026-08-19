@@ -2,7 +2,7 @@ import type { Config } from './config.js';
 import type { Store } from './db.js';
 import { record, type EventDoor } from './events.js';
 import { charge, maybeExpireClaims, maybeSweep, resolveAbsent, spend } from './hygiene.js';
-import { hashToken, isValidHandle, newId, newOtpCode, newToken, normalizeHandle, normalizeSlug } from './ids.js';
+import { HANDLE_MAX, hashToken, isValidHandle, newId, newOtpCode, newToken, normalizeHandle, normalizeSlug } from './ids.js';
 import {
   DEFAULT_RULES,
   ESCALATION_PRIORITIES,
@@ -572,10 +572,12 @@ export async function readInbox(
   if (options.agent !== undefined && typeof options.agent !== 'string') {
     throw badRequest('bad_agent', 'agent is the handle whose inbox this is.');
   }
-  // Trimmed like every other place a handle arrives. Asking under a padded
-  // handle used to work and then find nothing waiting, because the question was
-  // stored under the trimmed form and read back under the padded one.
-  const forAgent = options.agent ? { agent: options.agent.trim() } : {};
+  // Either shape. Handles are trimmed on the way in now, and rows written
+  // before that hold whatever arrived, so asking under a padded handle has to
+  // keep finding what it asked: an empty inbox reads as "you asked nothing".
+  const forAgent = options.agent
+    ? { agent: { $in: [options.agent.trim(), options.agent] } }
+    : {};
   const [answers, waiting, handovers, offers] = await Promise.all([
     store.escalations
       .find({
@@ -2934,7 +2936,7 @@ export async function withdrawEscalation(
   // The same normalisation the question was stored with, or the two never
   // meet: one door caps the handle and the other passes whatever a model
   // produced, and a mismatch here reads as "not your question".
-  const who = input.agent.trim();
+  const who = askingHandle(input.agent);
   const updated = await store.escalations.findOneAndUpdate(
     // The handle is in the predicate, not merely recorded afterwards. A fleet
     // shares one key, so without this any loop could close a question another
@@ -2955,7 +2957,7 @@ export async function withdrawEscalation(
         // stopped it and that no answer exists.
         answeredAt: now,
         withdrawnAt: now,
-        withdrawnBy: who.slice(0, 48),
+        withdrawnBy: who,
         withdrawnReason: reason,
         updatedAt: now,
       },
@@ -3005,6 +3007,35 @@ export async function withdrawEscalation(
   return updated as EscalationDoc;
 }
 
+/**
+ * The one shape a handle is stored in, whichever door it arrived through.
+ *
+ * The HTTP schema has always capped this at 48; MCP arguments are whatever a
+ * model produced. Reconciling two shapes downstream is what this cost a night
+ * of: a question asked through one door could not be taken back through the
+ * other, an inbox read under the same handle came back empty, and the fix that
+ * cut the handle to a length turned every pair of agents agreeing for that many
+ * characters into one agent who could close the other's questions.
+ *
+ * So it is refused rather than shortened, at the door, the way a wrong-typed
+ * argument is. Shortening an identity is the thing that must not happen; a
+ * refusal a caller can read is cheap by comparison.
+ */
+function askingHandle(agent: string): string {
+  const handle = agent.trim();
+  if (!handle) {
+    throw new ServiceError(400, 'bad_agent', 'A question is asked by somebody, so "agent" cannot be blank.');
+  }
+  if (handle.length > HANDLE_MAX) {
+    throw new ServiceError(
+      400,
+      'bad_agent',
+      `A handle is at most ${HANDLE_MAX} characters. Shortening yours here would make you indistinguishable from anybody whose handle starts the same way, and this one decides whose question is whose.`,
+    );
+  }
+  return handle;
+}
+
 export async function createEscalation(
   store: Store,
   project: ProjectDoc,
@@ -3017,6 +3048,7 @@ export async function createEscalation(
   },
   door: EventDoor,
 ): Promise<EscalationDoc> {
+  const asker = askingHandle(input.agent);
   if (typeof input.question !== 'string' || input.question.trim().length === 0) {
     throw badRequest('bad_question', 'An escalation needs a question the operator can answer.');
   }
@@ -3035,15 +3067,7 @@ export async function createEscalation(
   const doc: EscalationDoc = {
     _id: newId('e'),
     projectId: project._id,
-    // Trimmed here rather than at one door, because the HTTP schema caps this
-    // at 48 and MCP arguments are whatever a model produced, so the two doors
-    // used to store the same handle in two shapes and a question asked through
-    // one could not be taken back through the other.
-    //
-    // Trimmed and not cut. This value is compared as an identity when somebody
-    // takes a question back, and shortening an identity makes two agents whose
-    // names agree for forty eight characters into one agent.
-    agent: input.agent.trim(),
+    agent: asker,
     question: input.question.slice(0, 2000),
     context: (input.context ?? '').slice(0, 8000),
     priority: input.priority ?? 'normal',
@@ -3111,9 +3135,8 @@ export async function listEscalations(
 ): Promise<EscalationDoc[]> {
   const query: Record<string, unknown> = { projectId };
   if (filter.status) query.status = filter.status;
-  // The last handle ingress. Listing under a padded handle used to answer with
-  // nothing, which reads as "you have asked nothing" rather than as a typo.
-  if (filter.agent) query.agent = filter.agent.trim();
+  // The last handle ingress, and the same two shapes as the inbox above.
+  if (filter.agent) query.agent = { $in: [filter.agent.trim(), filter.agent] } as never;
   // Whether anybody acted on it, which is a different question from what the
   // human decided. A job asking "what is new for me" is asking this one.
   if (filter.acknowledged === true) query.acknowledgedAt = { $ne: null };
