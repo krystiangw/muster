@@ -161,6 +161,23 @@ function text(value: unknown, name: string): string | undefined {
   return value;
 }
 
+/**
+ * A string this call cannot do without, or a refusal naming it.
+ *
+ * `str` substitutes a default and `text` allows absence, and between them the
+ * slug read as an empty one: `{"slug": 42}` became "" and the caller was told
+ * its slug had no alphanumeric characters, which is true of "" and not of 42.
+ * The slug is what selects the card, so being wrong about why it was refused
+ * costs an agent the one retry it might have got right.
+ */
+function required(value: unknown, name: string): string {
+  const given = text(value, name);
+  if (given === undefined || given.trim() === '') {
+    throw new ServiceError(400, 'bad_argument', `"${name}" is required here, and this call has none.`);
+  }
+  return given;
+}
+
 /** Every element a string, or a refusal. Same reason, including the null. */
 function texts(value: unknown, name: string): string[] | undefined {
   if (value === undefined) return undefined;
@@ -1021,7 +1038,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
       }
       case 'upsert_item': {
         const result = await upsertItem(store, project, {
-          slug: str(args.slug),
+          slug: required(args.slug, 'slug'),
           title: args.title === undefined ? undefined : str(args.title),
           body: args.body === undefined ? undefined : str(args.body),
           status: args.status as ItemStatus | undefined,
@@ -1069,7 +1086,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         const result = await claimItem(
           store,
           project,
-          text(args.slug, 'slug') ?? '',
+          required(args.slug, 'slug'),
           text(args.agent, 'agent') || actor,
           typeof args.ttl_minutes === 'number' ? args.ttl_minutes : undefined,
         );
@@ -1085,7 +1102,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         const item = await heartbeatClaim(
           store,
           project,
-          str(args.slug),
+          required(args.slug, 'slug'),
           text(args.agent, 'agent') || actor,
           typeof args.ttl_minutes === 'number' ? args.ttl_minutes : undefined,
         );
@@ -1095,14 +1112,20 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         const item = await releaseItem(
           store,
           project,
-          str(args.slug),
+          required(args.slug, 'slug'),
           text(args.agent, 'agent') || actor,
           text(args.note, 'note') ?? undefined,
         );
         return { ok: true, item: itemJson(item) };
       }
       case 'append_note': {
-        const item = await appendNote(store, project, str(args.slug), actor, str(args.message));
+        const item = await appendNote(
+          store,
+          project,
+          required(args.slug, 'slug'),
+          actor,
+          required(args.message, 'message'),
+        );
         const warnings = await writeWarnings(store, project, actor);
         return { item: itemJson(item), ...(warnings.length > 0 ? { warnings } : {}) };
       }
@@ -1216,7 +1239,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
       }
       case 'move': {
         const result = await moveItem(store, project, {
-          slug: str(args.slug),
+          slug: required(args.slug, 'slug'),
           column: str(args.column),
           actor,
           ...(args.note === undefined ? {} : { note: str(args.note) }),

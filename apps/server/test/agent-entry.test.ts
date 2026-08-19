@@ -1140,6 +1140,41 @@ describe('the MCP surface', () => {
     assert.equal(still.structuredContent.answers.length, 1);
   });
 
+  it('says an argument is the wrong type, rather than guessing what it meant', async () => {
+    // MCP arguments are whatever a model produced, so a wrong type is likelier
+    // here than anywhere. Five of the six tools that take a slug read it
+    // leniently: `{"slug": 42}` became "" and the caller was told its slug had
+    // no alphanumeric characters, which is true of "" and not of 42. The slug
+    // is what selects the card, so being wrong about why it was refused costs
+    // an agent the one retry it might have got right.
+    const project = await createProject(harness, 'wrong types');
+    let id = 400;
+    const call = async (name: string, args: Record<string, unknown>) => {
+      const answer = await harness.server.inject({
+        method: 'POST',
+        url: '/mcp',
+        headers: { authorization: `Bearer ${project.token}` },
+        payload: { jsonrpc: '2.0', id: (id += 1), method: 'tools/call', params: { name, arguments: args } },
+      });
+      return answer.json().result;
+    };
+
+    for (const name of ['upsert_item', 'heartbeat', 'release', 'move']) {
+      const wrong = await call(name, { slug: 42, agent: 'a', column: 'doing' });
+      assert.equal(wrong.isError, true, name);
+      assert.match(
+        String(wrong.content[0].text),
+        /"slug" is a string here/,
+        `${name} said: ${String(wrong.content[0].text)}`,
+      );
+    }
+
+    // And absence is its own answer, not an empty slug.
+    const missing = await call('append_note', { message: 'something happened' });
+    assert.equal(missing.isError, true);
+    assert.match(String(missing.content[0].text), /"slug" is required here/);
+  });
+
   it('says the store is unreachable in the same words the other door uses', async () => {
     // A client branches on the code. Told "internal" it cannot tell a bug it
     // should report from an outage it should wait out, and this door was
