@@ -2689,6 +2689,46 @@ describe('a card whose blockers are finished', () => {
     });
     assert.equal(offered.json().item?.slug, 'ops:after', 'the same card the sheet now calls free');
   });
+
+  it('does not call a card free to take because it is finished', async () => {
+    // The live map is asked about work that is not finished, so a done or
+    // dropped card is missing from it whatever its blockers are doing, and a
+    // card somebody parked as blocked is missing once they are done while
+    // still not being offered. Reading an empty answer as "nothing is holding
+    // this up" was wrong in both directions.
+    const project = await createProject(harness, 'terminal blockers');
+    const file = async (payload: Record<string, unknown>) =>
+      harness.server.inject({
+        method: 'POST',
+        url: `${project.api}/items`,
+        headers: authed(project),
+        payload,
+      });
+    await file({ slug: 'ops:still-open', title: 'nobody has finished this' });
+    await file({ slug: 'ops:finished', title: 'a card somebody closed', blocked_by: ['ops:still-open'] });
+    await file({ slug: 'ops:finished', status: 'done', note: 'closed while its blocker was open' });
+    await file({ slug: 'ops:parked', title: 'a card waiting on a person', blocked_by: ['ops:still-open'] });
+    await file({ slug: 'ops:parked', status: 'blocked', note: 'waiting on the operator' });
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    const closed = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?card=ops:finished`,
+    });
+    assert.match(closed.body, /Filed after <code>ops:still-open<\/code>\./);
+    assert.ok(
+      !closed.body.includes('free to take'),
+      'a finished card is not free to take, and its blocker is not finished either',
+    );
+
+    // A parked card really is waiting, and says so.
+    const parked = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?card=ops:parked`,
+    });
+    assert.match(parked.body, /Waiting on <code>ops:still-open<\/code>/);
+    assert.ok(!parked.body.includes('free to take'));
+  });
 });
 
 describe('a card link that names nothing', () => {

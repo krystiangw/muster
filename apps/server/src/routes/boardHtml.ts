@@ -236,14 +236,24 @@ function preview(
       // rather than as their statuses, because the person reading this wants
       // the names to look for on the board; whether each is finished is on the
       // card it belongs to.
+      // Three sentences, because absence from the live map means two different
+      // things. That map is asked about work that is not finished, so a card
+      // that is done or dropped is missing from it whatever its blockers are
+      // doing, and a card somebody parked as `blocked` is missing once they
+      // are done while still not being offered. Saying "free to take" on the
+      // strength of an empty answer was wrong twice over.
       waiting.length > 0
         ? `<p class="why">Waiting on ${waiting
             .map((slug) => `<code>${escapeHtml(slug)}</code>`)
             .join(', ')}. An agent asking for work is not offered this one until they are done.</p>`
         : (item.blockedBy ?? []).length > 0
-          ? `<p class="why">Was filed after ${(item.blockedBy ?? [])
+          ? `<p class="why">Filed after ${(item.blockedBy ?? [])
               .map((slug) => `<code>${escapeHtml(slug)}</code>`)
-              .join(', ')}, and every one of them is finished, so this card is free to take.</p>`
+              .join(', ')}${
+              item.status === 'open'
+                ? ', and every one of them is finished, so this card is free to take.'
+                : '.'
+            }</p>`
           : ''
     }
     ${
