@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
+import { hashToken } from '../src/ids.js';
 import { authed, createProject, startHarness, type Harness, type Project } from './helper.js';
 
 /**
@@ -38,7 +39,17 @@ describe('a token from one project, at every door of another', () => {
   let atRest: Record<string, number> = {};
 
   before(async () => {
-    harness = await startHarness();
+    // The limits raised for this file alone. The sweep restores its fixtures
+    // before each of thirty five doors, which is several hundred writes in a
+    // few seconds, and production limits would start refusing them: the sweep
+    // would then be reading its own throttling as isolation, which is the
+    // exact mistake this file has already made in four other ways.
+    harness = await startHarness({
+      LIMIT_WRITES_PER_MINUTE: '5000',
+      LIMIT_READS_PER_MINUTE: '5000',
+      LIMIT_CLAIM_EMAILS_PER_HOUR: '5000',
+      LIMIT_CODE_ATTEMPTS_PER_HOUR: '5000',
+    });
     mine = await createProject(harness, 'my board');
     theirs = await createProject(harness, 'somebody else');
 
@@ -130,7 +141,12 @@ describe('a token from one project, at every door of another', () => {
             // check being tested.
             name === 'column'
             ? 'done'
-            : `taken-${name}`;
+            : // The six digits somebody was emailed. Wrong ones are refused
+              // for being wrong, which is that door working and this sweep
+              // never arriving at it.
+              name === 'code'
+              ? '123456'
+              : `taken-${name}`;
     const min = field.minLength ?? 0;
     const max = field.maxLength ?? Math.max(wanted.length, min);
     const padded = wanted.length < min ? wanted.padEnd(min, '1') : wanted;
@@ -215,6 +231,22 @@ describe('a token from one project, at every door of another', () => {
         headers: { ...authed(mine), 'content-type': 'application/json' },
         payload: { status: 'answered', answer: 'so that ack has something to do' },
       });
+      // And a claim waiting on my own board with a code this sweep knows. The
+      // last door verifies six digits that were emailed to somebody, so
+      // without this it refuses a wrong code, which is that door working
+      // rather than this test reaching it. Minted through the door that mints
+      // them, then the hash replaced, which is what the operator sign-in
+      // helper does for the same reason.
+      await harness.server.inject({
+        method: 'POST',
+        url: `${mine.api}/claim`,
+        headers: { ...authed(mine), 'content-type': 'application/json' },
+        payload: { email: 'nobody@example.com' },
+      });
+      await harness.store.claimCodes.updateMany(
+        { projectId: mine.id },
+        { $set: { codeHash: hashToken('123456') } },
+      );
       const answer = await harness.server.inject(
         door.body === undefined
           ? { method: door.method as 'GET', url: door.url, headers: authed(mine) }
