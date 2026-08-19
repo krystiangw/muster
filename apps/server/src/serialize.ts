@@ -111,6 +111,13 @@ export function escalationJson(doc: EscalationDoc): Record<string, unknown> {
     // because a provider that quietly refuses every send looks exactly like a
     // human who has not got round to it.
     notified_at: doc.notifiedAt ?? null,
+    // Set only when the agent that asked took it back. A `wont_do` with these
+    // filled in is not a person having dropped the question, and every reader
+    // of this field needs to be able to tell those apart: the next agent
+    // reading its inbox, the operator reading their own page, and us.
+    withdrawn_at: doc.withdrawnAt ?? null,
+    withdrawn_by: doc.withdrawnBy ?? null,
+    withdrawn_reason: doc.withdrawnReason ?? null,
     created_at: doc.createdAt,
   };
 }

@@ -62,6 +62,16 @@ export type EventKind =
   /** A human answered one. */
   | 'answer'
   /**
+   * The agent that asked took its own question back.
+   *
+   * Its own kind rather than an `answer`, because `answer` is the number that
+   * says whether people reply from the link the mail sends them, and an agent
+   * closing a question it should not have asked is not a person replying to
+   * anything. Counted at all so that a fleet withdrawing constantly is visible
+   * as what it is, a fleet asking badly.
+   */
+  | 'withdraw'
+  /**
    * A form post refused as somebody else's page.
    *
    * Here because the failure it makes visible is invisible everywhere else. A

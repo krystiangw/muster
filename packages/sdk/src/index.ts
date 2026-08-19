@@ -63,6 +63,13 @@ export interface Escalation {
   acted_by: string | null;
   acted_note: string | null;
   /**
+   * Set only when the agent that asked took the question back. A `wont_do`
+   * with these filled in is not a person having dropped it.
+   */
+  withdrawn_at: string | null;
+  withdrawn_by: string | null;
+  withdrawn_reason: string | null;
+  /**
    * When the human was told, which is a different question from whether they
    * have replied. Null on a claimed board means nothing has gone out about this
    * one yet: either it is younger than the periodic pass, or nothing is leaving
@@ -715,6 +722,27 @@ export class Muster {
     return this.request('POST', `/escalations/${encodeURIComponent(id)}/ack`, {
       agent: input.agent ?? this.actor,
       note: input.note,
+    });
+  }
+
+  /**
+   * Takes back a question you should not have asked.
+   *
+   * The mirror of {@link acknowledge}: that one is refused while nobody has
+   * answered, this one the moment somebody has, because taking back an
+   * answered question throws away attention a person already spent. Doing it
+   * before the service has mailed the operator stops the message going out at
+   * all, which is the only moment anybody can. The reason is required and is
+   * what the operator reads if the mail already went.
+   */
+  async withdraw(
+    id: string,
+    reason: string,
+    agent = this.actor,
+  ): Promise<{ escalation: Escalation }> {
+    return this.request('POST', `/escalations/${encodeURIComponent(id)}/withdraw`, {
+      agent,
+      reason,
     });
   }
 

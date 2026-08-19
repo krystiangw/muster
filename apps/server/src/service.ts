@@ -2885,6 +2885,92 @@ export async function acknowledgeEscalation(
   return updated as EscalationDoc;
 }
 
+/**
+ * The asker taking its own question back.
+ *
+ * The mirror of acknowledging, and refused on the opposite condition. An
+ * acknowledgement of an unanswered question would be a guess; a withdrawal of
+ * an answered one would throw away attention a person already spent, and the
+ * verb for that case is acknowledging it. So between them the two cover the
+ * whole of an escalation's life and neither can do the other's job.
+ *
+ * Why an agent gets this at all: without it, an agent that knows its question
+ * was a mistake has to leave a false alarm in somebody's queue, and this
+ * product mails those. Withdrawing before the notifier's sweep reaches it stops
+ * the message entirely, which is the only moment anybody can stop it.
+ *
+ * A reason is required, and not for tidiness: it is the only thing the operator
+ * will read if the mail already went out.
+ */
+export async function withdrawEscalation(
+  store: Store,
+  project: ProjectDoc,
+  id: string,
+  input: { agent: string; reason: string },
+): Promise<EscalationDoc> {
+  const reason = input.reason.trim().slice(0, 2000);
+  if (!reason) {
+    throw new ServiceError(
+      400,
+      'reason_required',
+      'Say why you are taking it back. If the mail has already gone out, this is the only thing the operator will read.',
+    );
+  }
+  const now = new Date();
+  // Guarded on `open` inside the update rather than checked first, so a person
+  // answering at the same moment wins and the withdrawal misses, rather than
+  // both landing and the answer being lost.
+  const updated = await store.escalations.findOneAndUpdate(
+    { _id: id, projectId: project._id, status: 'open' },
+    {
+      $set: {
+        status: 'wont_do' as EscalationStatus,
+        answer: null,
+        answeredAt: null,
+        withdrawnAt: now,
+        withdrawnBy: input.agent.slice(0, 48),
+        withdrawnReason: reason,
+        updatedAt: now,
+      },
+    },
+    { returnDocument: 'after' },
+  );
+  if (!updated) {
+    const existing = await store.escalations.findOne({ _id: id, projectId: project._id });
+    if (!existing) throw new ServiceError(404, 'not_found', 'No such question in this project.');
+    if (existing.withdrawnAt) {
+      throw new ServiceError(
+        409,
+        'already_withdrawn',
+        `${existing.withdrawnBy} already took this one back.`,
+      );
+    }
+    throw new ServiceError(
+      409,
+      'already_answered',
+      'Somebody has answered this one, so taking it back would throw away the attention they spent on it. Acknowledge it instead.',
+    );
+  }
+
+  // The slot returns, the same as an answer: a question nobody is waiting on is
+  // not a question the cap should keep counting.
+  await store.projects.updateOne({ _id: project._id }, spend('escalations'));
+  if (updated.itemSlug) {
+    await appendNote(
+      store,
+      project,
+      updated.itemSlug,
+      input.agent,
+      `took back the question it asked: ${reason.slice(0, 160)}`,
+    ).catch(() => undefined);
+  }
+  // Never `answer`: that count is what tells us whether people answer from the
+  // link the mail sends them, and an agent closing its own question is not a
+  // person answering anything.
+  record(store, 'withdraw', { door: 'http' });
+  return updated as EscalationDoc;
+}
+
 export async function createEscalation(
   store: Store,
   project: ProjectDoc,

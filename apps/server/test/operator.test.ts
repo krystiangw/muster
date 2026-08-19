@@ -114,6 +114,33 @@ describe('the operator view', () => {
     assert.equal(answer.answer, 'Not this week');
   });
 
+  it('shows a question the agent took back as taken back, not as a decision', async () => {
+    // Both are stored as `wont_do`, because that is what the status means to
+    // anything reading it later. On the page a person reads, the two must not
+    // look the same: one is them dropping a question, the other is an agent
+    // admitting it should not have asked.
+    const project = await createProject(harness, 'withdrawable');
+    await claimFor(project, 'boss@example.com');
+    const mine = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/escalations`,
+      headers: { ...authed(project), 'content-type': 'application/json' },
+      payload: { agent: 'errors-loop', question: 'Was pointing at the wrong deployment?' },
+    });
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/escalations/${mine.json().escalation.id}/withdraw`,
+      headers: { ...authed(project), 'content-type': 'application/json' },
+      payload: { agent: 'errors-loop', reason: 'my monitor was aimed at the wrong place' },
+    });
+
+    const session = await signIn(harness, 'boss@example.com');
+    const view = await harness.server.inject({ method: 'GET', url: '/operator', headers: session.headers });
+    assert.match(view.body, /withdrawn/);
+    assert.match(view.body, /took it back/);
+    assert.match(view.body, /aimed at the wrong place/);
+  });
+
   it('tells somebody with no projects yet how a board gets here', async () => {
     // The first screen after signing in, for somebody who has just been handed
     // a read link and does not know what to do with it. It was a table with a

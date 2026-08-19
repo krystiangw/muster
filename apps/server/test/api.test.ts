@@ -960,6 +960,89 @@ describe('escalations', () => {
   });
 });
 
+describe('taking a question back', () => {
+  // The incident this came from: a monitor pointed at the wrong deployment
+  // filed three urgent questions and had no way to take any of them back, so
+  // the only routes out were leaving a false alarm in a person's queue or
+  // reaching for the admin door the product says a worker key should not have.
+  it('lets the key a fleet is handed close its own unanswered question', async () => {
+    const project = await createProject(harness);
+    const worker = (await post(project, '/keys', { name: 'fleet', role: 'write' })).json().token;
+    const asWorker = { authorization: `Bearer ${worker}`, 'content-type': 'application/json' };
+    await post(project, '/items', { slug: 'ops:cutover', title: 'cutover', actor: 'ops-loop' });
+    const raised = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/escalations`,
+      headers: asWorker,
+      payload: { agent: 'ops-loop', question: 'Bridge or wait?', context: 'thin pool', item_slug: 'ops:cutover' },
+    });
+    const id = raised.json().escalation.id;
+    const before = (await get(project, '')).json().counts.escalations;
+
+    const gone = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/escalations/${id}/withdraw`,
+      headers: asWorker,
+      payload: { agent: 'ops-loop', reason: 'I was pointing at the wrong deployment' },
+    });
+    assert.equal(gone.statusCode, 200, gone.body);
+    const doc = gone.json().escalation;
+    // wont_do stays true for anyone reading it later, and the three fields
+    // beside it are what stop it reading as a person having dropped the
+    // question, in every inbox on this board and on the operator's own page.
+    assert.equal(doc.status, 'wont_do');
+    assert.equal(doc.withdrawn_by, 'ops-loop');
+    assert.match(doc.withdrawn_reason, /wrong deployment/);
+    assert.equal(doc.answer, null, 'nobody answered, so there is no answer to show');
+
+    // The slot comes back, the same as an answer: nobody is waiting on it.
+    assert.equal((await get(project, '')).json().counts.escalations, before - 1);
+
+    // The card keeps the status the agent gave it. Nothing here reaches into a
+    // status somebody else set, and the note is how they find out why.
+    const item = (await get(project, '/items/ops:cutover')).json().item;
+    assert.match(item.timeline.at(-1).message, /took back the question/);
+  });
+
+  it('refuses once somebody has answered, and says which verb is left', async () => {
+    const project = await createProject(harness);
+    const raised = await post(project, '/escalations', { agent: 'ops-loop', question: 'Bridge?', context: 'x' });
+    const id = raised.json().escalation.id;
+    await harness.server.inject({
+      method: 'PATCH',
+      url: `${project.api}/escalations/${id}`,
+      headers: { ...authed(project), 'content-type': 'application/json' },
+      payload: { status: 'answered', answer: 'bridge it' },
+    });
+
+    const late = await post(project, `/escalations/${id}/withdraw`, {
+      agent: 'ops-loop',
+      reason: 'changed my mind',
+    });
+    assert.equal(late.statusCode, 409);
+    assert.equal(late.json().error, 'already_answered');
+    assert.match(late.json().message, /Acknowledge it instead/);
+  });
+
+  it('refuses a second withdrawal, and a reason that says nothing', async () => {
+    const project = await createProject(harness);
+    const id = (await post(project, '/escalations', { agent: 'ops-loop', question: 'Bridge?', context: 'x' })).json()
+      .escalation.id;
+
+    const blank = await post(project, `/escalations/${id}/withdraw`, { agent: 'ops-loop', reason: '   ' });
+    assert.equal(blank.statusCode, 400);
+    assert.equal(blank.json().error, 'reason_required');
+
+    assert.equal(
+      (await post(project, `/escalations/${id}/withdraw`, { agent: 'ops-loop', reason: 'my mistake' })).statusCode,
+      200,
+    );
+    const again = await post(project, `/escalations/${id}/withdraw`, { agent: 'ops-loop', reason: 'again' });
+    assert.equal(again.statusCode, 409);
+    assert.equal(again.json().error, 'already_withdrawn');
+  });
+});
+
 describe('keys', () => {
   it('lets an admin token mint and revoke a write key, and stops a write key from doing it', async () => {
     const project = await createProject(harness);

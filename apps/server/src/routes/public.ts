@@ -1293,10 +1293,17 @@ ${
         : `<ul class="timeline">${answered
             .map(
               (doc) =>
-                `<li><span class="when">${when(doc.answeredAt)}</span><span class="who">${escapeHtml(
-                  doc.status,
+                `<li><span class="when">${when(doc.withdrawnAt ?? doc.answeredAt)}</span><span class="who">${escapeHtml(
+                  doc.withdrawnAt ? 'withdrawn' : doc.status,
                 )}</span><span>${escapeHtml(doc.question)}${
-                  doc.answer ? `<br><span style="color:var(--ink-2)">${escapeHtml(doc.answer)}</span>` : ''
+                  // A withdrawal wears `wont_do` in the data, because that is
+                  // what it means to anything reading it later. Here it must
+                  // not: this page is where a person finds out whether they
+                  // dropped a question or an agent took it back, and one word
+                  // is the whole difference.
+                  doc.withdrawnAt
+                    ? `<br><span style="color:var(--ink-2)">${who(doc.withdrawnBy ?? 'an agent')} took it back${doc.withdrawnReason ? `: ${escapeHtml(doc.withdrawnReason)}` : ''}</span>`
+                    : doc.answer ? `<br><span style="color:var(--ink-2)">${escapeHtml(doc.answer)}</span>` : ''
                 }${
                   // Whether the answer landed. Answering into silence is the
                   // fastest way to stop answering at all.

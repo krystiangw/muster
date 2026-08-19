@@ -42,6 +42,7 @@ import {
   ServiceError,
   looksLikeEmail,
   acknowledgeEscalation,
+  withdrawEscalation,
   answerEscalation,
   authenticate,
   claimItem,
@@ -1523,6 +1524,40 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         const { id } = request.params as { id: string };
         const body = request.body as { agent: string; note?: string };
         const doc = await acknowledgeEscalation(store, project, id, body);
+        return { escalation: escalationJson(doc) };
+      },
+    );
+
+    scoped.post(
+      '/v1/:project/escalations/:id/withdraw',
+      {
+        schema: {
+          tags: ['escalations'],
+          summary: 'Take back a question you should not have asked',
+          description:
+            'The mirror of /ack, refused on the opposite condition. Acknowledging an unanswered question would be a guess; withdrawing an answered one would throw away attention a person already spent, so this is refused the moment anybody answers, and then acknowledging is the verb. It lands on wont_do with withdrawn_by set, so nobody reads it as a person having dropped the question. Withdrawing before the notifier reaches it stops the message going out at all, which is the only moment anybody can. A worker key is enough: this closes your own question and cannot answer anybody else\u2019s.',
+          body: {
+            type: 'object',
+            required: ['agent', 'reason'],
+            properties: {
+              agent: { type: 'string', minLength: 1, maxLength: 48 },
+              reason: {
+                type: 'string',
+                minLength: 1,
+                maxLength: 2000,
+                description:
+                  'Why you are taking it back. Required, because if the mail has already gone out this is the only thing the operator will read.',
+              },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      async (request) => {
+        const { project } = auth(request);
+        const { id } = request.params as { id: string };
+        const body = request.body as { agent: string; reason: string };
+        const doc = await withdrawEscalation(store, project, id, body);
         return { escalation: escalationJson(doc) };
       },
     );

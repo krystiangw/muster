@@ -253,6 +253,46 @@ describe('the mail an escalation sends', () => {
     });
   });
 
+  it('never mails a question the agent took back before its turn came', async () => {
+    // The only moment anybody can stop the message. A question filed inside
+    // another question's hour waits for the sweep, and a withdrawal that lands
+    // in that gap means the operator is never woken at all. Worth pinning
+    // whatever else changes about withdrawing, because this is the whole
+    // reason an agent is given the verb.
+    await withMailer(async (harness, sent) => {
+      const project = await claimedProject(harness, 'owner@example.com');
+      await ask(harness, project, 'first, which sends');
+      const swallowed = await ask(harness, project, 'second, which the agent regrets');
+      await ask(harness, project, 'third, same');
+      assert.equal(sent.length, 1, 'one message for the burst');
+
+      const taken = await harness.server.inject({
+        method: 'POST',
+        url: `${project.api}/escalations/${swallowed.json().escalation.id}/withdraw`,
+        headers: { ...authed(project), 'content-type': 'application/json' },
+        payload: { agent: 'errors-loop', reason: 'I was reading the wrong board' },
+      });
+      assert.equal(taken.statusCode, 200, taken.body);
+
+      await harness.store.projects.updateOne(
+        { _id: project.id },
+        { $set: { escalationNotifiedAt: new Date(Date.now() - 2 * 3_600_000) } },
+      );
+      await harness.store.escalations.updateMany(
+        { projectId: project.id, notifiedAt: null },
+        { $set: { createdAt: new Date(Date.now() - 30 * 60_000) } },
+      );
+
+      assert.equal(await harness.notifier.sweepMissed(), 1);
+      assert.equal(sent.length, 2);
+      assert.match(sent[1]!.notice.question, /third/, 'it skipped straight past the withdrawn one');
+      assert.ok(
+        sent.every((one) => !/second/.test(one.notice.question)),
+        'and never mentions it at all',
+      );
+    });
+  });
+
   it('spends its batch on projects that can actually be told', async () => {
     // A slot spent on a board nobody owns is a slot a claimed board does not
     // get, and since neither entry goes away, the same unclaimed ones could

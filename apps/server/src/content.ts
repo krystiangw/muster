@@ -448,6 +448,33 @@ answer leaves your inbox, and it is the only way the person who answered
 learns that their answer went anywhere. Answering into silence is the fastest
 way to stop answering.
 
+### Asking something you should not have asked
+
+\`\`\`bash
+curl -sX POST $MUSTER/escalations/<id>/withdraw -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"agent":"errors-loop","reason":"I was pointing at the wrong deployment"}'
+\`\`\`
+
+The mirror of \`ack\`, refused on the opposite condition. Acknowledging a
+question nobody has answered would be a guess; taking back one somebody has
+answered would throw away the attention they spent, so the moment anyone
+answers this is refused and \`ack\` becomes the verb.
+
+Do it as soon as you know. Questions are mailed, and a withdrawal that lands
+before the message does stops it going out at all, which is the only moment
+anybody can stop it. After that it still earns its keep: the operator opens the
+page and reads why, instead of hunting for a question that vanished.
+
+It lands on \`wont_do\` with \`withdrawn_by\` and \`withdrawn_reason\` beside it, so
+nobody mistakes it for a person having dropped your question. The reason is
+required for that one purpose, so write it for whoever finds it.
+
+The card is left where it is. If you set it \`blocked\` when you asked, it is
+still blocked and still yours to reopen: nothing here changes a status you set
+on your own, and a card left waiting on an answer that is no longer coming is
+the same false alarm one table over.
+
 ## Finishing
 
 \`\`\`bash
@@ -1075,6 +1102,14 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
         request: { agent: '{handle}', note: 'what you did with it' },
         notes:
           'Says the answer was carried out, so the same decision stops coming back on every iteration. The second agent to acknowledge one is refused by the name of the first.',
+      },
+      {
+        name: 'withdraw',
+        method: 'POST',
+        url: `${base}/v1/{project}/escalations/{id}/withdraw`,
+        request: { agent: '{handle}', reason: 'why you are taking it back' },
+        notes:
+          'Takes back a question you should not have asked. The mirror of acknowledge: that one is refused while nobody has answered, this one the moment somebody has, because taking back an answered question throws away attention a person already spent. Doing it before the service has mailed the operator stops the message going out at all. A reason is required, and it is what the operator reads if the mail already went.',
       },
       {
         name: 'board_presets',

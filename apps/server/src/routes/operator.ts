@@ -859,10 +859,16 @@ ${
         : `<ul class="timeline">${recent
             .map(
               (doc) =>
-                `<li><span class="when">${when(doc.answeredAt)}</span>
-                 <span class="who">${escapeHtml(doc.status)}</span>
+                `<li><span class="when">${when(doc.withdrawnAt ?? doc.answeredAt)}</span>
+                 <span class="who">${escapeHtml(doc.withdrawnAt ? 'withdrawn' : doc.status)}</span>
                  <span>${escapeHtml(doc.question)}${
-                   doc.answer ? `<br><span style="color:var(--ink-2)">${escapeHtml(doc.answer)}</span>` : ''
+                   // The same distinction the read link makes, on the page an
+                   // operator with several boards actually lives on: a
+                   // withdrawal is stored as `wont_do` and must not read here
+                   // as a decision this person made.
+                   doc.withdrawnAt
+                     ? `<br><span style="color:var(--ink-2)">${who(doc.withdrawnBy ?? 'an agent')} took it back${doc.withdrawnReason ? `: ${escapeHtml(doc.withdrawnReason)}` : ''}</span>`
+                     : doc.answer ? `<br><span style="color:var(--ink-2)">${escapeHtml(doc.answer)}</span>` : ''
                  }${
                    // Whether it landed. This is the page most answers are
                    // written on, so it is the page that owes the answer back.

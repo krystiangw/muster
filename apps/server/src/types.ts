@@ -228,6 +228,23 @@ export interface EscalationDoc {
   acknowledgedAt: Date | null;
   acknowledgedBy: string | null;
   acknowledgedNote: string | null;
+  /**
+   * When the agent that asked took the question back, and why.
+   *
+   * The same kind of axis as the acknowledgement above, and for the same
+   * reason: the four statuses are the human's decision, and this is a fact
+   * about the asker. A question withdrawn by an agent lands on `wont_do`,
+   * which stays true for anyone reading it later, but without these fields it
+   * would be indistinguishable from a person having dropped it, in the inbox of
+   * every other agent and on the operator's own page.
+   *
+   * Only while nobody has answered. After that, taking it back would be
+   * erasing attention somebody already spent, and the verb for that is
+   * acknowledging it.
+   */
+  withdrawnAt?: Date | null;
+  withdrawnBy?: string | null;
+  withdrawnReason?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

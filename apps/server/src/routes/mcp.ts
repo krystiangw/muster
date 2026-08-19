@@ -21,6 +21,7 @@ import {
   looksLikeEmail,
   authenticate,
   acknowledgeEscalation,
+  withdrawEscalation,
   claimItem,
   heartbeatClaim,
   createEscalation,
@@ -695,6 +696,36 @@ const TOOLS: ToolDefinition[] = [
     // agents acting on one answer is the thing this stops.
     annotations: {
       readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+  },
+  {
+    name: 'withdraw',
+    title: 'Take back a question you should not have asked',
+    description:
+      'The mirror of acknowledge, refused on the opposite condition. Acknowledging a question nobody answered would be a guess; withdrawing one somebody answered would throw away the attention they spent, so this is refused the moment anybody answers and acknowledge becomes the verb. It lands on wont_do with the withdrawal recorded beside it, so nobody reads it as a person having dropped the question. Doing this before the service has mailed the operator stops the message going out at all, which is the only moment anybody can.',
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['id', 'agent', 'reason'],
+      properties: {
+        id: { type: 'string' },
+        agent: { type: 'string' },
+        reason: {
+          type: 'string',
+          description:
+            'Why you are taking it back. Required, because if the mail has already gone out this is the only thing the operator will read.',
+        },
+      },
+    },
+    requiresProject: true,
+    charges: 'write',
+    annotations: {
+      readOnlyHint: false,
+      // It closes a question, and only one that nobody has answered. Nothing
+      // a person wrote can be lost this way, which is what this hint is for.
       destructiveHint: false,
       idempotentHint: false,
       openWorldHint: false,
@@ -1384,6 +1415,24 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         const doc = await acknowledgeEscalation(store, project, str(args.id), {
           agent: who,
           ...(text(args.note, 'note') ? { note: str(args.note) } : {}),
+        });
+        return { escalation: escalationJson(doc) };
+      }
+      case 'withdraw': {
+        // By name, like acknowledging and for the same reason: this closes a
+        // question for everybody, and the operator reading a withdrawal needs
+        // to know which loop changed its mind, not that "unknown-agent" did.
+        const who = (text(args.agent, 'agent') ?? '').trim();
+        if (!who) {
+          throw new ServiceError(
+            400,
+            'bad_argument',
+            'Withdrawing is you taking back your own question, so "agent" is required here and has to be your handle.',
+          );
+        }
+        const doc = await withdrawEscalation(store, project, str(args.id), {
+          agent: who,
+          reason: str(args.reason),
         });
         return { escalation: escalationJson(doc) };
       }
