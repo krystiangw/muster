@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { authed, createProject, signIn, startHarness, type Harness, type Project } from './helper.js';
 import { flushEvents } from '../src/events.js';
-import { SEARCH_NARROWERS, searchTooSlow } from '../src/service.js';
+import { searchTooSlow } from '../src/service.js';
+import { SEARCH_NARROWERS } from '../src/types.js';
 
 /**
  * The promises that only an index keeps.
@@ -283,7 +284,7 @@ describe('the filters a slow search is told to use', () => {
       prefix: { slug: { $regex: '^errors:' } },
     };
     for (const name of SEARCH_NARROWERS) {
-      const narrowed = await fetched(asked[name]);
+      const narrowed = await fetched(asked[name]!);
       assert.ok(
         narrowed < bare,
         `${name}= is offered as a way to read less, and it read ${narrowed} of ${bare}`,
@@ -298,5 +299,34 @@ describe('the filters a slow search is told to use', () => {
       'label= reads exactly as much as no filter at all, which is why it is not offered',
     );
     assert.match(refusal.message, /neither does label=/);
+
+    // Every door that gives this advice has to give the same one. Four of the
+    // five used to spell the list out by hand, and every one of them was wrong
+    // at the same time.
+    // Read off the served surfaces, not the source, because what drifts is what
+    // a stranger is handed.
+    const asServed = async (url: string): Promise<string> =>
+      (await harness.server.inject({ method: 'GET', url })).body;
+    const listed = await harness.server.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: { 'content-type': 'application/json' },
+      payload: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+    });
+    const tool = (listed.json().result.tools as Array<{ name: string }>).find(
+      (one) => one.name === 'list_items',
+    );
+    const published: Array<[string, string]> = [
+      ['the refusal', refusal.message],
+      ['skill.md', await asServed('/skill.md')],
+      ['the OpenAPI document', await asServed('/openapi.json')],
+      ['the MCP tool', JSON.stringify(tool)],
+      ['the catalogue', await asServed('/.well-known/agent-access.json')],
+    ];
+    for (const [where, text] of published) {
+      for (const name of SEARCH_NARROWERS) {
+        assert.ok(text.includes(`${name}=`), `${where} names ${name}=`);
+      }
+    }
   });
 });

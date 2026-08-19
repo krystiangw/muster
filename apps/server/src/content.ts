@@ -1,6 +1,6 @@
 import { TOOL_COUNT } from './routes/mcp.js';
 import { RATE_LIMIT_SCOPES, type Config } from './config.js';
-import { DEFAULT_RULES } from './types.js';
+import { DEFAULT_RULES, SEARCH_NARROWING, SEARCH_NARROWING_MD } from './types.js';
 
 /**
  * Everything an agent reads before it writes anything.
@@ -542,7 +542,7 @@ curl -s "$MUSTER/items?q=withdraw&prefix=errors:" -H "authorization: Bearer $TOK
 
 The second one is what to ask again with. Four filters bound what a search
 reads, because each is a key an index can act on before a card is fetched:
-\`status=\`, \`owner=\`, \`source=\` and \`prefix=\`. Another word does not, and
+${SEARCH_NARROWING_MD}. Another word does not, and
 neither does \`label=\`: both narrow the answer while the same cards still come
 off disk.
 
@@ -1156,7 +1156,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
         method: 'GET',
         url: `${base}/v1/{project}/items?order=id&limit=200`,
         notes:
-          'Filter by status, owner, label, source, staleness or claim state, or search the slug and title with q=. Add &cursor=<next_cursor> for the page after this one, in the same order. order=id is the stable order for reading everything back; order=recent with &since=<as_of> is the change feed, and every page of one walk reports the same as_of.',
+          `Filter by status, owner, label, source, namespace, staleness or claim state, or search the slug and title with q=. prefix=ops: is one area of a board that names its cards area:thing. A search cannot be answered from an index, so put ${SEARCH_NARROWING} beside it to read less; label= and another word narrow the answer and not the read. Add &cursor=<next_cursor> for the page after this one, in the same order. order=id is the stable order for reading everything back; order=recent with &since=<as_of> is the change feed, and every page of one walk reports the same as_of.`,
       },
       {
         name: 'list_escalations',

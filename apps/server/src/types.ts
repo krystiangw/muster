@@ -359,6 +359,32 @@ export interface BoardConfig {
   rows: 'none' | 'owner' | 'label' | 'prefix';
 }
 
+/**
+ * The filters worth putting beside a search, and the only list of them.
+ *
+ * Each is a key an index can act on before a card is fetched, which is why they
+ * help: a substring over two fields cannot be answered from an index at all, so
+ * a search costs whatever the index has not already narrowed away. Measured on
+ * twenty thousand cards, documents fetched beside the same search: owner 500,
+ * source 800, status 1000, prefix 2500, and both `label=` and another search
+ * word 20000, which is all of them.
+ *
+ * It lives here, in the module with no dependencies, because the advice is
+ * published at five doors and was hand-written and wrong at every one of them.
+ */
+export const SEARCH_NARROWERS = ['status', 'owner', 'source', 'prefix'] as const;
+
+/** The same list, spelled for a sentence. `wrap` is what goes around each name. */
+export function narrowingList(wrap = ''): string {
+  const names = SEARCH_NARROWERS.map((name) => `${wrap}${name}=${wrap}`);
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+/** Plain, for a JSON description. */
+export const SEARCH_NARROWING = narrowingList();
+/** With backticks, for the documents that are markdown. */
+export const SEARCH_NARROWING_MD = narrowingList('`');
+
 export const MAX_BOARD_COLUMNS = 12;
 
 /**
