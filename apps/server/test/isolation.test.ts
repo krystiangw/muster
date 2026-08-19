@@ -82,6 +82,15 @@ describe('a token from one project, at every door of another', () => {
     const theirIds = await fill(theirs, 'their');
     theirEscalation = theirIds.escalation;
     theirKey = theirIds.key;
+    // Answered on their own board, because the door that acknowledges one
+    // refuses a question with no answer, and that refusal would stand in for
+    // the isolation this is looking for.
+    await harness.server.inject({
+      method: 'PATCH',
+      url: `${theirs.api}/escalations/${theirEscalation}`,
+      headers: { ...authed(theirs), 'content-type': 'application/json' },
+      payload: { status: 'answered', answer: 'answered by the board it belongs to' },
+    });
     const ids = await fill(mine, 'my');
     myEscalation = ids.escalation;
     myKey = ids.key;
@@ -116,7 +125,7 @@ describe('a token from one project, at every door of another', () => {
    * character string where the code is six. Fastify refuses both before the
    * check being tested ever runs, which reads as protection and is not.
    */
-  const valueFor = (name: string, field: Record<string, any>): unknown => {
+  const valueFor = (name: string, field: Record<string, any>, whose: 'my' | 'their'): unknown => {
     if (Array.isArray(field.enum) && field.enum.length > 0) return field.enum[0];
     if (field.type === 'array') {
       // The one place the document cannot describe what the handler wants: a
@@ -126,21 +135,24 @@ describe('a token from one project, at every door of another', () => {
       const one =
         name === 'columns'
           ? { key: 'todo', title: 'To do', match: { status: ['open'] } }
-          : (bodyFor(field.items) ?? valueFor(name, field.items ?? { type: 'string' }));
+          : (bodyFor(field.items, true, whose) ?? valueFor(name, field.items ?? { type: 'string' }, whose));
       return Array.from({ length: Math.max(field.minItems ?? 1, 1) }, () => one);
     }
-    if (field.type === 'object') return bodyFor(field, true) ?? {};
+    if (field.type === 'object') return bodyFor(field, true, whose) ?? {};
     if (field.type === 'integer' || field.type === 'number') return field.minimum ?? 1;
     if (field.type === 'boolean') return true;
     if (name === 'email') return 'nobody@example.com';
     // Long enough to be accepted, short enough to be allowed. A field that
     // pins both to the same number, as the six digit code does, gets exactly
     // that many characters.
+    // Whose card, whose agent. A heartbeat or a release names the holder, and
+    // naming somebody else is refused for not holding the lease, which is that
+    // door working and this sweep never arriving at it.
     const wanted =
       name === 'slug'
-        ? 'my-card'
-        : name === 'handle'
-          ? 'my-agent'
+        ? `${whose}-card`
+        : name === 'handle' || name === 'agent' || name === 'actor'
+          ? `${whose}-agent`
           : // A column key this board has. Free text in the schema, closed in
             // the handler, and a name it does not know is refused before the
             // check being tested.
@@ -161,6 +173,7 @@ describe('a token from one project, at every door of another', () => {
   function bodyFor(
     schema: Record<string, any> | undefined,
     everything = false,
+    whose: 'my' | 'their' = 'my',
   ): Record<string, unknown> | undefined {
     if (!schema || schema.type !== 'object') return undefined;
     const props = (schema.properties ?? {}) as Record<string, any>;
@@ -171,7 +184,7 @@ describe('a token from one project, at every door of another', () => {
     const wanted = everything ? Object.keys(props) : ((schema.required ?? []) as string[]);
     const body: Record<string, unknown> = {};
     for (const name of wanted) {
-      body[name] = valueFor(name, props[name] ?? { type: 'string' });
+      body[name] = valueFor(name, props[name] ?? { type: 'string' }, whose);
     }
     return body;
   }
@@ -210,7 +223,7 @@ describe('a token from one project, at every door of another', () => {
         out.push({
           method: method.toUpperCase(),
           url,
-          body: bodyFor(operation?.requestBody?.content?.['application/json']?.schema),
+          body: bodyFor(operation?.requestBody?.content?.['application/json']?.schema, false, whose),
         });
       }
     }
@@ -284,20 +297,28 @@ describe('a token from one project, at every door of another', () => {
     assert.deepEqual(leaked, [], `a token reached somebody else's board:\n${leaked.join('\n')}`);
   });
 
-  it('refuses their card, their question and their key at my own doors', async () => {
+  it('refuses their question and their key at my own doors', async () => {
     // The other direction, and the one an attacker takes. The first sweep asks
     // somebody else's address with my token, which the check in front of every
-    // route settles. This one is a request that check is happy with: my token,
-    // my project in the path, and a reference to something on their board in
-    // the parameter. Nothing in front of the handler can catch that. It is
-    // caught, if it is caught, by every lookup carrying the project beside the
-    // id, and a lookup that forgets is invisible until somebody notices their
-    // question was answered by a stranger.
-    const list = (await doors(mine.id, 'their')).filter((door) => /(their-card|their-agent)/.test(door.url) || door.url.includes(theirEscalation) || door.url.includes(theirKey));
-    assert.ok(list.length >= 8, `the routes that take a reference: ${list.length}`);
+    // route settles. This is a request that check is happy with: my token, my
+    // project in the path, and a reference to something on their board in the
+    // parameter. Nothing in front of a handler can catch that. It is caught by
+    // every lookup carrying the project beside the id, and a lookup that
+    // forgets is invisible until somebody notices their question was answered
+    // by a stranger.
+    //
+    // Only the references that can cross. A slug and an agent handle are names
+    // inside one board, so `their-card` at my door is not their card, it is a
+    // card I do not have, and counting those nine refusals as isolation would
+    // be counting the shape of the data model twice. What crosses is what is
+    // globally unique: the id of a question and the id of a key.
+    const crossable = (await doors(mine.id, 'their')).filter(
+      (door) => door.url.includes(theirEscalation) || door.url.includes(theirKey),
+    );
+    assert.ok(crossable.length >= 3, `the doors that take a global id: ${crossable.length}`);
 
     const reached: string[] = [];
-    for (const door of list) {
+    for (const door of crossable) {
       const answer = await harness.server.inject(
         door.body === undefined
           ? { method: door.method as 'GET', url: door.url, headers: authed(mine) }
@@ -309,11 +330,30 @@ describe('a token from one project, at every door of another', () => {
             },
       );
       if (answer.statusCode < 400) reached.push(`${door.method} ${door.url} answered ${answer.statusCode}`);
-      if (answer.body.includes('their work') || answer.body.includes('their question')) {
+      if (answer.body.includes('answered by the board it belongs to')) {
         reached.push(`${door.method} ${door.url} read it out`);
       }
     }
     assert.deepEqual(reached, [], `a reference reached across boards:\n${reached.join('\n')}`);
+  });
+
+  it('does not find a card or an agent named on another board, because names are local', async () => {
+    // Said once, plainly, rather than folded into the sweep above. This is the
+    // data model rather than a check: two boards can both have a card called
+    // `todo` and neither can name the other's.
+    for (const url of [
+      `${mine.api}/items/their-card`,
+      `${mine.api}/board/facets`,
+    ]) {
+      const answer = await harness.server.inject({ method: 'GET', url, headers: authed(mine) });
+      assert.doesNotMatch(answer.body, /their work/, `${url} does not carry their card`);
+    }
+    const card = await harness.server.inject({
+      method: 'GET',
+      url: `${mine.api}/items/their-card`,
+      headers: authed(mine),
+    });
+    assert.equal(card.statusCode, 404);
   });
 
   it('leaves their key working after somebody tried to revoke it from another board', async () => {
@@ -323,8 +363,8 @@ describe('a token from one project, at every door of another', () => {
     assert.equal(stored?.revokedAt ?? null, null, 'their key was not revoked');
 
     const question = await harness.store.escalations.findOne({ projectId: theirs.id, _id: theirEscalation });
-    assert.equal(question?.status, 'open', 'and their question was not answered for them');
-    assert.equal(question?.acknowledgedAt ?? null, null, 'nor acknowledged');
+    assert.equal(question?.answer, 'answered by the board it belongs to', 'their answer is their own');
+    assert.equal(question?.acknowledgedAt ?? null, null, 'and nobody else acknowledged it');
   });
 
   it('refuses their question through a read link that is not theirs', async () => {
@@ -352,8 +392,11 @@ describe('a token from one project, at every door of another', () => {
       projectId: theirs.id,
       _id: theirEscalation,
     });
-    assert.equal(question?.status, 'open', 'and their question is untouched');
-    assert.equal(question?.answer ?? '', '', 'with nothing written into it');
+    assert.equal(
+      question?.answer,
+      'answered by the board it belongs to',
+      'and their question still says what their own board said',
+    );
   });
 
   /** Everything of theirs that a door could have made or unmade. */
