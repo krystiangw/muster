@@ -414,6 +414,19 @@ and you can end that from the view itself.</p>
     );
   });
 
+/**
+ * The names somebody answers to, as a sentence rather than a list.
+ *
+ * Joined with commas, the list ran into the clause after it: "Nothing
+ * assigned to alex@example.com, alex, nothing blocked, nothing abandoned"
+ * gives a reader no way to see where the names stop. And "or" is what the
+ * page means, since work under any one of them is theirs.
+ */
+function either(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? '';
+  return `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
+}
+
   // --------------------------------------------------------------- the view
 
   async function renderView(session: OperatorSession): Promise<string> {
@@ -714,11 +727,11 @@ ${asked
 <h2>Your work</h2>
 ${
       mine.length === 0
-        ? `<p class="empty">Nothing assigned to ${escapeHtml(aliases.join(', '))}, nothing blocked,
+        ? `<p class="empty">Nothing assigned to ${escapeHtml(either(aliases))}, nothing blocked,
 nothing abandoned. If work of yours is missing, it is filed under a name this page does not know
 is you.</p>`
         : `
-<p style="color:var(--ink-2)">Assigned to ${escapeHtml(aliases.join(', '))}, or blocked and waiting
+<p style="color:var(--ink-2)">Assigned to ${escapeHtml(either(aliases))}, or blocked and waiting
 for somebody to unblock it. Across every project, because the work does not care which board it
 lives on.${
           mineTotal > mine.length

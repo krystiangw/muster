@@ -608,6 +608,25 @@ describe('the operator view', () => {
     );
   });
 
+  it('says where the names stop and the sentence carries on', async () => {
+    // Joined with commas, the list of names somebody answers to ran straight
+    // into the clause after it: "Nothing assigned to me@example.com, me,
+    // nothing blocked, nothing abandoned" gives a reader no way to see which
+    // words are names. "or" is also what the page means, since work under any
+    // one of them is theirs.
+    // Their own address, because this file's other tests leave work assigned
+    // to the ones they use and the empty state is what this is about.
+    const project = await createProject(harness, 'empty for now');
+    await claimFor(project, 'quiet@example.com');
+    const session = await signIn(harness, 'quiet@example.com');
+    const view = await harness.server.inject({
+      method: 'GET',
+      url: '/operator',
+      headers: { cookie: session.cookie },
+    });
+    assert.match(view.body, /Nothing assigned to quiet@example\.com or quiet, nothing blocked/);
+  });
+
   it('lets somebody say which names are theirs', async () => {
     const project = await createProject(harness, 'aliases');
     await claimFor(project, 'k.nowak@example.com');
