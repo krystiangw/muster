@@ -354,37 +354,90 @@ function priorityOptions(current: number): string {
     .join('');
 }
 
+/**
+ * One labelled control, in the shape a person expects.
+ *
+ * The label sits inside the box and moves out of the way once there is
+ * something in it or somebody is typing, so the row reads as a field rather
+ * than as a caption with a box under it, and the two do not disagree about
+ * where one ends and the next begins. The placeholder is the current state,
+ * "nobody" or "nothing", and it only appears once the label has moved, because
+ * showing both at once puts two answers in one box.
+ *
+ * A field with a list of values to pick from says so: the chevron is drawn by
+ * the script that makes it openable, so the affordance and the behaviour
+ * arrive together. Without the script it is the input and datalist it has
+ * always been, which is a browser's own picker and still works.
+ */
+function field(
+  options: {
+    id: string;
+    name: string;
+    label: string;
+    value?: string;
+    placeholder?: string;
+    size?: number;
+    /** Values to choose from. An empty list renders a plain input. */
+    choices?: readonly string[];
+    /** Space separated, so choosing replaces the word under the cursor. */
+    many?: boolean;
+  },
+): string {
+  const { id, name, label, value = '', placeholder = '', size, choices = [], many } = options;
+  const list = choices.length > 0 ? `list-${id}` : '';
+  return `<label class="field${list ? ' pickable' : ''}"${many ? ' data-many="true"' : ''}>
+      <input id="${escapeHtml(id)}" name="${escapeHtml(name)}"${
+        size ? ` size="${size}"` : ''
+      }${list ? ` list="${list}"` : ''} value="${escapeHtml(value)}" placeholder="${escapeHtml(
+        placeholder || ' ',
+      )}">
+      <span>${escapeHtml(label)}</span>${
+        list
+          ? `
+      <datalist id="${list}">${choices
+              .map((choice) => `<option value="${escapeHtml(choice)}"></option>`)
+              .join('')}</datalist>`
+          : ''
+      }
+    </label>`;
+}
+
 function editForms(item: ItemDoc, facets: BoardFacets, action: string, keep: BoardFilter): string {
   const id = escapeHtml(item._id);
   const labels = item.labels ?? [];
   return `<div class="edit">
   <form class="row" method="post" action="${escapeHtml(action)}/owner">
     <input type="hidden" name="slug" value="${escapeHtml(item.slug)}">${keptFilter(keep)}
-    <label for="own-${id}">Owner
-      <input id="own-${id}" name="owner" list="owners-${id}" size="14"
-        value="${escapeHtml(item.owner ?? '')}" placeholder="nobody">
-    </label>
-    <datalist id="owners-${id}">
-      ${facets.owners.map((name) => `<option value="${escapeHtml(name)}"></option>`).join('')}
-    </datalist>
+    ${field({
+      id: `own-${id}`,
+      name: 'owner',
+      label: 'Owner',
+      value: item.owner ?? '',
+      placeholder: 'nobody',
+      size: 14,
+      choices: facets.owners,
+    })}
     <button type="submit">assign</button>
   </form>
   <form class="row" method="post" action="${escapeHtml(action)}/labels">
     <input type="hidden" name="slug" value="${escapeHtml(item.slug)}">${keptFilter(keep)}
-    <label for="lab-${id}">Add label
-      <input id="lab-${id}" name="add" list="labels-${id}" size="14" placeholder="label">
-    </label>
-    <datalist id="labels-${id}">
-      ${facets.labels.map((name) => `<option value="${escapeHtml(name)}"></option>`).join('')}
-    </datalist>
+    ${field({
+      id: `lab-${id}`,
+      name: 'add',
+      label: 'Add label',
+      placeholder: 'one word',
+      size: 14,
+      choices: facets.labels,
+    })}
     <button type="submit">tag</button>
   </form>
   <form class="row" method="post" action="${escapeHtml(action)}/priority">
     <input type="hidden" name="slug" value="${escapeHtml(item.slug)}">${keptFilter(keep)}
-    <label for="pri-${id}">Urgency
+    <label class="field pickable">
       <select id="pri-${id}" name="priority">
         ${priorityOptions(item.priority ?? 0)}
       </select>
+      <span>Urgency</span>
     </label>
     <button type="submit">set</button>
   </form>
@@ -394,32 +447,40 @@ function editForms(item: ItemDoc, facets: BoardFacets, action: string, keep: Boa
       <input type="hidden" name="slug" value="${escapeHtml(item.slug)}">${keptFilter(keep)}
       <input type="hidden" name="was_title" value="${escapeHtml(item.title ?? '')}">
       <input type="hidden" name="was_body" value="${escapeHtml(item.body ?? '')}">
-      <label for="title-${id}">Title</label>
-      <input id="title-${id}" name="title" maxlength="200" value="${escapeHtml(item.title ?? '')}">
-      <label for="body-${id}">Description</label>
-      <textarea id="body-${id}" name="body" rows="4" maxlength="4000">${escapeHtml(item.body ?? '')}</textarea>
+      <label class="field">
+        <input id="title-${id}" name="title" maxlength="200" placeholder=" "
+          value="${escapeHtml(item.title ?? '')}">
+        <span>Title</span>
+      </label>
+      <label class="field">
+        <textarea id="body-${id}" name="body" rows="4" maxlength="4000"
+          placeholder=" ">${escapeHtml(item.body ?? '')}</textarea>
+        <span>Description</span>
+      </label>
       <button type="submit">save</button>
     </form>
   </details>
   <form class="row" method="post" action="${escapeHtml(action)}/waiting">
     <input type="hidden" name="slug" value="${escapeHtml(item.slug)}">${keptFilter(keep)}
-    <label for="wait-${id}">Waiting on
-      <input id="wait-${id}" name="waiting" list="slugs-${id}" size="22"
-        value="${escapeHtml((item.blockedBy ?? []).join(' '))}" placeholder="nothing">
-    </label>
-    <datalist id="slugs-${id}">
-      ${facets.slugs
-        .filter((slug) => slug !== item.slug)
-        .map((slug) => `<option value="${escapeHtml(slug)}"></option>`)
-        .join('')}
-    </datalist>
+    ${field({
+      id: `wait-${id}`,
+      name: 'waiting',
+      label: 'Waiting on',
+      value: (item.blockedBy ?? []).join(' '),
+      placeholder: 'nothing',
+      size: 22,
+      choices: facets.slugs.filter((slug) => slug !== item.slug),
+      many: true,
+    })}
     <button type="submit">set</button>
   </form>
   <form class="note" method="post" action="${escapeHtml(action)}/note">
     <input type="hidden" name="slug" value="${escapeHtml(item.slug)}">${keptFilter(keep)}
-    <label for="note-${id}">Add a note</label>
-    <textarea id="note-${id}" name="message" rows="2" maxlength="2000"
-      placeholder="What you know that the agents do not."></textarea>
+    <label class="field">
+      <textarea id="note-${id}" name="message" rows="2" maxlength="2000"
+        placeholder="What you know that the agents do not."></textarea>
+      <span>Add a note</span>
+    </label>
     <button type="submit">add note</button>
   </form>
   ${

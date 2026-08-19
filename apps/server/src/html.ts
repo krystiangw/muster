@@ -213,6 +213,58 @@ label { display:flex; flex-direction:column; gap:5px; font-size:14px; color:var(
 input, select, textarea { font:inherit; font-size:15px; padding:9px 11px; background:var(--surface);
   color:var(--ink); border:1px solid var(--rule); border-radius:3px; }
 textarea { min-height:80px; font-family:var(--mono); font-size:13.5px; }
+/* One field: the name of the thing lives inside the box it names.
+   A caption above a box makes every row two rows and leaves the eye to work
+   out which caption belongs to which box, which is exactly the question a
+   filled-in field should never raise. The label sits where the text will go
+   and steps up out of the way the moment there is text or a cursor.
+   The placeholder is the current state, "nobody" or "nothing", and it stays
+   invisible until the label has moved: two answers in one box is worse than
+   one at a time. */
+.field { position:relative; display:inline-flex; flex-direction:column; gap:0; }
+.field input, .field select, .field textarea { padding:17px 11px 5px; }
+/* A box taller than one line puts its name at the top and keeps it there:
+   there is no middle to sit in, and a label that slid up a four line box would
+   travel further than the eye wants to follow. */
+/* More room above than a one line box needs. An input centres its value in
+   what is left and clears the label by itself; a textarea starts at the top,
+   where the label already is, so the first line has to be pushed past it. */
+.field textarea { width:100%; padding-top:30px; }
+.field:has(textarea) > span { top:11px; transform:none; font-size:10.5px;
+  letter-spacing:.04em; text-transform:uppercase; }
+.field.pickable input, .field.pickable select { padding-right:30px; }
+.field > span { position:absolute; left:12px; top:50%; transform:translateY(-50%);
+  font-size:15px; color:var(--muted); pointer-events:none; transition:top .12s, font-size .12s;
+  background:transparent; }
+.field input:focus + span, .field input:not(:placeholder-shown) + span,
+.field select + span { top:11px; transform:none; font-size:10.5px; letter-spacing:.04em;
+  text-transform:uppercase; color:var(--muted); }
+/* Only once the label has moved out of it. */
+.field input:placeholder-shown:not(:focus)::placeholder { color:transparent; }
+.field textarea:focus { outline:2px solid var(--accent); outline-offset:-2px; }
+.edit form.note .field { flex:1 0 100%; }
+.field input:focus { outline:2px solid var(--accent); outline-offset:-2px; }
+/* Drawn by the script that makes it openable, so the mark and the behaviour
+   arrive together: a chevron on a box that does nothing when clicked is a
+   promise the page cannot keep. A select draws its own. */
+.field.pickable.combo::after, .field.pickable:has(select)::after {
+  content:''; position:absolute; right:11px; top:calc(50% + 4px); width:8px; height:8px;
+  border-right:1.5px solid var(--muted); border-bottom:1.5px solid var(--muted);
+  transform:translateY(-50%) rotate(45deg); pointer-events:none; }
+.field.pickable:has(select) { appearance:none; }
+.field.pickable select { appearance:none; }
+/* The list the script opens. Native datalist has no affordance, does not open
+   on click in every browser, and cannot be styled or read out; this is the
+   same set of values as a listbox somebody can see, aim at and arrow through. */
+.field .choices { position:absolute; z-index:30; top:100%; left:0; right:0; margin:3px 0 0;
+  padding:4px; list-style:none; max-height:210px; overflow-y:auto;
+  background:var(--surface); border:1px solid var(--rule); border-radius:3px;
+  box-shadow:0 6px 20px color-mix(in srgb, var(--ink) 14%, transparent); }
+.field .choices[hidden] { display:none; }
+.field .choices li { padding:6px 9px; border-radius:2px; font-size:14px; cursor:pointer;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.field .choices li[aria-selected='true'] { background:var(--accent-soft); color:var(--accent); }
+.field .choices li.none { color:var(--muted); cursor:default; }
 /* One appearance for one meaning. A link that performs the page's action is a
    button to everybody who is not reading the markup, and "Add an item" spent a
    week as a line of underlined text among other lines of underlined text: it
@@ -369,6 +421,9 @@ button.ghost, .btn.ghost { background:transparent; color:var(--accent); }
 .timeline { list-style:none; padding:0; margin:0; font-size:14px; }
 .timeline li { display:grid; grid-template-columns:auto auto 1fr; gap:10px; padding:7px 0;
   border-top:1px solid var(--rule); align-items:baseline; }
+/* One line, not two. The list draws a rule above itself and every entry draws
+   one above itself, so the first entry had both, a few pixels apart. */
+.timeline li:first-child { border-top:0; }
 .timeline .when, .timeline .who { font-family:var(--mono); font-size:12px; color:var(--muted); white-space:nowrap; }
 .timeline .who.hygiene { color:var(--warn); }
 .empty { color:var(--muted); font-style:italic; }
@@ -491,10 +546,19 @@ const SCRIPT = `(() => {
     clear();
   });
 
+  // A board can have swimlanes, and then the same column key appears in every
+  // one of them. The move form carries a column and nothing else, so a drop
+  // across lanes would change the column and leave the row where it was: the
+  // card would not land where the highlight said it would. The drag does what
+  // the form does or it does not happen, so a target in another lane is not a
+  // target. The button is still there for a move that means something else.
+  const sameLane = (card, column) => card.closest('.lane') === column.closest('.lane');
+
   board.addEventListener('dragover', (event) => {
     const column = event.target.closest('.col[data-column]');
     if (!dragging || !column) return;
     if (column.contains(dragging)) return;
+    if (!sameLane(dragging, column)) return;
     if (!optionFor(dragging, column.dataset.column)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
@@ -511,7 +575,7 @@ const SCRIPT = `(() => {
 
   board.addEventListener('drop', (event) => {
     const column = event.target.closest('.col[data-column]');
-    if (!dragging || !column) return;
+    if (!dragging || !column || !sameLane(dragging, column)) return;
     const select = optionFor(dragging, column.dataset.column);
     if (!select) return;
     event.preventDefault();
@@ -524,6 +588,145 @@ const SCRIPT = `(() => {
     if (form.requestSubmit) form.requestSubmit();
     else form.submit();
   });
+
+  /**
+   * A field with values to pick from, made openable.
+   *
+   * The server renders an input and a datalist, which every browser supports
+   * and none of them makes visible: there is no mark to say a list exists, a
+   * click does not reliably open it, the rows cannot be read out or styled,
+   * and on a phone it is a different thing again. This turns the same values
+   * into a listbox somebody can see, aim at, filter and arrow through, and it
+   * takes the datalist away so the two do not both appear.
+   *
+   * The value it writes is the value the field already took, so the form and
+   * the server are untouched by any of this. Where a field holds several words
+   * at once, picking replaces the word under the cursor rather than the lot.
+   */
+  for (const input of document.querySelectorAll('.field.pickable input[list]')) {
+    const field = input.closest('.field');
+    const datalist = document.getElementById(input.getAttribute('list'));
+    if (!field || !datalist) continue;
+    const values = [...datalist.options].map((option) => option.value).filter(Boolean);
+    if (values.length === 0) continue;
+    datalist.remove();
+    input.removeAttribute('list');
+    input.setAttribute('autocomplete', 'off');
+    input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-expanded', 'false');
+    input.setAttribute('aria-autocomplete', 'list');
+    field.classList.add('combo');
+
+    const many = field.dataset.many === 'true';
+    const list = document.createElement('ul');
+    list.className = 'choices';
+    list.id = input.id + '-choices';
+    list.setAttribute('role', 'listbox');
+    list.hidden = true;
+    input.setAttribute('aria-controls', list.id);
+    field.append(list);
+
+    let at = -1;
+    // Which word the cursor is in, for a field that holds several.
+    const word = () => {
+      if (!many) return { start: 0, end: input.value.length };
+      const caret = input.selectionStart ?? input.value.length;
+      const start = input.value.lastIndexOf(' ', Math.max(0, caret - 1)) + 1;
+      const after = input.value.indexOf(' ', caret);
+      return { start, end: after === -1 ? input.value.length : after };
+    };
+    const typed = () => {
+      const { start, end } = word();
+      return input.value.slice(start, end).trim().toLowerCase();
+    };
+
+    const draw = () => {
+      const needle = typed();
+      const shown = values.filter((value) => value.toLowerCase().includes(needle));
+      list.replaceChildren();
+      if (shown.length === 0) {
+        const empty = document.createElement('li');
+        empty.className = 'none';
+        empty.textContent = 'nothing matches';
+        list.append(empty);
+      }
+      shown.forEach((value, index) => {
+        const row = document.createElement('li');
+        row.id = list.id + '-' + index;
+        row.setAttribute('role', 'option');
+        row.setAttribute('aria-selected', String(index === at));
+        row.textContent = value;
+        list.append(row);
+      });
+      const active = at >= 0 && at < shown.length ? list.id + '-' + at : '';
+      if (active) input.setAttribute('aria-activedescendant', active);
+      else input.removeAttribute('aria-activedescendant');
+      return shown;
+    };
+    const open = () => {
+      draw();
+      list.hidden = false;
+      input.setAttribute('aria-expanded', 'true');
+    };
+    const shut = () => {
+      list.hidden = true;
+      at = -1;
+      input.setAttribute('aria-expanded', 'false');
+      input.removeAttribute('aria-activedescendant');
+    };
+    const choose = (value) => {
+      const { start, end } = word();
+      const tail = input.value.slice(end);
+      input.value = input.value.slice(0, start) + value + (many && !tail.startsWith(' ') ? ' ' : '') + tail;
+      const caret = start + value.length + (many ? 1 : 0);
+      input.setSelectionRange(caret, caret);
+      shut();
+      input.focus();
+    };
+
+    input.addEventListener('focus', open);
+    input.addEventListener('click', open);
+    input.addEventListener('input', () => {
+      at = -1;
+      open();
+    });
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        if (!list.hidden) event.stopPropagation();
+        shut();
+        return;
+      }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        if (list.hidden) open();
+        const rows = [...list.querySelectorAll('li[role="option"]')];
+        if (rows.length === 0) return;
+        event.preventDefault();
+        at = event.key === 'ArrowDown' ? (at + 1) % rows.length : (at <= 0 ? rows.length : at) - 1;
+        draw();
+        list.querySelector('li[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' });
+        return;
+      }
+      if (event.key === 'Enter' && !list.hidden && at >= 0) {
+        const rows = [...list.querySelectorAll('li[role="option"]')];
+        if (rows[at]) {
+          // Only when something is highlighted. Enter on a typed word is the
+          // submit it has always been, because a new label is a thing somebody
+          // is allowed to invent.
+          event.preventDefault();
+          choose(rows[at].textContent);
+        }
+      }
+    });
+    // Mousedown rather than click: the input would otherwise lose focus and
+    // shut the list before the click landed on anything.
+    list.addEventListener('mousedown', (event) => {
+      const row = event.target.closest('li[role="option"]');
+      if (!row) return;
+      event.preventDefault();
+      choose(row.textContent);
+    });
+    input.addEventListener('blur', () => setTimeout(shut, 0));
+  }
 })();
 `;
 

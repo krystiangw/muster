@@ -370,6 +370,54 @@ describe('the board in the browser', () => {
     assert.ok(!readOnly.body.includes('draggable="true"'), 'no drag where there is no move form');
   });
 
+  it('gives every field on a card one box with its own name in it', async () => {
+    // A caption above a box makes every row two rows and leaves the eye to work
+    // out which caption belongs to which box. One component now: the name sits
+    // inside the box it names and steps out of the way when there is something
+    // in it. The placeholder is the current state and stays hidden until the
+    // label has moved, because two answers in one box is worse than one.
+    const project = await createProject(harness, 'one box');
+    // With an owner and a label somewhere on the board, because a field only
+    // offers a list when the board has values to offer: on an empty board
+    // there is nothing to pick and it stays the plain input it always was.
+    await post(project, '/items', {
+      slug: 'shaped',
+      title: 'a card with fields',
+      owner: 'alex',
+      labels: ['ops'],
+      actor: 'a',
+    });
+    await post(project, '/items', { slug: 'other', title: 'something to wait on', actor: 'a' });
+    const readToken = (await harness.store.projects.findOne({ _id: project.id }))!.readToken;
+    const page = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?card=shaped`,
+    });
+
+    const sheet = /<div class="peeked open"[\s\S]*?<\/div>\s*<\/div>\s*<\/div>/.exec(page.body)?.[0] ?? page.body;
+    for (const name of ['Owner', 'Add label', 'Urgency', 'Waiting on', 'Add a note']) {
+      assert.match(
+        sheet,
+        new RegExp(`<label class="field[^"]*"[^>]*>[\\s\\S]{0,400}?<span>${name}</span>`),
+        `${name} is inside its own field`,
+      );
+    }
+    // And nothing is left carrying the old shape.
+    assert.ok(
+      !/<label for="(own|lab|pri|wait|note|title|body)-/.test(sheet),
+      'no caption sitting above a box any more',
+    );
+
+    // The three that take a value from a list say so, and carry the values.
+    for (const which of ['own', 'lab', 'wait']) {
+      assert.match(sheet, new RegExp(`<input id="${which}-[^"]+"[^>]*list="list-${which}-`));
+    }
+    assert.match(sheet, /<datalist id="list-wait-[^"]+"><option value="other">/);
+    // The one that holds several at once says which it is, so picking a value
+    // replaces the word under the cursor and not the lot.
+    assert.match(sheet, /<label class="field pickable" data-many="true">[\s\S]{0,200}?name="waiting"/);
+  });
+
   it('carries no script on the pages that draw no board', async () => {
     // The board asks for it. Nowhere else does, because everywhere else it
     // would be a request that buys the reader nothing.
