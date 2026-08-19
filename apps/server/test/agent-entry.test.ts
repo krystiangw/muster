@@ -481,8 +481,12 @@ describe('A. discovery', () => {
       // advertised anywhere.
       if (!String(rendered.headers['content-type'] ?? '').startsWith('text/html')) continue;
       pages.add(path);
-      for (const [, href] of rendered.body.matchAll(/href="(\/[^"#?]*)"/g)) {
-        const next = href!.replace(/\/$/, '') || '/';
+      // Every internal link, then the path out of it. Matching a path that
+      // carries no query and no fragment would skip a page linked only as
+      // "/guide#start", and skipping it is exactly the case this is for.
+      for (const [, href] of rendered.body.matchAll(/href="(\/[^"]*)"/g)) {
+        const { pathname } = new URL(href!, 'https://board.invalid');
+        const next = pathname.replace(/\/$/, '') || '/';
         if (found.has(next) || next.startsWith('/r/') || next.startsWith('/style-')) continue;
         found.add(next);
         queue.push(next);
