@@ -253,6 +253,7 @@ const TOOLS: ToolDefinition[] = [
       'Create a Muster project and receive a token. This is the whole signup: no account, no human. Only needed once per repository or product.',
     inputSchema: {
       type: 'object',
+      additionalProperties: false,
       properties: {
         name: { type: 'string', description: 'Human readable project name' },
         description: {
@@ -289,6 +290,7 @@ const TOOLS: ToolDefinition[] = [
       'Declare who you are and what you own. Scope is advisory: it decides what next_item offers you and warns others when they write into your area.',
     inputSchema: {
       type: 'object',
+      additionalProperties: false,
       required: ['handle'],
       properties: {
         handle: { type: 'string', description: 'Stable handle, e.g. errors-loop' },
@@ -314,6 +316,7 @@ const TOOLS: ToolDefinition[] = [
       'Idempotent on slug: the same slug always addresses the same item, so two sessions converge instead of duplicating. Never put a date in a slug.',
     inputSchema: {
       type: 'object',
+      additionalProperties: false,
       required: ['slug'],
       properties: {
         slug: { type: 'string', description: 'Stable key, e.g. errors:withdraw-stuck' },
@@ -384,6 +387,7 @@ const TOOLS: ToolDefinition[] = [
       'Take a lease before working. A refusal names the current holder. Claims expire without a heartbeat, so a crashed session never blocks the board.',
     inputSchema: {
       type: 'object',
+      additionalProperties: false,
       required: ['slug', 'agent'],
       properties: {
         slug: { type: 'string' },
@@ -408,6 +412,7 @@ const TOOLS: ToolDefinition[] = [
       'Extend the lease on an item you hold while the work is still running. A lapsed lease cannot be extended, only claimed again, because between expiry and the sweep the item is already fair game for everybody else.',
     inputSchema: {
       type: 'object',
+      additionalProperties: false,
       required: ['slug', 'agent'],
       properties: {
         slug: { type: 'string' },
@@ -432,6 +437,7 @@ const TOOLS: ToolDefinition[] = [
       'Give up the lease without closing the item, so somebody else can pick it up now rather than when it expires. Say why in the note: the next agent reads the timeline to decide whether to take it.',
     inputSchema: {
       type: 'object',
+      additionalProperties: false,
       required: ['slug', 'agent'],
       properties: {
         slug: { type: 'string' },
@@ -460,6 +466,7 @@ const TOOLS: ToolDefinition[] = [
       'Record what you learned. The next agent reads the timeline to decide whether to pick this up.',
     inputSchema: {
       type: 'object',
+      additionalProperties: false,
       required: ['slug', 'message'],
       properties: {
         slug: { type: 'string' },
@@ -484,6 +491,7 @@ const TOOLS: ToolDefinition[] = [
       'The oldest unclaimed open item inside your declared scope. If there is none you are told so, rather than handed somebody else’s work.',
     inputSchema: {
       type: 'object',
+      additionalProperties: false,
       properties: {
         agent: { type: 'string' },
         claim: {
@@ -511,6 +519,7 @@ const TOOLS: ToolDefinition[] = [
       'Filter by status, owner, label, source, staleness or claim state. Pages with next_cursor, and as_of is what to pass back as since to read only what changed.',
     inputSchema: {
       type: 'object',
+      additionalProperties: false,
       properties: {
         status: { type: 'string', enum: [...ITEM_STATUSES] },
         owner: { type: 'string' },
@@ -566,6 +575,7 @@ const TOOLS: ToolDefinition[] = [
       'Items of that source missing from the list start an absence streak and close only after N consecutive absences and M hours, so one failed poll cannot close live work.',
     inputSchema: {
       type: 'object',
+      additionalProperties: false,
       required: ['source', 'present'],
       properties: {
         source: { type: 'string' },
@@ -589,6 +599,7 @@ const TOOLS: ToolDefinition[] = [
       'File a question only the operator can answer, then keep working on something else and read answers with the inbox tool.',
     inputSchema: {
       type: 'object',
+      additionalProperties: false,
       required: ['question'],
       properties: {
         question: { type: 'string' },
@@ -615,6 +626,7 @@ const TOOLS: ToolDefinition[] = [
       'Clear an answered question out of your inbox once you have done what it says. Until you do, inbox keeps handing it back, and a second agent has no way of telling that somebody already acted on it.',
     inputSchema: {
       type: 'object',
+      additionalProperties: false,
       required: ['id', 'agent'],
       properties: {
         id: { type: 'string' },
@@ -640,6 +652,7 @@ const TOOLS: ToolDefinition[] = [
       'The project’s columns as its operator laid them out, with the items in each. Columns are a view over status, labels, owner and claim state, so reading the board tells you how this project wants work described.',
     inputSchema: {
       type: 'object',
+      additionalProperties: false,
       properties: {
         items: { type: 'boolean', description: 'false for counts only' },
         include_closed: {
@@ -673,6 +686,7 @@ const TOOLS: ToolDefinition[] = [
       'Puts an item in a column of this board, doing whatever that column says belongs there: a status, a label, an owner, a claim. Read the board first to see the column keys. The answer says which column it actually landed in, which is not always the one you asked for.',
     inputSchema: {
       type: 'object',
+      additionalProperties: false,
       required: ['slug', 'column'],
       properties: {
         slug: { type: 'string' },
@@ -699,6 +713,7 @@ const TOOLS: ToolDefinition[] = [
       'Offers the project to an operator by email. It appears in their view where one click makes them the owner, which also lifts the limits and stops the project expiring. Needs an admin token, because this is how a project changes hands and ownership has no way back. Use it to answer a handover_requests entry from the inbox tool, and never send anybody the project token.',
     inputSchema: {
       type: 'object',
+      additionalProperties: false,
       required: ['email'],
       properties: {
         email: { type: 'string' },
@@ -723,6 +738,7 @@ const TOOLS: ToolDefinition[] = [
       'Four statuses, four meanings: answered (act on it), resolved (already handled, stop), wont_do (dropped, do not ask again), in_progress (wait, do not duplicate).',
     inputSchema: {
       type: 'object',
+      additionalProperties: false,
       properties: { agent: { type: 'string' } },
     },
     requiresProject: true,

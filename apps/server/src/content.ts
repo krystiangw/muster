@@ -838,6 +838,12 @@ export function llmsTxt(config: Config): string {
 `;
 }
 
+// The catalogue is named twice already: allowed by path above, and linked from
+// every page's head as rel="ai-catalog". It used to be named a third time here,
+// with an `AI-Catalog:` directive that exists in no standard, and a parser
+// reading a directive nobody defined calls the whole file invalid. A made-up
+// line that costs this file its validity is worse than no line at all, because
+// what it breaks is the one file every crawler actually reads.
 export function robotsTxt(config: Config): string {
   return `User-agent: *
 Allow: /
@@ -869,7 +875,6 @@ User-agent: Claude-SearchBot
 Allow: /
 
 Sitemap: ${config.baseUrl}/sitemap.xml
-AI-Catalog: ${config.baseUrl}/.well-known/ai-catalog.json
 `;
 }
 

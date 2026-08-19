@@ -1021,6 +1021,89 @@ describe('a form that says two things', () => {
   });
 });
 
+describe('the colours these pages are read in', () => {
+  /**
+   * A page-speed report found one chip below the line at 4.32:1 where its two
+   * neighbours sat at 5.50 and 5.18. The neighbours were not right on purpose,
+   * they were right by luck, and luck does not survive the next colour anybody
+   * picks. This reads the stylesheet the pages actually link and does the
+   * arithmetic, in both themes, so the next one is caught before a report is.
+   */
+  const channel = (value: number): number => {
+    const c = value / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  // Three digits and six are the same colour, and the stylesheet writes both.
+  const full = (hex: string): string => {
+    const h = hex.replace('#', '');
+    return h.length === 3 ? `#${[...h].map((d) => d + d).join('')}` : `#${h}`;
+  };
+  const luminance = (raw: string): number => {
+    const h = full(raw).replace('#', '');
+    const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+    return 0.2126 * channel(r!) + 0.7152 * channel(g!) + 0.0722 * channel(b!);
+  };
+  const contrast = (a: string, b: string): number => {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (hi! + 0.05) / (lo! + 0.05);
+  };
+  // What the browser composites: a translucent tint over whatever is behind it.
+  const over = (tint: string, behind: string, share: number): string => {
+    const [t, b] = [full(tint).replace('#', ''), full(behind).replace('#', '')];
+    return `#${[0, 2, 4]
+      .map((i) =>
+        Math.round(parseInt(t.slice(i, i + 2), 16) * share + parseInt(b.slice(i, i + 2), 16) * (1 - share))
+          .toString(16)
+          .padStart(2, '0'),
+      )
+      .join('')}`;
+  };
+
+  it('gives every chip enough contrast to read, in both themes', async () => {
+    const page = await harness.server.inject({ method: 'GET', url: '/' });
+    const href = /<link rel="stylesheet" href="([^"]+)"/.exec(page.body)?.[1];
+    assert.ok(href, 'the page links a stylesheet');
+    const sheet = (await harness.server.inject({ method: 'GET', url: href })).body;
+
+    // The light block is written first and the dark one inside the media
+    // query, so the first value of a name is light and the second is dark.
+    const themes = [0, 1].map((which) => {
+      const found = new Map<string, string>();
+      const seen = new Map<string, number>();
+      for (const [, name, value] of sheet.matchAll(
+        /--([a-z0-9-]+):(#[0-9a-f]{6}\b|#[0-9a-f]{3}\b)/g,
+      )) {
+        const count = (seen.get(name!) ?? 0) + 1;
+        seen.set(name!, count);
+        if (count === which + 1) found.set(name!, value!);
+      }
+      return found;
+    });
+
+    const rules = [
+      ...sheet.matchAll(
+        /\.chip\.([a-z]+) \{ color:var\(--([a-z0-9-]+)\); background:color-mix\(in srgb,var\(--([a-z0-9-]+)\) (\d+)%,transparent\); \}/g,
+      ),
+    ];
+    assert.ok(rules.length >= 3, `found ${rules.length} tinted chips to check`);
+
+    for (const [which, vars] of themes.entries()) {
+      const surface = vars.get('surface');
+      assert.ok(surface, 'the theme names a surface');
+      for (const [, chip, ink, tint, share] of rules) {
+        const text = vars.get(ink!);
+        const behind = vars.get(tint!);
+        assert.ok(text && behind, `${chip} names colours this theme has`);
+        const ratio = contrast(text, over(behind, surface, Number(share) / 100));
+        assert.ok(
+          ratio >= 4.5,
+          `.chip.${chip} reads at ${ratio.toFixed(2)}:1 in the ${which === 0 ? 'light' : 'dark'} theme, under 4.5:1`,
+        );
+      }
+    }
+  });
+});
+
 describe('every link these pages render', () => {
   /**
    * A link that goes nowhere is invisible to a test that only asserts it is
@@ -1067,6 +1150,28 @@ describe('every link these pages render', () => {
         headers: { accept: 'text/html', cookie: session.cookie },
       });
       assert.equal(rendered.statusCode, 200, page);
+
+      // One main landmark on every page, so a screen reader can skip the
+      // header and the nav rather than walking them again on each one.
+      assert.equal(
+        (rendered.body.match(/<main>/g) ?? []).length,
+        1,
+        `${page} renders exactly one main landmark`,
+      );
+
+      // A link whose text says nothing is a link read out of context, which is
+      // how both a screen reader and a crawler read it. "start" was the one
+      // that said nothing: start what.
+      for (const [, text] of rendered.body.matchAll(/<a\b[^>]*>([^<]*)<\/a>/g)) {
+        const words = (text ?? '').trim().toLowerCase();
+        assert.ok(
+          !['start', 'here', 'click here', 'read more', 'learn more', 'more', 'link'].includes(
+            words,
+          ),
+          `${page} has a link that says only "${words}"`,
+        );
+      }
+
       for (const href of linksOn(rendered.body)) {
         if (checked.has(href)) continue;
         checked.add(href);

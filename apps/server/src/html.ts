@@ -23,7 +23,12 @@ const CSS = `
 :root {
   --bg:#f5f7f5; --surface:#fff; --surface-2:#ecefec; --ink:#141917; --ink-2:#3c4643;
   --muted:#61706c; --rule:#d6dcd8; --accent:#0e5f59; --accent-soft:#dcebe8;
-  --danger:#a2372a; --warn:#8a6410; --ok:#2c6b48;
+  /* --warn was #8a6410, and the one chip in the row that missed: 4.32:1 on its
+     own tinted background where blocked reads 5.50 and done 5.18. Same hue and
+     the same saturation, four steps darker, which puts it at 5.30 between its
+     two neighbours rather than merely over the line. The dark theme's amber was
+     already at 5.60 and is untouched. */
+  --danger:#a2372a; --warn:#77560e; --ok:#2c6b48;
   /* What a modal dims the page with, and what a shadow is made of. Both used to
      be mixed from --ink, which is the text colour: in the dark theme that is
      nearly white, so the layer meant to push the board back lit it up instead.
@@ -59,7 +64,9 @@ body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans)
 .wrap.wide > h1, .wrap.wide > p, .wrap.wide > .lead, .wrap.wide > form:not(.filters) { max-width:66ch; }
 /* Every page's own paragraphs, not just the ones on the pages that remembered
    to ask: /docs and /operator were running to about 104 characters a line. */
-.wrap > p { max-width:66ch; }
+/* Both, because the body moved inside a main landmark and this rule is what
+   keeps a paragraph from running the width of a wide screen. */
+.wrap > p, .wrap > main > p { max-width:66ch; }
 .prose { max-width:66ch; }
 header.top { display:flex; align-items:baseline; gap:16px; flex-wrap:wrap;
   border-bottom:1px solid var(--rule); padding-bottom:14px; margin-bottom:32px; }
@@ -474,11 +481,18 @@ ${
     <a href="/skill.md">skill.md</a>
     <a href="/pricing">pricing</a>
     <a href="/operator">${options.signedIn ? 'your projects' : 'sign in'}</a>
-    <a href="/signup">start</a>
+    <!-- "start" was one word that said nothing: read out of context, which is
+         how a screen reader and a crawler both read it, start what. The link
+         goes to signup and now says so. -->
+    <a href="/signup">create a board</a>
   </nav>
 </header>`
   }
+<!-- One main landmark, so a screen reader can skip the header and the nav on
+     every page rather than walking them again on each one. -->
+<main>
 ${body}
+</main>
 <footer class="bot">
   <span>Muster</span>
   <a href="https://github.com/krystiangw/muster">source on GitHub</a>

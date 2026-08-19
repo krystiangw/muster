@@ -502,7 +502,22 @@ describe('B. agent entry', () => {
     }
 
     const robots = await harness.server.inject({ method: 'GET', url: '/robots.txt' });
-    assert.match(robots.body, /AI-Catalog: \S+\/\.well-known\/ai-catalog\.json/);
+    // The catalogue is reachable and allowed, and it is named where naming it
+    // is valid: the head link on every page. It used to be named here too,
+    // with an `AI-Catalog:` directive that exists in no standard, and a parser
+    // reading an unknown directive calls the whole file invalid. Every line of
+    // this file is one a crawler is known to read.
+    assert.match(robots.body, /Allow: \/\.well-known\/ai-catalog\.json/);
+    assert.match(robots.body, /Sitemap: \S+\/sitemap\.xml/);
+    for (const line of robots.body.split('\n')) {
+      const trimmed = line.trim();
+      if (trimmed === '' || trimmed.startsWith('#')) continue;
+      assert.match(
+        trimmed,
+        /^(User-agent|Allow|Disallow|Sitemap|Crawl-delay):/,
+        `robots.txt directive nobody defined: ${trimmed}`,
+      );
+    }
 
     // Three surfaces once told a newcomer to run `npm install @muster/sdk`
     // while the registry answered 404. Both states are checked, because both
@@ -1225,6 +1240,24 @@ describe('the MCP surface', () => {
       /"zupelnie_wymyslony" is not a field "list_items" has\./,
     );
     assert.match(String(invented.content[0].text), /It takes status, owner, label/);
+
+    // What tools/list advertises and what this door does have to be the same
+    // sentence. An open schema tells a client generating arguments from the
+    // listing that anything goes, and then the call is refused: the contract
+    // said yes and the door said no, which is worse than either answer alone.
+    const listed = await harness.server.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: { authorization: `Bearer ${project.token}` },
+      payload: { jsonrpc: '2.0', id: 999, method: 'tools/list' },
+    });
+    for (const tool of listed.json().result.tools) {
+      assert.equal(
+        tool.inputSchema.additionalProperties,
+        false,
+        `${tool.name} advertises the same closed shape this door enforces`,
+      );
+    }
 
     // `_meta` is the protocol's, not ours. A client sending a progress token
     // beside the arguments is conforming, not guessing, and params is the one
