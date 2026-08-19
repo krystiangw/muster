@@ -859,22 +859,6 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
           'Lease with TTL. ok:false means somebody else holds it and the holder is named. A 409 blocked_by means the card is waiting on others, which the message names with their statuses.',
       },
       {
-        name: 'heartbeat',
-        method: 'POST',
-        url: `${base}/v1/{project}/items/{slug}/heartbeat`,
-        request: { agent: 'errors-loop', ttl_minutes: 60 },
-        notes:
-          'Extends a lease you hold. A lapsed one cannot be extended, only claimed again: between expiry and the sweep the item is already fair game.',
-      },
-      {
-        name: 'release',
-        method: 'POST',
-        url: `${base}/v1/{project}/items/{slug}/release`,
-        request: { agent: 'errors-loop', note: 'why you are handing it back' },
-        notes:
-          'Hands the item back without closing it. Releasing what nobody holds succeeds, because that is already what the caller wanted.',
-      },
-      {
         // The same name the MCP tool carries. These read as operation names and
         // an agent that meets both doors should not have to work out that two
         // words describe one act.
@@ -905,18 +889,21 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
         notes: 'One card with its timeline, which is what to read before deciding whether to pick it up.',
       },
       {
-        name: 'heartbeat_claim',
+        // The names the MCP tools carry, because one operation has one name.
+        name: 'heartbeat',
         method: 'POST',
         url: `${base}/v1/{project}/items/{slug}/heartbeat`,
         request: { agent: '{handle}', ttl_minutes: 60 },
-        notes: 'Work outliving its lease says so. Without this the claim expires and the item goes back in the pool.',
+        notes:
+          'Work outliving its lease says so. Without this the claim expires and the item goes back in the pool, and a lapsed one cannot be extended, only claimed again.',
       },
       {
-        name: 'release_claim',
+        name: 'release',
         method: 'POST',
         url: `${base}/v1/{project}/items/{slug}/release`,
         request: { agent: '{handle}', note: 'why you are letting go' },
-        notes: 'Safe to call twice and safe after closing: what you asked for is already true.',
+        notes:
+          'Hands the item back without closing it, so somebody else can take it now rather than at expiry. Safe to call twice and safe after closing: what you asked for is already true.',
       },
       {
         name: 'list_agents',

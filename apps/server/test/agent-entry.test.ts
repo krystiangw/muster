@@ -786,6 +786,21 @@ describe('B. agent entry', () => {
     );
     const published = access.json().endpoints as Array<{ name: string; method: string; url: string }>;
     const cardNames = new Set(published.map((endpoint) => endpoint.name));
+    // One name per operation, in both directions. The card advertised
+    // heartbeat_claim and release_claim, and adding the tools of the same name
+    // put a second row on each URL: a client picking operations by name read
+    // one call as two. The names are what a caller matches on, so a duplicate
+    // is worse than a gap.
+    const seen = new Map<string, string[]>();
+    for (const endpoint of published) {
+      const key = `${endpoint.method} ${endpoint.url}`;
+      seen.set(key, [...(seen.get(key) ?? []), endpoint.name]);
+    }
+    const twice = [...seen.entries()]
+      .filter(([, names]) => names.length > 1)
+      .map(([key, names]) => `${key} is published as ${names.join(' and ')}`);
+    assert.deepEqual(twice, [], 'one operation, one name');
+
     const missing = [...toolNames].filter((name) => !cardNames.has(name));
     assert.deepEqual(
       missing,
