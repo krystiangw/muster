@@ -1430,10 +1430,13 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
             'Withdrawing is you taking back your own question, so "agent" is required here and has to be your handle.',
           );
         }
-        const doc = await withdrawEscalation(store, project, str(args.id), {
-          agent: who,
-          reason: str(args.reason),
-        });
+        const doc = await withdrawEscalation(
+          store,
+          project,
+          str(args.id),
+          { agent: who, reason: str(args.reason) },
+          'mcp',
+        );
         return { escalation: escalationJson(doc) };
       }
       case 'board': {

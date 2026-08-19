@@ -2843,7 +2843,7 @@ export async function acknowledgeEscalation(
 ): Promise<EscalationDoc> {
   const now = new Date();
   const updated = await store.escalations.findOneAndUpdate(
-    { _id: id, projectId: project._id, status: { $ne: 'open' }, acknowledgedAt: null },
+    { _id: id, projectId: project._id, status: { $ne: 'open' }, acknowledgedAt: null, withdrawnAt: null },
     {
       $set: {
         acknowledgedAt: now,
@@ -2862,6 +2862,13 @@ export async function acknowledgeEscalation(
         409,
         'not_answered',
         'That question has no answer yet. Acting on it now would be a guess, not an acknowledgement.',
+      );
+    }
+    if (existing.withdrawnAt) {
+      throw new ServiceError(
+        409,
+        'not_answered',
+        `${existing.withdrawnBy} took this question back, so there is no answer to have acted on. Nothing is owed here.`,
       );
     }
     throw new ServiceError(
@@ -2907,6 +2914,7 @@ export async function withdrawEscalation(
   project: ProjectDoc,
   id: string,
   input: { agent: string; reason: string },
+  door: EventDoor = 'http',
 ): Promise<EscalationDoc> {
   const reason = input.reason.trim().slice(0, 2000);
   if (!reason) {
@@ -2920,15 +2928,25 @@ export async function withdrawEscalation(
   // Guarded on `open` inside the update rather than checked first, so a person
   // answering at the same moment wins and the withdrawal misses, rather than
   // both landing and the answer being lost.
+  const who = input.agent.slice(0, 48);
   const updated = await store.escalations.findOneAndUpdate(
-    { _id: id, projectId: project._id, status: 'open' },
+    // The handle is in the predicate, not merely recorded afterwards. A fleet
+    // shares one key, so without this any loop could close a question another
+    // loop is waiting on, and the sentence at both doors promises it cannot.
+    { _id: id, projectId: project._id, status: 'open', agent: who },
     {
       $set: {
         status: 'wont_do' as EscalationStatus,
         answer: null,
-        answeredAt: null,
+        // Set, although nobody answered. Every reader of closed questions, the
+        // inbox and both operator histories, orders by this and then takes the
+        // first fifty, so a withdrawal left null would sort behind every answer
+        // ever given and vanish from the pages meant to show it. It reads as
+        // "when it stopped being open", and `withdrawnAt` beside it says who
+        // stopped it and that no answer exists.
+        answeredAt: now,
         withdrawnAt: now,
-        withdrawnBy: input.agent.slice(0, 48),
+        withdrawnBy: who,
         withdrawnReason: reason,
         updatedAt: now,
       },
@@ -2943,6 +2961,13 @@ export async function withdrawEscalation(
         409,
         'already_withdrawn',
         `${existing.withdrawnBy} already took this one back.`,
+      );
+    }
+    if (existing.status === 'open') {
+      throw new ServiceError(
+        403,
+        'not_your_question',
+        `${existing.agent} asked this one. You can only take back your own, and closing somebody else's would leave them waiting on an answer that is no longer coming.`,
       );
     }
     throw new ServiceError(
@@ -2967,7 +2992,7 @@ export async function withdrawEscalation(
   // Never `answer`: that count is what tells us whether people answer from the
   // link the mail sends them, and an agent closing its own question is not a
   // person answering anything.
-  record(store, 'withdraw', { door: 'http' });
+  record(store, 'withdraw', { door });
   return updated as EscalationDoc;
 }
 
@@ -3151,7 +3176,19 @@ export async function answerEscalation(
         // recency: the history a person sees is ordered by it, so a retry of
         // last week's answer would climb over this morning's.
         ...(changed
-          ? { answeredAt: now, acknowledgedAt: null, acknowledgedBy: null, acknowledgedNote: null }
+          ? {
+              answeredAt: now,
+              acknowledgedAt: null,
+              acknowledgedBy: null,
+              acknowledgedNote: null,
+              // A withdrawn question can be reopened and answered from the
+              // browser, and the two pages a person reads branch on these, so
+              // leaving them set would show a real answer as a withdrawal for
+              // ever and hide the words the person wrote.
+              withdrawnAt: null,
+              withdrawnBy: null,
+              withdrawnReason: null,
+            }
           : {}),
       },
     },

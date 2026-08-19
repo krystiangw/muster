@@ -1043,6 +1043,79 @@ describe('taking a question back', () => {
   });
 });
 
+describe('what taking a question back must not do', () => {
+  const raise = async (project: Project, agent: string, question: string) =>
+    (await post(project, '/escalations', { agent, question, context: 'x' })).json().escalation.id;
+
+  it('closes only your own, since a fleet shares one key', async () => {
+    const project = await createProject(harness);
+    const theirs = await raise(project, 'errors-loop', 'Bridge or wait?');
+    const refused = await post(project, `/escalations/${theirs}/withdraw`, {
+      agent: 'trades-loop',
+      reason: 'not mine to close',
+    });
+    assert.equal(refused.statusCode, 403);
+    assert.equal(refused.json().error, 'not_your_question');
+    assert.match(refused.json().message, /errors-loop asked this one/);
+    // Untouched: the agent that asked is still waiting on an answer.
+    assert.equal((await get(project, `/escalations`)).json().escalations[0].status, 'open');
+  });
+
+  it('leaves it where the readers of closed questions look', async () => {
+    // Both operator histories and the inbox order closed questions by
+    // answeredAt and then take the first page. A withdrawal that left it null
+    // would sort behind every answer ever given on the board and vanish from
+    // the pages that exist to show it.
+    const project = await createProject(harness);
+    const older = await raise(project, 'errors-loop', 'answered a while ago');
+    await harness.server.inject({
+      method: 'PATCH',
+      url: `${project.api}/escalations/${older}`,
+      headers: { ...authed(project), 'content-type': 'application/json' },
+      payload: { status: 'answered', answer: 'do it' },
+    });
+    const mine = await raise(project, 'errors-loop', 'the one taken back');
+    await post(project, `/escalations/${mine}/withdraw`, { agent: 'errors-loop', reason: 'my mistake' });
+
+    const answers = (await get(project, '/inbox?agent=errors-loop')).json().answers;
+    assert.equal(answers[0].id, mine, 'the newest closed question is the withdrawn one');
+    assert.ok(answers[0].answered_at, 'stamped when it stopped being open, so it sorts');
+    assert.equal(answers[0].answer, null, 'and no answer, because nobody gave one');
+  });
+
+  it('cannot then be acknowledged as though somebody had answered', async () => {
+    const project = await createProject(harness);
+    const id = await raise(project, 'errors-loop', 'Bridge?');
+    await post(project, `/escalations/${id}/withdraw`, { agent: 'errors-loop', reason: 'my mistake' });
+    const acted = await post(project, `/escalations/${id}/ack`, { agent: 'errors-loop', note: 'did it' });
+    assert.equal(acted.statusCode, 409);
+    assert.match(acted.json().message, /took this question back/);
+  });
+
+  it('stops being a withdrawal once somebody reopens and answers it', async () => {
+    const project = await createProject(harness);
+    const id = await raise(project, 'errors-loop', 'Bridge?');
+    await post(project, `/escalations/${id}/withdraw`, { agent: 'errors-loop', reason: 'my mistake' });
+    const answer = async (status: string, text: string) =>
+      harness.server.inject({
+        method: 'PATCH',
+        url: `${project.api}/escalations/${id}`,
+        headers: { ...authed(project), 'content-type': 'application/json' },
+        payload: { status, answer: text },
+      });
+    await answer('open', '');
+    await answer('answered', 'bridge it, the pool is fine');
+
+    const doc = (await get(project, `/escalations`)).json().escalations[0];
+    assert.equal(doc.status, 'answered');
+    assert.equal(doc.answer, 'bridge it, the pool is fine');
+    // Both pages a person reads branch on this, so a stale marker would show a
+    // real answer as a withdrawal and hide the words somebody wrote.
+    assert.equal(doc.withdrawn_at, null);
+    assert.equal(doc.withdrawn_by, null);
+  });
+});
+
 describe('keys', () => {
   it('lets an admin token mint and revoke a write key, and stops a write key from doing it', async () => {
     const project = await createProject(harness);
