@@ -37,12 +37,15 @@ const client = new Muster({
 ```ts
 await client.registerAgent({ handle: 'errors-loop', scope: ['errors:'] });
 
-const { item, reason } = await client.next();
-if (!item) return console.log(reason);
-
-// Claims it, keeps the lease alive while the work runs, releases it even on a
-// throw, and returns null instead of duplicating work somebody else holds.
-await client.withClaim(item.slug, async (claimed) => {
+// Takes the next card and its lease in one write, keeps the lease alive while
+// the work runs, and hands it back even on a throw. Null means there was
+// nothing to take, which is the ordinary answer on a quiet board.
+//
+// Not `next()` and then `withClaim()`: that reads well and is a race, because
+// every loop is offered the same card and one of them wins the claim that
+// follows. Use `next()` when you want to look without taking, and
+// `withClaim(slug)` when you already know which card you want.
+await client.withNext(async (claimed) => {
   await client.note(claimed.slug, 'checked the pool depth, too thin');
 
   await client.escalate({

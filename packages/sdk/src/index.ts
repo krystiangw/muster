@@ -213,6 +213,17 @@ export interface BoardFacets {
   omitted: { owners: number; agents: number; labels: number };
 }
 
+export interface ApiKey {
+  id: string;
+  name: string;
+  role: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  /** Null for a key that does not expire. */
+  expires_at: string | null;
+}
+
 export interface MusterOptions {
   project: string;
   token: string;
@@ -534,8 +545,34 @@ export class Muster {
     return this.request('DELETE', `/items/${encodeURIComponent(slug)}`);
   }
 
+  /**
+   * What to pick up next, without taking it. Safe to poll and safe for a proxy
+   * or a client to retry, because it writes nothing.
+   */
   async next(agent = this.actor): Promise<NextResult> {
     return this.request('GET', '/next', undefined, { agent });
+  }
+
+  /**
+   * The same choice, taken in the same breath.
+   *
+   * A fleet that looks and then claims is a fleet where everybody is offered
+   * the same card and one of them wins: nine loops out of ten spend a round
+   * trip losing a race. The service settles that in one update, and until this
+   * existed nothing here could reach it, so every fleet built on this package
+   * had the problem the endpoint was written to remove.
+   *
+   * `claimed` says whether the lease came with the card. A null item means
+   * there was nothing to take, which is not a failure.
+   */
+  async take(
+    agent = this.actor,
+    ttlMinutes?: number,
+  ): Promise<NextResult & { claimed: boolean }> {
+    return this.request('POST', '/next', {
+      agent,
+      ...(ttlMinutes === undefined ? {} : { ttl_minutes: ttlMinutes }),
+    });
   }
 
   async observe(
@@ -588,6 +625,40 @@ export class Muster {
 
     try {
       return await work(claimed.item);
+    } finally {
+      clearInterval(beat);
+      await this.release(slug, agent).catch(() => undefined);
+    }
+  }
+
+  /**
+   * The loop, for anything running more than one of these.
+   *
+   * `next()` and then `withClaim()` reads well and is a race: everybody is
+   * offered the same card and one of them wins the claim that follows. This
+   * takes the card and the lease in a single write, keeps the lease alive while
+   * the work runs, and hands it back afterwards even if the work throws.
+   *
+   * Returns null when there was nothing to take, which is the ordinary answer
+   * on a quiet board and not a failure.
+   */
+  async withNext<T>(
+    work: (item: Item) => Promise<T>,
+    options: { agent?: string; ttlMinutes?: number } = {},
+  ): Promise<T | null> {
+    const agent = options.agent ?? this.actor;
+    const ttlMinutes = options.ttlMinutes ?? 15;
+    const taken = await this.take(agent, ttlMinutes);
+    if (!taken.item || !taken.claimed) return null;
+    const slug = taken.item.slug;
+
+    const beat = setInterval(() => {
+      void this.heartbeat(slug, agent, ttlMinutes).catch(() => undefined);
+    }, Math.max(30_000, (ttlMinutes * 60_000) / 3));
+    if (typeof beat.unref === 'function') beat.unref();
+
+    try {
+      return await work(taken.item);
     } finally {
       clearInterval(beat);
       await this.release(slug, agent).catch(() => undefined);
@@ -803,6 +874,50 @@ export class Muster {
     token: string;
   }> {
     return this.request('POST', '/keys', input);
+  }
+
+  /**
+   * Every key this project has, without the tokens: those are shown once.
+   * Revoked ones stay on the list with a date, because a list of live keys
+   * cannot answer what happened to one that used to work.
+   */
+  async keys(): Promise<{ keys: ApiKey[] }> {
+    return this.request('GET', '/keys');
+  }
+
+  /**
+   * Revokes one. Minting a credential from code and having to open a browser
+   * to take it back is the kind of asymmetry that leaves keys alive forever.
+   */
+  async deleteKey(id: string): Promise<{ ok: boolean }> {
+    return this.request('DELETE', `/keys/${encodeURIComponent(id)}`);
+  }
+
+  /**
+   * Moves everything one handle wrote, and any lease it holds, onto another.
+   * What an agent does after it notices it has been calling itself two things.
+   */
+  async renameAgent(from: string, to: string): Promise<Record<string, unknown>> {
+    return this.request('POST', `/agents/${encodeURIComponent(from)}/rename`, { to });
+  }
+
+  /** The hygiene rules this project runs itself by. */
+  async setRules(input: {
+    stale_after_hours?: number;
+    absence_resolve?: number;
+    require_body_after_hours?: number;
+    claim_ttl_minutes?: number;
+    scope_warnings?: boolean;
+  }): Promise<Record<string, unknown>> {
+    return this.request('PATCH', '/rules', input);
+  }
+
+  /**
+   * A new read link, and the old one stops working. What to do from code the
+   * moment a link that was meant for one person turns up somewhere else.
+   */
+  async rotateReadLink(): Promise<{ read_url: string }> {
+    return this.request('POST', '/read-link/rotate');
   }
 
   /** Starts the human claim by emailing a six digit code. */

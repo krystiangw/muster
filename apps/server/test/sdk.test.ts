@@ -367,6 +367,156 @@ describe('the typed SDK', () => {
     );
   });
 
+  it('reaches every call a project token can make', async () => {
+    /**
+     * The gap this found was the one that mattered: `next()` was the GET, which
+     * looks and does not take, and nothing here could reach the POST. A fleet
+     * built on this package therefore did exactly what that endpoint was
+     * written to stop, with everybody offered the same card and one of them
+     * winning. The service had solved it and the layer agents import could not
+     * say so.
+     *
+     * Read out of the published document rather than from a list kept here, so
+     * a call added to the service is either wrapped or named below as
+     * deliberately absent.
+     */
+    const spec = (await harness.server.inject({ method: 'GET', url: '/openapi.json' })).json() as {
+      paths: Record<string, Record<string, unknown>>;
+    };
+
+    // Not through a project client, and each for its own reason.
+    const elsewhere = new Map([
+      ['GET /.well-known/oauth-authorization-server', 'metadata a client reads before it has a token'],
+      ['GET /.well-known/oauth-protected-resource', 'the same'],
+      ['POST /oauth/register', 'the other way to get a token, and this client already has one'],
+      ['POST /oauth/token', 'the same'],
+      ['POST /feedback', 'about this service rather than about a board, and it takes no token'],
+      ['GET /v1/{project}', 'read back through summary()'],
+      ['GET /v1/{project}/inbox', 'read through inbox()'],
+    ]);
+
+    const source = await (await import('node:fs/promises')).readFile(
+      new URL('../../../packages/sdk/src/index.ts', import.meta.url),
+      'utf8',
+    );
+    const wrapped = new Set<string>(['POST /p']);
+    for (const [, method, path] of source.matchAll(/this\.request(?:<[^>]*>)?\(\s*'([A-Z]+)',\s*[`']([^`']*)/g)) {
+      wrapped.add(
+        `${method} /v1/{project}${path!
+          .replace(/\$\{encodeURIComponent\(slug\)\}/, '{slug}')
+          .replace(/\$\{encodeURIComponent\(from\)\}/, '{handle}')
+          .replace(/\$\{encodeURIComponent\(id\)\}/, '{id}')}`,
+      );
+    }
+
+    const missing: string[] = [];
+    for (const [path, item] of Object.entries(spec.paths)) {
+      for (const method of Object.keys(item)) {
+        if (!['get', 'post', 'patch', 'put', 'delete'].includes(method)) continue;
+        const call = `${method.toUpperCase()} ${path}`;
+        if (wrapped.has(call) || elsewhere.has(call)) continue;
+        missing.push(call);
+      }
+    }
+    assert.deepEqual(missing, [], `the SDK cannot reach: ${missing.join(', ')}`);
+
+    // And the reasons stay honest: a call named as deliberately absent has to
+    // still exist, or the note is about nothing.
+    for (const call of elsewhere.keys()) {
+      const [method, path] = call.split(' ');
+      assert.ok(spec.paths[path!]?.[method!.toLowerCase()], `${call} is named as absent and is not a call at all`);
+    }
+  });
+
+  it('takes the next card and the lease in one call', async () => {
+    const { client } = await Muster.start({ name: 'taking', actor: 'taker', baseUrl });
+    await client.upsert({ slug: 'first', title: 'something to do' });
+    await client.upsert({ slug: 'second', title: 'something else' });
+
+    const taken = await client.take();
+    assert.equal(taken.claimed, true, 'the lease came with it');
+    assert.ok(taken.item, 'and there was something to take');
+    assert.equal(taken.item!.claim?.agent, 'taker');
+
+    // A second loop asking at the same moment gets the other card, not the
+    // same one, which is the whole reason this call exists.
+    const other = await client.take('second-loop');
+    assert.ok(other.item);
+    assert.notEqual(other.item!.slug, taken.item!.slug);
+
+    // And nothing left to take is an answer, not a failure.
+    const empty = await client.take('third-loop');
+    assert.equal(empty.item, null);
+    assert.equal(empty.claimed, false);
+
+    // The look still looks: it hands back what is there without taking it.
+    const looked = await client.next('fourth-loop');
+    assert.equal((looked as { claimed?: boolean }).claimed, undefined);
+  });
+
+  it('withNext takes, holds and hands back, and says nothing rather than failing', async () => {
+    // The pattern the README teaches, because the one it used to teach was a
+    // race: `next()` then `withClaim()` offers every loop the same card.
+    const { client } = await Muster.start({ name: 'the loop', actor: 'loop-a', baseUrl });
+    await client.upsert({ slug: 'only', title: 'the one thing to do' });
+
+    const held: string[] = [];
+    const done = await client.withNext(async (item) => {
+      const during = await client.item(item.slug);
+      held.push(during.item.claim?.agent ?? '(nobody)');
+      return item.slug;
+    });
+    assert.equal(done, 'only');
+    assert.deepEqual(held, ['loop-a'], 'the lease was held while the work ran');
+
+    const after = await client.item('only');
+    assert.equal(after.item.claim, null, 'and handed back afterwards');
+
+    // A throw still hands it back.
+    await client.upsert({ slug: 'second', title: 'something that goes wrong' });
+    await assert.rejects(
+      client.withNext(async () => {
+        throw new Error('the work failed');
+      }),
+      /the work failed/,
+    );
+    const released = await client.item('second');
+    assert.equal(released.item.claim, null, 'even when the work throws');
+
+    // Nothing left is an answer, not a failure.
+    for (const slug of ['only', 'second']) {
+      await client.upsert({ slug, status: 'done', note: 'finished' });
+    }
+    assert.equal(await client.withNext(async () => 'ran'), null);
+  });
+
+  it('can list and revoke a key it made, and rotate a read link', async () => {
+    // Minting a credential from code and having to open a browser to take it
+    // back is the asymmetry that leaves keys alive forever.
+    const { client, created } = await Muster.start({ name: 'keys', actor: 'a', baseUrl });
+    const made = await client.createKey({ name: 'a worker', role: 'write' });
+    const listed = await client.keys();
+    assert.ok(listed.keys.some((key) => key.id === made.key.id), 'it can see what it made');
+    assert.ok(
+      !JSON.stringify(listed.keys).includes(made.token),
+      'and the token is not in the list, because it is shown once',
+    );
+
+    const revoked = await client.deleteKey(made.key.id);
+    assert.equal(revoked.ok, true);
+    // Still on the list, with a date. A list of live keys only cannot answer
+    // what happened to one that used to work, which is the question somebody
+    // reading an audit is asking.
+    const after = await client.keys();
+    const gone = after.keys.find((key) => key.id === made.key.id);
+    assert.ok(gone, 'it is still on the list');
+    assert.ok(gone!.revoked_at, 'and it says when it stopped working');
+
+    const rotated = await client.rotateReadLink();
+    assert.match(rotated.read_url, /\/r\/r_/);
+    assert.notEqual(rotated.read_url, created.read_url, 'the old link is not the new one');
+  });
+
   /**
    * The types are a published promise about the responses, and they are
    * released separately from them. A field added to a serializer and not to the
