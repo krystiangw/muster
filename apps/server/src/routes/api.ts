@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { RATE_LIMIT_SCOPES, type Config } from '../config.js';
-import { READ_LINK_GRANTS } from '../content.js';
+import { READ_LINK_GRANTS, TOKEN_IS_SHOWN_ONCE, ownerNotSent } from '../content.js';
 import type { Store } from '../db.js';
 import { maybeExpireClaims, maybeSweep, sweepProject } from '../hygiene.js';
 import {
@@ -265,9 +265,16 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
             ? { owner_notified: offered }
             : {
                 owner_notified: false,
-                owner_notice: `That address has been written to enough for now, so nothing was sent. The board exists: hand them ${config.baseUrl}/r/${project.readToken} yourself, or offer it again in ${mayWrite?.retryAfterSeconds ?? 0}s.`,
+                owner_notice: ownerNotSent(
+                  `${config.baseUrl}/r/${project.readToken}`,
+                  mayWrite?.retryAfterSeconds ?? 0,
+                ),
               }
           : {}),
+        // The same sentence the other door says. An agent that discards this
+        // token has lost the project, and until now only one of the two ways
+        // of getting one said so.
+        notice: TOKEN_IS_SHOWN_ONCE,
         next: {
           instructions: `${config.baseUrl}/skill.md`,
           claim_to_keep: `${config.baseUrl}/v1/${project._id}/claim`,

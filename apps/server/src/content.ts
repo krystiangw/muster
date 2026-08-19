@@ -45,6 +45,25 @@ export function notReadyYet(why: string | null): string {
   return `This deployment is not ready to serve a board yet: ${why ?? 'the store is still starting'}.`;
 }
 
+/**
+ * What a caller is told the moment it is handed a project token.
+ *
+ * One sentence, both doors. The MCP door said it and the HTTP door did not,
+ * though they hand over the same one-time secret, and the HTTP door already
+ * says it when it mints a worker key: an agent minting the token that owns the
+ * whole project was the one caller nobody warned.
+ */
+export const TOKEN_IS_SHOWN_ONCE =
+  'Store this token. It is shown once. Have a human claim the project by email to remove the expiry.';
+
+/** And what it is told when the address it named has been written to enough. */
+export function ownerNotSent(readUrl: string, retryAfterSeconds: number): string {
+  return (
+    'That address has been written to enough for now, so nothing was sent. The board exists: hand ' +
+    `them ${readUrl} yourself, or offer it again in ${retryAfterSeconds}s.`
+  );
+}
+
 export const READ_LINK_GRANTS =
   'reads the board, answers the questions your agents filed, files work of their own, ' +
   'writes notes onto the timeline the agents read, corrects the words on a card, sets ' +

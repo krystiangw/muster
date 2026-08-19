@@ -985,6 +985,35 @@ describe('the MCP surface', () => {
     assert.equal(unauthorized.json().result.isError, true);
   });
 
+  it('hands over the token with the same warning either way', async () => {
+    // The two doors mint the same one-time secret, and only one of them said
+    // so. An agent that discards it has lost the project: there is no second
+    // copy, because only a hash is stored. The HTTP door already warned about
+    // this when minting a worker key, so the one caller nobody warned was the
+    // one holding the token that owns everything.
+    const { TOKEN_IS_SHOWN_ONCE } = await import('../src/content.js');
+
+    const overHttp = await harness.server.inject({
+      method: 'POST',
+      url: '/p',
+      payload: { name: 'either-way' },
+    });
+    assert.equal(overHttp.statusCode, 201);
+    assert.equal(overHttp.json().notice, TOKEN_IS_SHOWN_ONCE);
+
+    const overMcp = await harness.server.inject({
+      method: 'POST',
+      url: '/mcp',
+      payload: {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'create_project', arguments: { name: 'either-way-too' } },
+      },
+    });
+    assert.equal(overMcp.json().result.structuredContent.notice, TOKEN_IS_SHOWN_ONCE);
+  });
+
   it('carries a claim from start to finish, which it could not before', async () => {
     // claim_item told a client that "claims expire without a heartbeat" on a
     // door with no heartbeat and no release, so an MCP agent could take a lease

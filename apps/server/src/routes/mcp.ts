@@ -3,7 +3,7 @@ import { record, recordFirstWrite } from '../events.js';
 import { clientIp } from './api.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
-import { STORE_UNAVAILABLE } from '../content.js';
+import { STORE_UNAVAILABLE, TOKEN_IS_SHOWN_ONCE, ownerNotSent } from '../content.js';
 import { storeUnreachable, type Store } from '../db.js';
 import { maybeExpireClaims, maybeSweep } from '../hygiene.js';
 import type { Notifier } from '../notify.js';
@@ -928,11 +928,13 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
             ? { owner_notified: offered }
             : {
                 owner_notified: false,
-                owner_notice: `That address has been written to enough for now, so nothing was sent. Hand them ${config.baseUrl}/r/${project.readToken} yourself, or offer it again in ${mayWrite?.retryAfterSeconds ?? 0}s.`,
+                owner_notice: ownerNotSent(
+                  `${config.baseUrl}/r/${project.readToken}`,
+                  mayWrite?.retryAfterSeconds ?? 0,
+                ),
               }
           : {}),
-        notice:
-          'Store this token. It is shown once. Have a human claim the project by email to remove the expiry.',
+        notice: TOKEN_IS_SHOWN_ONCE,
         // Where a token has to go, without claiming more than is true. This
         // endpoint reads the header on every request and holds no session
         // state, so a caller that can set a header per call is already
