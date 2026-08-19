@@ -3,7 +3,7 @@ import { after, before, describe, it } from 'node:test';
 import { authed, createProject, signIn, startHarness, type Harness, type Project } from './helper.js';
 import { flushEvents } from '../src/events.js';
 import { searchTooSlow } from '../src/service.js';
-import { SEARCH_NARROWERS } from '../src/types.js';
+import { SEARCH_NARROWERS, SEARCH_NARROWING, SEARCH_NARROWING_MD } from '../src/types.js';
 
 /**
  * The promises that only an index keeps.
@@ -326,6 +326,32 @@ describe('the filters a slow search is told to use', () => {
     for (const [where, text] of published) {
       for (const name of SEARCH_NARROWERS) {
         assert.ok(text.includes(`${name}=`), `${where} names ${name}=`);
+      }
+      // Not just the names somewhere in the document: the rendered list, whole
+      // and in order. A hand-written second copy satisfies a search for the
+      // names and contradicts the generated one, which is how the last of
+      // these survived a review. Reading prose with a regex is what produced
+      // the false alarm before that, so this compares against the rendering
+      // instead of trying to find sentences.
+      // Exactly one rendering per document, whole and in order. Not "somewhere
+      // in the text": a second, hand-written copy satisfies a search for the
+      // names while contradicting the generated one, which is how the last of
+      // these survived a review. Counting instead of matching prose, because
+      // reading these sentences with a regex is what produced a false alarm
+      // one round earlier.
+      const renderings =
+        text.split(SEARCH_NARROWING).length - 1 + (text.split(SEARCH_NARROWING_MD).length - 1);
+      assert.ok(
+        renderings >= 1,
+        `${where} carries the list as it is rendered, whole and in order, not a copy of it`,
+      );
+      // Twice in a schema is two parameter descriptions, which is fine. Twice
+      // in the document an agent reads start to finish is the same advice
+      // given twice, and that is the shape the duplicate took: a paragraph
+      // about the namespace repeating the search section's list, free to go
+      // stale beside it while every check still passed.
+      if (where === 'skill.md') {
+        assert.equal(renderings, 1, 'skill.md gives this advice in one place');
       }
     }
   });

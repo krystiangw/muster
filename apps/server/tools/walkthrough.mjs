@@ -274,6 +274,27 @@ const run = async () => {
     );
   }
 
+  // The namespace in the slug, read back the two ways a caller reads it. Both
+  // are pure reads, so nothing here needs cleaning up after.
+  const facets = await json(`${api}/board/facets`, { headers: authed });
+  const namespace = `${SLUG.split(':')[0]}:`;
+  check(
+    'the board says which namespaces it holds',
+    Array.isArray(facets.body?.prefixes) && facets.body.prefixes.includes(namespace),
+    JSON.stringify(facets.body?.prefixes),
+  );
+  // Handed back exactly as it was given: a value that needs a delimiter added
+  // before it works is a filter list that answers with somebody else's area.
+  const area = await json(`${api}/items?prefix=${encodeURIComponent(namespace)}&limit=50`, {
+    headers: authed,
+  });
+  const slugs = (area.body?.items ?? []).map((item) => item.slug);
+  check(
+    'and narrowing to one of them answers with that area and nothing else',
+    slugs.includes(SLUG) && slugs.every((slug) => slug.startsWith(namespace)),
+    JSON.stringify(slugs).slice(0, 200),
+  );
+
   // A pipeline written on the work: file a card that names its successor,
   // finish it, and the successor should be there. Both cards are removed after,
   // because this tool keeps its project between runs and a board of its own
