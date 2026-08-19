@@ -167,7 +167,7 @@ describe('what the service knows about its own use', () => {
     }
   });
 
-  it('counts a crawler reading the protocol beside the agents, never among them', async () => {
+  it('counts an indexer reading the protocol beside the agents, never among them', async () => {
     // Records are batched now, so a reading taken before they are written
     // measures the buffer rather than the board.
     await flushEvents();
@@ -191,17 +191,22 @@ describe('what the service knows about its own use', () => {
     await flushEvents();
 
     const after = await insights(harness.store);
-    assert.equal(after.funnel.discovered, before.funnel.discovered + 1, 'one reader was not a bot');
+    // Two readers and one indexer. curl is on the readers' side deliberately:
+    // every example in the protocol is a curl command, so an agent doing
+    // exactly what this service told it to do arrives that way, and counting
+    // it as an indexer answered "how often are we crawled" with the people
+    // this file exists for and divided reads per signup by the wrong number.
+    assert.equal(after.funnel.discovered, before.funnel.discovered + 2, 'two readers, one of them curl');
     assert.equal(
       after.funnel.discoveredByCrawlers,
-      before.funnel.discoveredByCrawlers + 2,
-      'and the other two said they were',
+      before.funnel.discoveredByCrawlers + 1,
+      'and one said it was building an index',
     );
 
     // Both are kept. Dropping the crawler reads would throw away the answer to
     // "are these files being indexed at all", which is half of why they exist.
     const kept = await harness.store.events.countDocuments({ kind: 'discover', crawler: true });
-    assert.ok(kept >= 2);
+    assert.ok(kept >= 1);
   });
 
   it('drops a board out of every stage at once when its signup falls out of the window', async () => {
@@ -434,6 +439,31 @@ describe('counting the people, not the agents', () => {
     await harness.server.inject({ method: 'GET', url: `/r/${readToken}` });
     await flushEvents();
     assert.equal((await insights(harness.store)).pages.project ?? 0, (before.pages.project ?? 0) + 1);
+  });
+
+  it('keeps a tool out of the page counts while keeping it in the readers', async () => {
+    // The two questions read the same header and want different answers. A
+    // page view is about somebody looking at a page, and curl is not that. A
+    // protocol read is about an agent deciding whether to use this, and curl
+    // is exactly that, because the protocol is written in curl.
+    await flushEvents();
+    const before = await insights(harness.store);
+    await harness.server.inject({
+      method: 'GET',
+      url: '/',
+      headers: { 'user-agent': 'curl/8.4.0', accept: 'text/html' },
+    });
+    await harness.server.inject({
+      method: 'GET',
+      url: '/skill.md',
+      headers: { 'user-agent': 'curl/8.4.0' },
+    });
+    await flushEvents();
+    const after = await insights(harness.store);
+    const views = (report: Awaited<ReturnType<typeof insights>>): number =>
+      Object.values(report.pages).reduce((sum, count) => sum + count, 0);
+    assert.equal(views(after), views(before), 'curl did not look at a page');
+    assert.equal(after.funnel.discovered, before.funnel.discovered + 1, 'and did read the protocol');
   });
 
   it('does not count a crawler as a person', async () => {

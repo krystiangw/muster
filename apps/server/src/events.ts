@@ -101,16 +101,33 @@ export const VIEWABLE = [
 export type Viewable = (typeof VIEWABLE)[number];
 
 /**
- * Crawlers, as far as a page counter needs to care.
+ * Something building an index, rather than somebody deciding whether to use us.
  *
  * Not a security control and not exhaustive: a counter that includes every
  * indexing bot answers "how often are we crawled", which nobody asked. The
  * string is read and thrown away; no user agent is ever stored.
  */
-const CRAWLER = /bot\b|bot\/|crawler|spider|slurp|feedfetcher|scrapy|curl\/|wget/i;
+const INDEXER = /bot\b|bot\/|crawler|spider|slurp|feedfetcher|scrapy/i;
 
+/**
+ * A tool somebody is driving, which is not a person looking at a page.
+ *
+ * Kept apart from the indexers on purpose. Every example in the protocol is a
+ * curl command, so an agent doing exactly what this service told it to do
+ * arrives as `curl/8.x`: counting that as an indexer put our own readers in
+ * the "how often are we crawled" bucket and left "reads per signup" dividing
+ * by the wrong number. On a page view it is still not a person.
+ */
+const FETCHER = /curl\/|wget/i;
+
+/** Not a person looking at a page: an indexer, or a tool somebody is driving. */
 export function isCrawler(userAgent: string | undefined): boolean {
-  return userAgent !== undefined && CRAWLER.test(userAgent);
+  return userAgent !== undefined && (INDEXER.test(userAgent) || FETCHER.test(userAgent));
+}
+
+/** Something putting this in an index, which is not somebody reading it. */
+export function isIndexer(userAgent: string | undefined): boolean {
+  return userAgent !== undefined && INDEXER.test(userAgent);
 }
 
 export interface EventDoc {

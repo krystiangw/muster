@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
-import { isCrawler, record } from '../events.js';
+import { isIndexer, record } from '../events.js';
 import {
   agentAccessJson,
   agentSignupMd,
@@ -29,11 +29,16 @@ export function registerAgentFiles(app: FastifyInstance, config: Config, store: 
   // and walked away. Counted together, the second question gets the first
   // question's answer, and "two hundred reads per signup" stops meaning
   // anything. Nothing about the reader is stored beyond the one bit.
+  //
+  // Indexers only, not every tool: every example in the protocol is a curl
+  // command, so an agent following this service's own instructions arrives as
+  // `curl/8.x`, and filing that under "how often are we crawled" answered the
+  // first question with the readers of the second.
   const seen = (detail: string, request: { headers: { 'user-agent'?: string | undefined } }) =>
     record(store, 'discover', {
       door: 'http',
       detail,
-      crawler: isCrawler(request.headers['user-agent']),
+      crawler: isIndexer(request.headers['user-agent']),
     });
 
   const skill = skillMd(config);
