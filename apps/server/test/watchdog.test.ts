@@ -174,11 +174,29 @@ describe('the watchdog, watched', () => {
 
   it('notices that nothing has written a backup for two nights', async () => {
     // The failure that leaves every other check green, because the cron for it
-    // runs on the operator's machine and not on the dyno.
+    // runs on the operator's machine and not on the dyno. Two rounds, like an
+    // outage: one missed run is a laptop that was closed.
     backupWritten(Date.now() - 50 * 3_600_000);
+    assert.match(await round(), /backup miss 1: newest 50h ago/);
+    assert.match(await round(), /backups stale: newest 50h ago/);
+    assert.equal(saved().backupAlerted, true);
+  });
+
+  // The whole reason this check is answered on its own counter. A stale archive
+  // on this laptop holding the outage latch would silence the mail this script
+  // exists to send, on the night it was needed.
+  it('lets production still page while the archives are stale', async () => {
+    backupWritten(Date.now() - 50 * 3_600_000);
+    await round();
+    await round();
+    assert.equal(saved().backupAlerted, true, 'the backup alert has latched');
+    assert.equal(saved().alerted, false, 'and it is not the outage latch');
+
+    state.landing = 500;
+    await round();
     const out = await round();
-    assert.match(out, /backups/);
-    assert.match(out, /50h old/);
+    assert.match(out, /^down:/m, 'the outage still reports');
+    assert.equal(saved().alerted, true);
   });
 
   it('takes one missed night for a laptop that was closed', async () => {
@@ -192,9 +210,22 @@ describe('the watchdog, watched', () => {
     assert.equal(saved().failures, 0);
   });
 
+  // Rounding before the comparison moves the boundary half an hour early, and
+  // with a backup at 03:17 and this running every quarter of an hour, the round
+  // just before 03:17 on the second night would page about a run that had not
+  // had its turn yet. Forty seven and a half hours rounds to forty eight and
+  // has to still be fine.
+  it('waits the full two nights, not the rounded ones', async () => {
+    backupWritten(Date.now() - 47.6 * 3_600_000);
+    await round();
+    const out = await round();
+    assert.match(out, /^ok /, 'not yet two nights');
+    assert.equal(saved().backupMisses, 0);
+  });
+
   it('says so when there is no archive at all', async () => {
     rmSync(join(home, 'backups'), { recursive: true, force: true });
-    assert.match(await round(), /no archive/);
+    assert.match(await round(), /backup miss 1: newest never, or not where this looks/);
   });
 
   it('notices a board page that lost its script', async () => {

@@ -1530,6 +1530,13 @@ index. And `q` does not always fetch everything: it fetches whatever the filters
 beside it have not already narrowed away, which is the whole project only when
 it stands alone.
 
+The same thing again on the other axis, through the HTTP door rather than the
+planner, from `tools/perf-audit.mts` at thirty thousand items: `q=` alone is
+32 ms and 135 ms at its worst, `q=` with `prefix=` beside it is 5 ms and 60 ms,
+and `prefix=` alone is 2 ms and 5 ms. Wall clock is what gets noticed and
+documents fetched is what predicts it, and here they agree, which is the point
+of measuring both.
+
 Not every filter beside a search helps. `label=` narrows the answer and not the
 read: labels carry no index on purpose, so the same twenty thousand documents
 come off disk and the label is checked on each one. The four that do help are

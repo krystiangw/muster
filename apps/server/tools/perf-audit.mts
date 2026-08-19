@@ -264,6 +264,14 @@ say('the API an agent uses');
 await timed('GET /v1/:project (summary)', inject(api, authed));
 await timed('GET /v1/:project/items?limit=50', inject(`${api}/items?limit=50`, authed));
 await timed('GET /v1/:project/items?q=scanner+build', inject(`${api}/items?q=scanner build&limit=50`, authed));
+// The two halves of the advice this service publishes when a search runs out
+// of its budget, measured at the size where the difference exists. The fixture
+// already names its cards `area:thing`, the way every real board here does.
+await timed('GET /v1/:project/items?prefix=ops:', inject(`${api}/items?prefix=ops:&limit=50`, authed));
+await timed(
+  'GET /v1/:project/items?q=scanner&prefix=ops:',
+  inject(`${api}/items?q=scanner&prefix=ops:&limit=50`, authed),
+);
 await timed('GET /v1/:project/items?status=open&limit=200', inject(`${api}/items?status=open&limit=200`, authed));
 await timed('GET /v1/:project/board', inject(`${api}/board`, authed));
 await timed('GET /v1/:project/next?agent=errors-loop', inject(`${api}/next?agent=errors-loop`, authed));

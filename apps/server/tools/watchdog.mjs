@@ -53,6 +53,8 @@ const state = {
   hygieneAlerted: saved.hygieneAlerted === true,
   noticeMisses: Number(saved.noticeMisses) || 0,
   noticeAlerted: saved.noticeAlerted === true,
+  backupMisses: Number(saved.backupMisses) || 0,
+  backupAlerted: saved.backupAlerted === true,
   lastNote: typeof saved.lastNote === 'string' ? saved.lastNote : null,
   keyCheckedAt: typeof saved.keyCheckedAt === 'string' ? saved.keyCheckedAt : null,
   keyAlerted: saved.keyAlerted === true,
@@ -216,6 +218,9 @@ if (readUrl) {
  * failures: one missed run is a laptop that was closed, two is something that
  * stopped.
  */
+const BACKUP_MAX_AGE_HOURS = 48;
+let backupAge = null;
+let backupsFresh = false;
 {
   const dir = join(HOME, 'backups');
   let newest = null;
@@ -226,15 +231,33 @@ if (readUrl) {
       if (newest === null || at > newest) newest = at;
     }
   }
-  const hours = newest === null ? null : Math.round((Date.now() - newest) / 3_600_000);
+  // Compared raw and rounded only to say it out loud. Rounding first moves the
+  // boundary half an hour early, and with a backup at 03:17 and this running
+  // every quarter of an hour, the round just before 03:17 on the second night
+  // would page about a run that had not had its turn yet.
+  const ageMs = newest === null ? null : Date.now() - newest;
+  backupAge = ageMs === null ? null : ageMs / 3_600_000;
+  // Decided once. The line that says it and the branch that acts on it were
+  // each comparing for themselves, so one of them could be changed and the
+  // other would go on disagreeing quietly.
+  backupsFresh = backupAge !== null && backupAge < BACKUP_MAX_AGE_HOURS;
   checks.push({
     name: 'backups',
-    ok: hours !== null && hours < 48,
-    status: hours === null ? 'no archive in ~/.muster/backups' : `newest is ${hours}h old`,
+    ok: backupsFresh,
+    // Local, so it stays out of the outage latch below. A stale archive on this
+    // laptop is not production being down, and letting it set `alerted` would
+    // silence the outage mail this whole script exists to send.
+    local: true,
+    status:
+      backupAge === null
+        ? 'no archive in ~/.muster/backups'
+        : `newest is ${Math.round(backupAge)}h old`,
   });
 }
 
-const broken = checks.filter((check) => !check.ok);
+// Production only. The backup check reports beside these and is answered on its
+// own terms further down, because it is about this machine.
+const broken = checks.filter((check) => !check.ok && !check.local);
 const now = new Date().toISOString();
 
 // One place the credential comes from, and an override, so the check below can
@@ -299,6 +322,7 @@ const noteIsDue = () =>
 // round, and cannot claim the hour on a round that had something to say.
 let hygieneBehind = false;
 let noticesStuck = false;
+let backupsStale = false;
 // Anything this round already said, recoveries included. A round that printed
 // "hygiene is running again" has reported itself, and following that with a
 // line claiming nothing happened would both repeat it and take the hour from
@@ -408,6 +432,54 @@ if (broken.length === 0 && apiRead?.body && 'swept_at' in apiRead.body) {
     } else {
       say(`hygiene miss ${state.hygieneMisses}: last swept ${since}`);
     }
+  }
+}
+
+/**
+ * The failure that is not the service's at all.
+ *
+ * The archives are the only copy that exists, and the cron that writes them
+ * runs on this machine rather than on the dyno, so a laptop asleep at the wrong
+ * hour stops them while every check above stays green. Answered here, on its
+ * own counter, rather than in the outage branch: a stale archive is not
+ * production being down, and letting it hold the outage latch would silence the
+ * mail this whole script exists to send, on the night it was needed.
+ *
+ * The board is the first channel because production is up by definition when
+ * this reads, and mail is the fallback, the same order the hygiene check uses
+ * and for the same reason.
+ */
+if (backupsFresh) {
+  if (state.backupAlerted) say('backups are being written again');
+  state.backupMisses = 0;
+  state.backupAlerted = false;
+} else if (backupAge !== null || existsSync(join(HOME, 'tokens.json'))) {
+  backupsStale = true;
+  state.backupMisses += 1;
+  const since = backupAge === null ? 'never, or not where this looks' : `${Math.round(backupAge)}h ago`;
+  if (state.backupMisses >= 2 && !state.backupAlerted) {
+    const filed = await fileOnTheBoard(
+      'Nothing has written a backup for two nights. Is the cron still installed on the machine that runs it?',
+      `The newest archive in ~/.muster/backups is ${since}, and the service is answering normally. `
+        + 'The free Atlas tier takes no snapshots, so these files are the only copy that exists. '
+        + 'crontab -l should show the muster-backup line; the log is ~/.muster/logs/backup.log.',
+    );
+    const delivery = filed === 'filed' ? 'not needed' : await mail('Muster has stopped backing up', [
+      `The newest archive in ~/.muster/backups is ${since}, and ${base} is answering normally.`,
+      '',
+      'The free Atlas tier takes no snapshots, so these files are the only copy that exists.',
+      `Filing this on the board was refused: ${filed}.`,
+      '',
+      'crontab -l | grep muster-backup',
+      'tail -n 40 ~/.muster/logs/backup.log',
+    ]);
+    state.backupAlerted = filed === 'filed' || delivery === 'sent';
+    say(
+      `backups stale: newest ${since} | board ${filed} | email ${delivery}`
+        + (state.backupAlerted ? '' : ' | nothing landed, will try again'),
+    );
+  } else {
+    say(`backup miss ${state.backupMisses}: newest ${since}`);
   }
 }
 
@@ -532,7 +604,7 @@ if (broken.length === 0 && keyCheckIsDue()) {
   }
 }
 
-if (broken.length === 0 && !hygieneBehind && !noticesStuck && !said && noteIsDue()) {
+if (broken.length === 0 && !hygieneBehind && !noticesStuck && !backupsStale && !said && noteIsDue()) {
   state.lastNote = now;
   const swept = apiRead?.body?.swept_at
     ? `${Math.round((Date.parse(now) - Date.parse(apiRead.body.swept_at)) / 60_000)} min`
