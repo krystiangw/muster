@@ -1980,6 +1980,35 @@ describe('a database that does not answer', () => {
     }
   });
 
+  it('answers a burst with one ping, not one each', async () => {
+    // The cache held the answer, which only exists once the ping comes back,
+    // so everything arriving in between started a ping of its own. On an
+    // endpoint anybody can call, that turns a burst into as many database
+    // commands as there are callers, against the pool the boards need.
+    const real = harness.store.db.command.bind(harness.store.db);
+    let pings = 0;
+    harness.store.db.command = ((...args: Parameters<typeof real>) => {
+      pings += 1;
+      return real(...args);
+    }) as typeof harness.store.db.command;
+    try {
+      // Past the cached second first, so the burst is what refreshes it.
+      await new Promise((resolve) => setTimeout(resolve, 1_100));
+      const answers = await Promise.all(
+        Array.from({ length: 20 }, () =>
+          harness.server.inject({ method: 'GET', url: '/health' }),
+        ),
+      );
+      assert.ok(
+        answers.every((answer) => answer.statusCode === 200),
+        'every caller in the burst still gets an answer',
+      );
+      assert.equal(pings, 1, `twenty callers asked the database ${pings} times`);
+    } finally {
+      harness.store.db.command = real;
+    }
+  });
+
   it('says later rather than "something broke", and says it is not your request', async () => {
     // 5xx is the class this protocol tells an agent to retry, so a bug and an
     // outage answered the same way meant a fleet retried the bug at full speed

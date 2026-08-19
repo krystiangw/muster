@@ -257,8 +257,17 @@ function keptParams(form: KeptFilter): Record<string, string> {
   return kept;
 }
 
-/** What the store last said about itself, and when. See `/health`. */
-const health = new WeakMap<object, { at: number; ok: boolean }>();
+/**
+ * The ping in flight or the one just finished, and when it started.
+ *
+ * The promise rather than its answer, and written down before it is awaited.
+ * Caching the answer only cached it once the ping came back, so every request
+ * arriving in between started a ping of its own: an unauthenticated endpoint
+ * that turned a burst into as many database commands as there were callers,
+ * against the pool the boards need, which is the opposite of what the cache
+ * was for.
+ */
+const health = new WeakMap<object, { at: number; probe: Promise<boolean> }>();
 const HEALTH_CACHE_MS = 1_000;
 
 export function registerPublic(app: FastifyInstance, deps: PublicDeps): void {
@@ -277,11 +286,11 @@ export function registerPublic(app: FastifyInstance, deps: PublicDeps): void {
    * its shell, and every call behind them is a 503. So it asks the store, and
    * says the same thing the API would.
    *
-   * Cached for a second, because a health endpoint is the thing that gets
-   * polled and a ping per poll spends the budget the board needs. Keyed by
-   * store rather than kept in a module variable, because two harnesses in one
-   * test file share this module and would otherwise share an answer about
-   * different databases.
+   * One ping a second at most, and one at a time: a health endpoint is the
+   * thing that gets polled, and a ping per poll spends the budget the board
+   * needs. Keyed by store rather than kept in a module variable, because two
+   * harnesses in one test file share this module and would otherwise share an
+   * answer about different databases.
    */
   app.get('/health', { schema: { hide: true } }, async (_request, reply) => {
     const now = Date.now();
@@ -289,9 +298,11 @@ export function registerPublic(app: FastifyInstance, deps: PublicDeps): void {
     const fresh =
       remembered && now - remembered.at < HEALTH_CACHE_MS
         ? remembered
-        : { at: now, ok: await store.db.command({ ping: 1 }).then(() => true, () => false) };
+        : { at: now, probe: store.db.command({ ping: 1 }).then(() => true, () => false) };
+    // Before the await, so the next caller in the same tick joins this ping
+    // rather than starting another.
     health.set(store, fresh);
-    if (fresh.ok) return { ok: true, store: 'ok' };
+    if (await fresh.probe) return { ok: true, store: 'ok' };
     return reply.code(503).header('retry-after', '5').send({
       ok: false,
       error: 'store_unavailable',
