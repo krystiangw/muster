@@ -573,6 +573,25 @@ export async function buildApp(
         additionalProperties: true,
       };
 
+      // A lease somebody else holds is not refused, it is described: the answer
+      // names the holder, says what to do instead, and hands back the card so
+      // the caller does not have to fetch it to find out what it lost. That is
+      // a better answer than a refusal and it is not the refusal shape, which
+      // is why writing it down as one was wrong until a check compared the map
+      // with a body that had actually arrived.
+      doc.components.schemas.Held = {
+        type: 'object',
+        description: 'A lease request that lost. Not an error envelope: the card comes back with it.',
+        required: ['ok', 'held_by', 'item'],
+        properties: {
+          ok: { type: 'boolean', description: 'false. The lease was not taken.' },
+          held_by: { type: 'string', description: 'The agent holding it now.' },
+          hint: { type: 'string', description: 'What to do instead.' },
+          item: { type: 'object', description: 'The card, as every other call returns it.' },
+        },
+        additionalProperties: true,
+      };
+
       const refusal = (code: string) => ({
         description: REFUSAL_SAYS[code] ?? 'Refused.',
         content: { 'application/json': { schema: { $ref: '#/components/schemas/Refusal' } } },
@@ -595,9 +614,14 @@ export async function buildApp(
           const codes = [
             ...(path.startsWith('/v1/') ? TOKEN_DOOR : path === '/p' || path === '/feedback' ? OPEN_DOOR : []),
             ...(NOT_FOUND.has(key) ? ['404'] : []),
-            ...(CONFLICTS.has(key) ? ['409'] : []),
           ];
           for (const code of codes) responses[code] ??= refusal(code);
+          if (CONFLICTS.has(key)) {
+            responses['409'] ??= {
+              description: 'Somebody else holds the lease. The answer names them and returns the card.',
+              content: { 'application/json': { schema: { $ref: '#/components/schemas/Held' } } },
+            };
+          }
 
           // A body announced as something other than JSON is refused by the
           // content-type parser, before routing reaches anything this endpoint
@@ -626,8 +650,12 @@ export async function buildApp(
                 "Refused by this endpoint's own rules, in the OAuth shape, or by the schema check in front of them, in this service's.",
               content: {
                 'application/json': {
+                  // anyOf and not oneOf. Both shapes are open and OauthError
+                  // requires only `error`, so a house-shaped refusal satisfies
+                  // both branches; under oneOf, which means exactly one, a
+                  // validator rejects the very body this service sends.
                   schema: {
-                    oneOf: [
+                    anyOf: [
                       { $ref: '#/components/schemas/OauthError' },
                       { $ref: '#/components/schemas/Refusal' },
                     ],

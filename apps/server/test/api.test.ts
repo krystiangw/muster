@@ -1495,6 +1495,29 @@ describe('the map every refusal points at', () => {
       },
     ];
 
+    // Enough of a validator for two flat schemas and the two keywords that
+    // join them, which is all this document uses. Written here rather than
+    // pulled in, because a fifth dependency to check a map is a worse trade
+    // than twenty lines that only have to understand what the map contains.
+    const doc = (await harness.server.inject({ method: 'GET', url: '/openapi.json' })).json() as {
+      components: { schemas: Record<string, { required?: string[]; properties?: Record<string, { type?: string }> }> };
+    };
+    const branches = (schema: Record<string, unknown>): Record<string, unknown>[] => {
+      if (typeof schema.$ref === 'string') return [doc.components.schemas[schema.$ref.split('/').pop()!]!];
+      const union = (schema.anyOf ?? schema.oneOf) as { $ref?: string }[] | undefined;
+      if (union) return union.flatMap((one) => branches(one as Record<string, unknown>));
+      return [schema];
+    };
+    const fits = (schema: { required?: string[]; properties?: Record<string, { type?: string }> }, body: Record<string, unknown>): boolean => {
+      for (const name of schema.required ?? []) if (!(name in body)) return false;
+      for (const [name, rule] of Object.entries(schema.properties ?? {})) {
+        if (!(name in body) || !rule.type) continue;
+        const seen = Array.isArray(body[name]) ? 'array' : typeof body[name];
+        if (rule.type === 'integer' ? seen !== 'number' : rule.type !== seen) return false;
+      }
+      return true;
+    };
+
     for (const one of cases) {
       const answer = await harness.server.inject({
         method: one.method as 'GET',
@@ -1507,6 +1530,26 @@ describe('the map every refusal points at', () => {
         documents(paths, one.method.toLowerCase(), one.path, one.code),
         `${one.method} ${one.path} answers ${one.code} and the map does not say so`,
       );
+
+      // And the shape it promises is the shape that arrived. A union that says
+      // oneOf where the branches overlap fails this: both schemas here are
+      // open and one of them requires only `error`, so a house-shaped refusal
+      // satisfies both, and "exactly one" then rejects the body the service
+      // really sends.
+      const written = (
+        paths[one.path]?.[one.method.toLowerCase()]?.responses?.[String(one.code)] as
+          | { content?: Record<string, { schema?: Record<string, unknown> }> }
+          | undefined
+      )?.content?.['application/json']?.schema;
+      if (!written || one.code < 400) continue;
+      const body = answer.json() as Record<string, unknown>;
+      const union = written.oneOf ? 'oneOf' : written.anyOf ? 'anyOf' : 'one';
+      const matched = branches(written).filter((schema) => fits(schema, body)).length;
+      if (union === 'oneOf') {
+        assert.equal(matched, 1, `${one.method} ${one.path} ${one.code}: oneOf, and ${matched} branches fit what arrived`);
+      } else {
+        assert.ok(matched >= 1, `${one.method} ${one.path} ${one.code}: nothing the map documents fits ${JSON.stringify(body).slice(0, 90)}`);
+      }
     }
   });
 
@@ -1530,14 +1573,14 @@ describe('the map every refusal points at', () => {
     // it. The handlers write the OAuth shape; the schema check, the media type
     // parser and the readiness gate in front of them write this service's. A
     // 400 is honestly either, a 429 is always theirs, 415 and 503 always ours.
-    const schemaOf = (path: string, code: string): { $ref?: string; oneOf?: { $ref: string }[] } =>
+    const schemaOf = (path: string, code: string): { $ref?: string; anyOf?: { $ref: string }[] } =>
       (paths[path]?.post?.responses?.[code] as { content?: Record<string, { schema?: never }> })?.content?.[
         'application/json'
       ]?.schema ?? {};
 
     for (const path of ['/oauth/register', '/oauth/token']) {
       assert.deepEqual(
-        schemaOf(path, '400').oneOf?.map((one) => one.$ref).sort(),
+        schemaOf(path, '400').anyOf?.map((one) => one.$ref).sort(),
         ['#/components/schemas/OauthError', '#/components/schemas/Refusal'],
         `${path} says a 400 can be either shape`,
       );
