@@ -969,6 +969,56 @@ describe('the MCP surface', () => {
     });
     assert.equal(unauthorized.json().result.isError, true);
   });
+
+  it('carries a claim from start to finish, which it could not before', async () => {
+    // claim_item told a client that "claims expire without a heartbeat" on a
+    // door with no heartbeat and no release, so an MCP agent could take a lease
+    // and then only wait for it to lapse: it could neither hold it through long
+    // work nor hand it back early. The instructions on that door say the tools
+    // mirror skill.md, and skill.md documents both.
+    let id = 100;
+    const call = async (name: string, args: Record<string, unknown>, token?: string) => {
+      const answer = await harness.server.inject({
+        method: 'POST',
+        url: '/mcp',
+        ...(token ? { headers: { authorization: `Bearer ${token}` } } : {}),
+        payload: { jsonrpc: '2.0', id: (id += 1), method: 'tools/call', params: { name, arguments: args } },
+      });
+      return answer.json().result;
+    };
+
+    const project = (await call('create_project', { name: 'lifecycle' })).structuredContent;
+    const token = project.token as string;
+    await call('upsert_item', { slug: 'ops:cutover', title: 'Cut traffic over', actor: 'mcp-agent' }, token);
+
+    const claimed = await call('claim_item', { slug: 'ops:cutover', agent: 'mcp-agent' }, token);
+    assert.equal(claimed.structuredContent.ok, true);
+    const first = Date.parse(claimed.structuredContent.expires_at);
+
+    const beat = await call(
+      'heartbeat',
+      { slug: 'ops:cutover', agent: 'mcp-agent', ttl_minutes: 120 },
+      token,
+    );
+    assert.equal(beat.structuredContent.ok, true);
+    assert.ok(Date.parse(beat.structuredContent.expires_at) > first, 'the lease moved out');
+
+    // Somebody else holding it is still a refusal, on this door as on the other.
+    const stranger = await call('heartbeat', { slug: 'ops:cutover', agent: 'other-loop' }, token);
+    assert.equal(stranger.isError, true);
+
+    const handedBack = await call(
+      'release',
+      { slug: 'ops:cutover', agent: 'mcp-agent', note: 'needs the venue first' },
+      token,
+    );
+    assert.equal(handedBack.structuredContent.ok, true);
+    assert.equal(handedBack.structuredContent.item.claim, null);
+
+    // And it is free at once rather than at the sweep: the point of releasing.
+    const offered = await call('next_item', { agent: 'other-loop' }, token);
+    assert.equal(offered.structuredContent.item.slug, 'ops:cutover');
+  });
 });
 
 describe('the human read view', () => {

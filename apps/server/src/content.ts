@@ -859,6 +859,22 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
           'Lease with TTL. ok:false means somebody else holds it and the holder is named. A 409 blocked_by means the card is waiting on others, which the message names with their statuses.',
       },
       {
+        name: 'heartbeat',
+        method: 'POST',
+        url: `${base}/v1/{project}/items/{slug}/heartbeat`,
+        request: { agent: 'errors-loop', ttl_minutes: 60 },
+        notes:
+          'Extends a lease you hold. A lapsed one cannot be extended, only claimed again: between expiry and the sweep the item is already fair game.',
+      },
+      {
+        name: 'release',
+        method: 'POST',
+        url: `${base}/v1/{project}/items/{slug}/release`,
+        request: { agent: 'errors-loop', note: 'why you are handing it back' },
+        notes:
+          'Hands the item back without closing it. Releasing what nobody holds succeeds, because that is already what the caller wanted.',
+      },
+      {
         // The same name the MCP tool carries. These read as operation names and
         // an agent that meets both doors should not have to work out that two
         // words describe one act.

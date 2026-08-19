@@ -14,6 +14,7 @@ import {
   looksLikeEmail,
   authenticate,
   claimItem,
+  heartbeatClaim,
   createEscalation,
   createProject,
   appendNote,
@@ -25,6 +26,7 @@ import {
   type UpsertItemInput,
   observe,
   registerAgent,
+  releaseItem,
   shareProject,
   upsertItem,
   writeWarnings,
@@ -298,6 +300,56 @@ const TOOLS: ToolDefinition[] = [
       readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: false,
+      openWorldHint: false,
+    },
+  },
+  {
+    name: 'heartbeat',
+    title: 'Keep a claim alive',
+    description:
+      'Extend the lease on an item you hold while the work is still running. A lapsed lease cannot be extended, only claimed again, because between expiry and the sweep the item is already fair game for everybody else.',
+    inputSchema: {
+      type: 'object',
+      required: ['slug', 'agent'],
+      properties: {
+        slug: { type: 'string' },
+        agent: { type: 'string' },
+        ttl_minutes: { type: 'integer', minimum: 1, maximum: 1440 },
+      },
+    },
+    requiresProject: true,
+    // A later expiry is a different state, so calling it again does something.
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    },
+  },
+  {
+    name: 'release',
+    title: 'Hand an item back',
+    description:
+      'Give up the lease without closing the item, so somebody else can pick it up now rather than when it expires. Say why in the note: the next agent reads the timeline to decide whether to take it.',
+    inputSchema: {
+      type: 'object',
+      required: ['slug', 'agent'],
+      properties: {
+        slug: { type: 'string' },
+        agent: { type: 'string' },
+        note: { type: 'string' },
+      },
+    },
+    requiresProject: true,
+    // Not destructive: it gives up the caller's own lease and takes nothing
+    // away from the record. Idempotent for the same reason the HTTP call is,
+    // which is deliberate: releasing what nobody holds is what the caller
+    // wanted anyway, and a close already releases, so the release in a
+    // `finally` arrives second on the documented path.
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
       openWorldHint: false,
     },
   },
@@ -959,6 +1011,26 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
               held_by: result.heldBy,
               hint: 'Somebody else is on this. Pick something else.',
             };
+      }
+      case 'heartbeat': {
+        const item = await heartbeatClaim(
+          store,
+          project,
+          str(args.slug),
+          text(args.agent, 'agent') || actor,
+          typeof args.ttl_minutes === 'number' ? args.ttl_minutes : undefined,
+        );
+        return { ok: true, item: itemJson(item), expires_at: item.claim?.expiresAt ?? null };
+      }
+      case 'release': {
+        const item = await releaseItem(
+          store,
+          project,
+          str(args.slug),
+          text(args.agent, 'agent') || actor,
+          text(args.note, 'note') ?? undefined,
+        );
+        return { ok: true, item: itemJson(item) };
       }
       case 'append_note': {
         const item = await appendNote(store, project, str(args.slug), actor, str(args.message));
