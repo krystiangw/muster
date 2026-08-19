@@ -23,7 +23,7 @@
  *   node apps/server/tools/watchdog.mjs --status   # what it thinks right now
  */
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -198,6 +198,40 @@ if (readUrl) {
         : { ok: false, why: digest === null ? `script ${served.status || served.error}` : `page wants ${named[1]}, server serves ${digest}` };
   }
   checks.push({ name: 'board script', ok: script.ok, status: script.why });
+}
+
+/**
+ * Is anything still writing the backups?
+ *
+ * The one failure in this system that leaves every other check green. The cron
+ * entry runs on this machine, not on the dyno, so nothing the service reports
+ * has any bearing on it: a laptop asleep at the wrong hour, a moved file, a
+ * revoked disk permission, and the archives simply stop, quietly, until the day
+ * somebody needs one. `docs/deploy.md` already says to test the restore rather
+ * than the backup, and the restore was drilled by hand against the newest
+ * archive on 2026-08-19. What was missing is the cheaper half: noticing that
+ * there is no newest archive any more.
+ *
+ * Two nights rather than one, for the same reason the outage rule needs two
+ * failures: one missed run is a laptop that was closed, two is something that
+ * stopped.
+ */
+{
+  const dir = join(HOME, 'backups');
+  let newest = null;
+  if (existsSync(dir)) {
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith('.json.gz')) continue;
+      const at = statSync(join(dir, name)).mtimeMs;
+      if (newest === null || at > newest) newest = at;
+    }
+  }
+  const hours = newest === null ? null : Math.round((Date.now() - newest) / 3_600_000);
+  checks.push({
+    name: 'backups',
+    ok: hours !== null && hours < 48,
+    status: hours === null ? 'no archive in ~/.muster/backups' : `newest is ${hours}h old`,
+  });
 }
 
 const broken = checks.filter((check) => !check.ok);

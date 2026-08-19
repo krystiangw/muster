@@ -100,14 +100,22 @@ holds projects, because the realistic accident is restoring over production
 instead of into a copy. Test the restore, not the backup: an archive nobody has
 read back is a guess.
 
-Last read back on 2026-08-18 at 11:28, from `muster-2026-08-18-1128.json.gz`
-into a throwaway mongod: four projects, ours with its seven column layout, 75
-items, all 75 with their timelines, 15 escalations, 786 documents in 53 kB.
-Dates come back as dates rather than as the strings JSON turned them into,
-which is the part of this format most likely to rot silently, and that now
-includes the two written today: `escalationNoticeSentAt` on a project and
-`notifiedAt` on a question. Repeat it after any change to what a document
-holds.
+Last read back on 2026-08-19 at 23:40, from `muster-2026-08-19-0317.json.gz`
+into a throwaway mongod: 15 projects, ours among them with its counts intact,
+137 items, 11 agents, 11 escalations, 18 keys and 2189 telemetry rows. Dates
+come back as dates rather than as the strings JSON turned them into, which is
+the part of this format most likely to rot silently. Repeat it after any change
+to what a document holds. The tool enumerates collections from the database
+rather than from a list somebody has to remember to extend, so a collection
+added tomorrow is in tomorrow's archive without anybody touching this file.
+
+And the half that was missing until tonight: **nothing noticed when the archives
+stopped.** The cron runs on this machine, not on the dyno, so every check the
+service makes stays green through a laptop asleep at the wrong hour or a moved
+directory. `watchdog.mjs` reads `~/.muster/backups` now and reports the age of
+the newest file on every round, failing past 48 hours. Two nights rather than
+one, for the same reason an outage needs two failed probes: one missed run is a
+closed laptop, two is something that stopped.
 
 `watchdog.sh` runs `apps/server/tools/watchdog.mjs` every quarter of an hour.
 It writes one line an hour when everything is fine, naming what it checked and

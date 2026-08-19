@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -124,7 +124,18 @@ describe('the watchdog, watched', () => {
     state.serves = script;
     state.visibility = 'link';
     state.private = false;
+    // An archive from an hour ago, because the ordinary case is that last
+    // night's cron ran. The cases below move it or take it away.
+    mkdirSync(join(home, 'backups'), { recursive: true });
+    backupWritten(Date.now() - 3_600_000);
   });
+
+  /** Puts one archive in place, stamped whenever the case needs it to be. */
+  const backupWritten = (at: number): void => {
+    const file = join(home, 'backups', 'muster-test.json.gz');
+    writeFileSync(file, 'not really gzip, and nothing here reads it');
+    utimesSync(file, new Date(at), new Date(at));
+  };
 
   /**
    * One round, and what it printed.
@@ -159,6 +170,31 @@ describe('the watchdog, watched', () => {
     assert.match(out, /browser form 400/);
     assert.match(out, new RegExp(`board script ${hashOf(script)}`));
     assert.equal(saved().failures, 0);
+  });
+
+  it('notices that nothing has written a backup for two nights', async () => {
+    // The failure that leaves every other check green, because the cron for it
+    // runs on the operator's machine and not on the dyno.
+    backupWritten(Date.now() - 50 * 3_600_000);
+    const out = await round();
+    assert.match(out, /backups/);
+    assert.match(out, /50h old/);
+  });
+
+  it('takes one missed night for a laptop that was closed', async () => {
+    backupWritten(Date.now() - 30 * 3_600_000);
+    // The first round in a fresh home is spent saying the alerting key is not
+    // here, the same as everywhere else in this file.
+    await round();
+    const out = await round();
+    assert.match(out, /^ok /, 'a night without a run is not an outage');
+    assert.match(out, /backups newest is 30h old/);
+    assert.equal(saved().failures, 0);
+  });
+
+  it('says so when there is no archive at all', async () => {
+    rmSync(join(home, 'backups'), { recursive: true, force: true });
+    assert.match(await round(), /no archive/);
   });
 
   it('notices a board page that lost its script', async () => {
