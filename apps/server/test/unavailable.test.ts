@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { MongoMemoryServer } from 'mongodb-memory-server';
 import { after, before, describe, it } from 'node:test';
 import { authed, createProject, startHarness, type Harness, type Project } from './helper.js';
 
@@ -104,45 +105,54 @@ describe('when the store is not there', () => {
     });
   });
 
-  // Bounded on purpose. Both ways of breaking the translation below turn these
-  // requests into ones that never answer at all, so without a limit a
-  // regression here stops the suite rather than failing it, and a suite that
-  // hangs gets killed by whoever is waiting rather than read.
-  it('answers a database that went away after it was working, not only one that never came', { timeout: 30_000 }, async () => {
+  // Bounded, because the request under test is one that must answer and the
+  // failure being guarded against is one that does not.
+  it('answers a database that went away after it was working, not only one that never came', { timeout: 60_000 }, async () => {
     // The other outage, and the one the free tier actually produces. The gate
     // above is the deployment that has not connected yet; this is the one that
     // had, and lost it. `ready` stays true, the request reaches the driver,
     // and the answer depends entirely on the error handler recognising what
     // came back. The first version of this file tested only the gate, so it
     // would have passed while this hung or answered 500. Codex found that.
-    const lost = await startHarness();
-    const board = await createProject(lost, 'a board whose database left');
-    await lost.store.close();
+    // A database of its own, stopped underneath a server that was using it
+    // happily a moment ago. Not the client closed from inside: that raises one
+    // error class, and the outage a hosted database produces raises the others,
+    // server selection and network, which are a different branch of the same
+    // matcher and the ones with a timeout attached.
+    const its_own = await MongoMemoryServer.create();
+    const lost = await startHarness({ MONGODB_URI: its_own.getUri(), MONGODB_DB: 'gone' });
+    try {
+      const board = await createProject(lost, 'a board whose database left');
+      await its_own.stop();
 
-    for (const door of [
-      { method: 'GET' as const, url: `${board.api}/board` },
-      { method: 'POST' as const, url: `${board.api}/items`, payload: { slug: 'x', title: 'x' } },
-      { method: 'POST' as const, url: '/p', payload: { name: 'arriving mid-outage' } },
-    ]) {
-      const answer = await lost.server.inject({
-        ...door,
-        headers: { ...authed(board), 'content-type': 'application/json' },
-      });
-      assert.equal(answer.statusCode, 503, `${door.method} ${door.url} said ${answer.statusCode}`);
-      assert.equal(answer.json().error, 'store_unavailable');
-      assert.equal(answer.headers['retry-after'], '5');
-      // 5xx is the class this protocol tells a fleet to retry, so the one
-      // thing this answer must not do is look like a bug in the service.
-      assert.notEqual(answer.json().message, 'Something broke on our side. The request was not applied.');
+      for (const door of [
+        { method: 'GET' as const, url: `${board.api}/board` },
+        { method: 'POST' as const, url: `${board.api}/items`, payload: { slug: 'x', title: 'x' } },
+        { method: 'POST' as const, url: '/p', payload: { name: 'arriving mid-outage' } },
+      ]) {
+        const answer = await lost.server.inject({
+          ...door,
+          headers: { ...authed(board), 'content-type': 'application/json' },
+        });
+        assert.equal(answer.statusCode, 503, `${door.method} ${door.url} said ${answer.statusCode}`);
+        assert.equal(answer.json().error, 'store_unavailable');
+        assert.equal(answer.headers['retry-after'], '5');
+        // 5xx is the class this protocol tells a fleet to retry, so the one
+        // thing this answer must not do is look like a bug in the service.
+        assert.notEqual(answer.json().message, 'Something broke on our side. The request was not applied.');
+      }
+
+      // And the pages that need nothing still need nothing.
+      const landing = await lost.server.inject({ method: 'GET', url: '/' });
+      assert.equal(landing.statusCode, 200);
+    } finally {
+      // Whatever happened above. A harness left running holds a count on the
+      // shared mongod that the outer teardown then waits on, so a failing
+      // assertion here used to stop the suite instead of failing it, which is
+      // how two deliberate breakages earlier today looked like hangs.
+      await lost.stop().catch(() => undefined);
+      await its_own.stop().catch(() => undefined);
     }
-
-    // And the pages that need nothing still need nothing.
-    const landing = await lost.server.inject({ method: 'GET', url: '/' });
-    assert.equal(landing.statusCode, 200);
-
-    // Closing the client twice is not an error, and the harness is finished
-    // with either way.
-    await lost.stop().catch(() => undefined);
   });
 
   it('writes nothing while it refuses, and works the moment the store is back', async () => {
