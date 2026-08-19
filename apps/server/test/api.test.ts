@@ -1951,6 +1951,50 @@ describe('a refusal that clears by waiting', () => {
   });
 });
 
+describe('a database that was never there', () => {
+  it('serves anyway, and says which of the two it is', async () => {
+    // Connecting before listening meant a blip during a deploy exited the
+    // process, and Heroku backs a crashing dyno off for minutes: a database
+    // that came back in twenty seconds still left the site down long after.
+    // Every route already answers an unreachable store with 503, so the
+    // honest thing is to serve that rather than not to serve at all.
+    const { openStore } = await import('../src/db.js');
+    const { buildApp } = await import('../src/app.js');
+    const { loadConfig } = await import('../src/config.js');
+    const config = loadConfig({
+      // Port one, which nothing is listening on.
+      MONGODB_URI: 'mongodb://127.0.0.1:1/muster',
+      MONGODB_DB: 'never_there',
+      BASE_URL: 'http://muster.test',
+      LOG_LEVEL: 'silent',
+    });
+    const store = openStore(config.mongoUri, config.mongoDb, { serverSelectionTimeoutMS: 300 });
+    const { server, limiter } = await buildApp(config, store);
+    await server.ready();
+    try {
+      // The pages a person lands on are static and still render.
+      const landing = await server.inject({ method: 'GET', url: '/', headers: { accept: 'text/html' } });
+      assert.equal(landing.statusCode, 200);
+      const protocol = await server.inject({ method: 'GET', url: '/skill.md' });
+      assert.equal(protocol.statusCode, 200);
+
+      // The health check says what is actually wrong.
+      const health = await server.inject({ method: 'GET', url: '/health' });
+      assert.equal(health.statusCode, 503, health.body);
+      assert.equal(health.json().error, 'store_unavailable');
+
+      // And so does a call that needs the database.
+      const signup = await server.inject({ method: 'POST', url: '/p', payload: { name: 'nope' } });
+      assert.equal(signup.statusCode, 503, signup.body);
+      assert.equal(signup.json().error, 'store_unavailable');
+    } finally {
+      limiter.stop();
+      await server.close();
+      await store.close();
+    }
+  });
+});
+
 describe('a database that does not answer', () => {
   it('makes the health check say so, instead of reporting the process', async () => {
     // A health endpoint that cannot fail is decoration: it would have stayed

@@ -1,15 +1,43 @@
+import type { FastifyBaseLogger } from 'fastify';
 import { flushEvents } from './events.js';
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
-import { createStore } from './db.js';
+import { ensureIndexes, openStore, runMigrations, type Store } from './db.js';
 import { sweepProject } from './hygiene.js';
 
 const SWEEP_INTERVAL_MS = 5 * 60_000;
 const SWEEP_BATCH = 50;
 
+/**
+ * Bring the store up behind the port, and keep trying.
+ *
+ * Connecting before listening meant a database blip during a deploy exited the
+ * process, and Heroku backs a crashing dyno off for minutes: a database that
+ * came back in twenty seconds still left the site down long after. Every route
+ * already answers an unreachable store with 503 and `/health` says so, so the
+ * honest thing is to serve that answer rather than not to serve at all.
+ *
+ * Indexes and migrations wait for the same connection, which is the point: a
+ * process that started without them would otherwise run without them for ever.
+ */
+async function bringUp(store: Store, log: FastifyBaseLogger): Promise<void> {
+  for (let wait = 1_000; ; wait = Math.min(wait * 2, 30_000)) {
+    try {
+      await store.client.connect();
+      await ensureIndexes(store);
+      await runMigrations(store);
+      log.info('the store is up, with its indexes and migrations');
+      return;
+    } catch (error) {
+      log.error({ err: error }, `the store is not up; serving 503 and retrying in ${wait / 1000}s`);
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+  }
+}
+
 async function main(): Promise<void> {
   const config = loadConfig();
-  const store = await createStore(config.mongoUri, config.mongoDb);
+  const store = openStore(config.mongoUri, config.mongoDb);
   const { server, limiter, notifier } = await buildApp(config, store);
 
   /**
@@ -92,6 +120,9 @@ async function main(): Promise<void> {
 
   await server.listen({ port: config.port, host: config.host });
   server.log.info({ baseUrl: config.baseUrl }, 'muster is up');
+  // After listening, deliberately: the port is what Heroku waits for, and a
+  // database that takes a minute to answer must not become a boot timeout.
+  void bringUp(store, server.log);
 }
 
 main().catch((error) => {

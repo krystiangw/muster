@@ -113,14 +113,36 @@ export interface Store {
  * connection, and a promise nobody can rely on.
  */
 export async function connectStore(uri: string, dbName: string): Promise<Store> {
+  const store = openStore(uri, dbName);
+  await store.client.connect();
+  return store;
+}
+
+/**
+ * The handles, without asking whether anything is listening.
+ *
+ * Nothing here touches the network: a collection is a name and a client, and
+ * the client only goes looking for a server when somebody runs a command. That
+ * is what lets the process bind its port before the database is up, answer
+ * every call with the 503 it would answer anyway, and start serving the moment
+ * the database arrives. Awaiting a connection first meant a blip during a
+ * deploy exited the process, and Heroku backs a crashing dyno off for minutes,
+ * so a database that came back in twenty seconds still left the site down.
+ */
+export function openStore(
+  uri: string,
+  dbName: string,
+  // Overridable so the test that proves a process serves without a database
+  // does not have to wait out the real timeout five seconds at a time.
+  options: { serverSelectionTimeoutMS?: number } = {},
+): Store {
   const client = new MongoClient(uri, {
     // Agents call this in a loop; a request should fail fast rather than hang
     // on a wedged primary and burn the caller's own timeout budget.
-    serverSelectionTimeoutMS: 5_000,
+    serverSelectionTimeoutMS: options.serverSelectionTimeoutMS ?? 5_000,
     connectTimeoutMS: 5_000,
     maxPoolSize: 20,
   });
-  await client.connect();
   const db = client.db(dbName);
 
   const store: Store = {
