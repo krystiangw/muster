@@ -1141,6 +1141,7 @@ ${Object.entries(BOARD_PRESETS)
 <tr><td class="mono">owner</td><td>Any of these owners.</td></tr>
 <tr><td class="mono">stale</td><td>Whether hygiene has flagged it as untouched.</td></tr>
 <tr><td class="mono">source</td><td>For items mirrored from a scanner or an error stream.</td></tr>
+<tr><td class="mono">slug_prefix</td><td>Slug starts with this. Boards name their cards <code>area:thing</code>, so <code>"slug_prefix": "ops:"</code> is one area of the work without anybody adding a label for it.</td></tr>
 <tr><td class="mono">priority_min</td><td>Priority at or above this number. Higher is more urgent: the scale runs -10 to 10, 0 is ordinary work.</td></tr>
 <tr><td class="mono">within_days</td><td>Only work touched in the last N days. What a "Done" column wants: finished work is worth reading, and all of it for ever is a landfill. Nothing is deleted, and the rest is one search away.</td></tr>
 <tr><td class="mono">fields</td><td>Values kept from another system, e.g. <code>{"legacy_status":["investigating","fix_planned"]}</code>.</td></tr>
@@ -1170,6 +1171,11 @@ than the move can set, the reply says which column the card actually landed in.<
 </tbody></table></div>
 <p>A column with nothing to apply is a view. The board leaves it out of the move control, and a move
 sent straight to the API is refused rather than quietly doing nothing.</p>
+<p><code>"rows"</code> sits beside <code>"columns"</code> and takes <code>none</code>, <code>owner</code>,
+<code>label</code> or <code>prefix</code>. <code>prefix</code> lanes by the namespace already in the slug,
+which on most boards is the grouping the agents wrote themselves. A lane appears for every value among
+the cards the board scanned, finished ones included, so <code>within_days</code> on the archive column
+is what stops old work setting the shape of the board.</p>
 <p class="mono" style="color:var(--muted)">Same thing over the API:
 PUT ${escapeHtml(project._id ? `/v1/${project._id}/board` : '/v1/{project}/board')}</p>
 </details>`;

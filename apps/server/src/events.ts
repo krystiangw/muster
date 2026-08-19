@@ -211,7 +211,7 @@ export interface EventDoc {
   expiresAt: Date;
 }
 
-const KEEP_DAYS = 90;
+export const KEEP_DAYS = 90;
 
 /** How many of the most recent answers the median is taken over. */
 export const ANSWER_SAMPLE = 500;

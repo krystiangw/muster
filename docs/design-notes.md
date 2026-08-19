@@ -1544,9 +1544,11 @@ them has a time budget and the other does not.
 
 **Both triggers, measured 2026-08-19.** The note above says a trigger nobody
 measures is a sentence in a document, so: `search_too_slow` has been recorded
-**zero** times, ever, and the refusal is wired at exactly one place in the
-service, so zero means never rather than never looked. The largest board in
-production holds 187 items against a threshold of fifty thousand. The search
-question stays deferred, and now says so out loud: `tools/insights.mts` prints
-that row at zero as well, because a row that is simply absent reads as
-unreported rather than as never happened.
+**zero** times in the ninety days these rows are kept, and the refusal is wired
+at exactly one place in the service, so the zero is the check having run rather
+than the check being absent. It is not a claim about never: telemetry rows carry
+a TTL, so this trigger is only ever answerable for the window, which is the
+honest limit of measuring it this way. The largest board in production holds 187
+items against a threshold of fifty thousand. The search question stays deferred,
+and now says so out loud, with the window named: `tools/insights.mts` prints that
+row at zero as well, because a row that is simply absent reads as unreported.

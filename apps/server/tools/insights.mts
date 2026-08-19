@@ -25,7 +25,7 @@
  * Reads only. It never writes, so running it against production is safe.
  */
 import { connectStore } from '../src/db.js';
-import { insights } from '../src/events.js';
+import { KEEP_DAYS, insights } from '../src/events.js';
 
 const uri = process.env.MONGODB_URI;
 const dbName = process.env.MONGODB_DB ?? 'muster';
@@ -325,11 +325,14 @@ console.log('\nRefused, by reason');
 row('all of them', refusedRows.reduce((total, [, n]) => total + n, 0));
 for (const [reason, n] of refusedRows) row(`  ${reason}`, n);
 // Printed at zero as well, unlike the rest, because this one is a trigger
-// somebody wrote down and a row that is simply absent reads as unreported
-// rather than as never. Measured 2026-08-19: zero, ever.
+// somebody wrote down and a row that is simply absent reads as unreported.
+// Zero here is zero in the window these rows live in, not zero ever: they
+// carry a TTL, so a search that hit the clock last spring has already been
+// forgotten. Saying "never" would be this report making the same kind of
+// claim the trigger exists to prevent.
 if (!refusedRows.some(([reason]) => reason === 'search_too_slow')) {
   row('  search_too_slow', 0);
-  console.log('    never, so the search question in docs/design-notes.md stays deferred');
+  console.log(`    none in the ${KEEP_DAYS} days these rows are kept, so the search question in docs/design-notes.md stays deferred`);
 }
 
 console.log('\nLast seven days');
