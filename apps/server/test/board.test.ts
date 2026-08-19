@@ -354,7 +354,7 @@ describe('the board in the browser', () => {
     );
     assert.ok(columns.length >= 3, `columns: ${columns.join(', ')}`);
     const offered = new Set(
-      [...page.body.matchAll(/<option value="([^"]+)">/g)].map((match) => match[1]!),
+      [...page.body.matchAll(/<option value="([^"]+)" data-lands=/g)].map((match) => match[1]!),
     );
     assert.ok(
       columns.some((column) => offered.has(column)),
@@ -370,17 +370,16 @@ describe('the board in the browser', () => {
     assert.ok(!readOnly.body.includes('draggable="true"'), 'no drag where there is no move form');
   });
 
-  it('says which lane a card lands in, for the columns that decide it', async () => {
-    // The same column is drawn in every swimlane. Usually a move changes the
-    // column and leaves the row alone, so the only honest drop target is a
-    // column in the card's own lane. A column for one person's work assigns
-    // that person, and on a board grouped by owner that move changes the lane
-    // too: then the honest target is that column in its own lane, and the copy
-    // drawn in the card's lane is the misleading one. The markup carries the
-    // answer so the page never has to work it out twice.
+  it('says where each card lands, on that card\u2019s own options', async () => {
+    // Where a card ends up after a move is a fact about the card, not about
+    // the column: a column that assigns an owner decides the lane for
+    // everybody, and a column that adds a label decides it only for a card
+    // that had none, or had ones that sort after it. Anything worked out from
+    // the column alone is right for some cards and wrong for others, which is
+    // worse than not answering, so the answer lives on each card's options.
     const project = await createProject(harness, 'swimlanes');
     await post(project, '/items', { slug: 'alex-work', title: 'work', owner: 'alex', actor: 'a' });
-    await post(project, '/items', { slug: 'bob-work', title: 'more work', owner: 'bob', actor: 'a' });
+    await post(project, '/items', { slug: 'bob-work', title: 'more', owner: 'bob', actor: 'a' });
     await harness.server.inject({
       method: 'PUT',
       url: `${project.api}/board`,
@@ -399,57 +398,60 @@ describe('the board in the browser', () => {
 
     assert.match(page.body, /<div class="lane" data-lane="alex"/);
     assert.match(page.body, /<div class="lane" data-lane="bob"/);
-    // A column for one person says whose lane it lands in. A column for a
-    // status says nothing, because it leaves the row alone.
-    assert.match(page.body, /data-column="alexs" data-lands="alex"/);
-    assert.match(page.body, /data-column="bobs" data-lands="bob"/);
-    assert.ok(!/data-column="open" data-lands=/.test(page.body), 'a status column decides no lane');
+    // The column no longer claims anything: the same column is drawn in every
+    // lane and the claim was different for each card in it.
+    assert.ok(!page.body.includes('data-lands=" data-column'), 'not on the column');
+    assert.ok(!/<section class="col"[^>]*data-lands=/.test(page.body));
 
-    // Every column that names a lane names one the board actually draws. A
-    // column for somebody who owns nothing yet has no lane to land in, and
-    // saying it did would have made it a target every copy of which refuses:
-    // the column unreachable by drag for as long as that person had no work.
-    const lanes = new Set(
-      [...page.body.matchAll(/<div class="lane" data-lane="([^"]*)"/g)].map((match) => match[1]!),
-    );
-    for (const [, lands] of page.body.matchAll(/data-lands="([^"]*)"/g)) {
-      assert.ok(lanes.has(lands!), `a column lands in "${lands}", which is not a lane on this board`);
-    }
+    // Split rather than match across: a lazy regex starting at the first move
+    // form runs past the end of it looking for the slug, and then reads
+    // options belonging to somebody else's card.
+    const moveFormFor = (body: string, slug: string): string => {
+      const form = body
+        .split('<form class="move"')
+        .slice(1)
+        .find((chunk) => chunk.includes(`name="slug" value="${slug}"`));
+      assert.ok(form, `${slug} has a move form`);
+      return form!.slice(0, form!.indexOf('</form>'));
+    };
+    const optionsOf = (slug: string): Record<string, string> =>
+      Object.fromEntries(
+        [...moveFormFor(page.body, slug).matchAll(/<option value="([^"]+)" data-lands="([^"]*)"/g)].map(
+          (match) => [match[1]!, match[2]!],
+        ),
+      );
 
-    // A column for somebody with nothing on the board yet says nothing, and is
-    // an ordinary column: droppable in the lane it is drawn in.
-    await harness.server.inject({
-      method: 'PUT',
-      url: `${project.api}/board`,
-      headers: authed(project),
-      payload: {
-        rows: 'owner',
-        columns: [
-          { key: 'open', title: 'Open', match: { status: ['open'] } },
-          { key: 'carols', title: "Carol's", match: { status: ['open'], owner: ['carol'] } },
-        ],
-      },
-    });
-    const before = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
-    assert.ok(!before.body.includes('data-lands="carol"'), 'carol owns nothing, so carol has no lane');
-    assert.ok(!before.body.includes('data-lane="carol"'));
-
-    // Give her something and the lane appears, and with it the promise.
-    await post(project, '/items', { slug: 'carol-work', title: 'hers', owner: 'carol', actor: 'a' });
-    const after = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
-    assert.match(after.body, /data-lane="carol"/);
-    assert.match(after.body, /data-column="carols" data-lands="carol"/);
+    // A column that assigns somebody lands the card in that person's lane,
+    // whichever card it is. A column that only sets a status leaves the card
+    // where it was, which is a different answer for each of these two.
+    const alexs = optionsOf('alex-work');
+    const bobs = optionsOf('bob-work');
+    assert.equal(alexs.bobs, 'bob', "alex's card lands in bob's lane if it goes to bob's column");
+    assert.equal(bobs.alexs, 'alex');
+    // Its own column is not among its options, which is why "open" is absent
+    // from both: first match wins and these two cards are in it.
+    // Its own column is not among its options. Both cards are drawn in "open",
+    // because first match wins, so that is the one missing from each.
+    assert.equal(alexs.open, undefined);
+    assert.equal(bobs.open, undefined);
+    // A column that assigns the owner a card already has keeps it where it is,
+    // which is the case that makes this a fact about the card: the same column
+    // answers "alex" for one of these and "alex" for the other too, and only
+    // one of them is staying put.
+    assert.equal(alexs.alexs, 'alex');
+    assert.equal(bobs.alexs, 'alex');
+    assert.equal(alexs.bobs, 'bob');
+    assert.equal(bobs.bobs, 'bob');
   });
 
-  it('promises no lane on a board grouped by label', async () => {
-    // A lane keyed by label is the card's first label, and a move unions what
-    // it adds with what is already there: adding one moves nothing unless the
-    // card had none, and removing one can change the first label while looking
-    // like it changes nothing. Neither direction can be promised from the
-    // column alone, so a label board says nothing and falls back to the lane
-    // the card was dropped in.
+  it('works the label arithmetic out per card, the way the write does', async () => {
+    // A lane keyed by label is the card's first label, a move unions what it
+    // adds with what is already there, and the union comes back sorted. So a
+    // card with no labels lands in the added one, and a card whose first label
+    // sorts before it does not move lanes at all. One column, two answers.
     const project = await createProject(harness, 'labels as lanes');
-    await post(project, '/items', { slug: 'both', title: 'two labels', labels: ['old'], actor: 'a' });
+    await post(project, '/items', { slug: 'bare', title: 'no labels yet', actor: 'a' });
+    await post(project, '/items', { slug: 'already', title: 'has one', labels: ['aaa'], actor: 'a' });
     await harness.server.inject({
       method: 'PUT',
       url: `${project.api}/board`,
@@ -458,14 +460,29 @@ describe('the board in the browser', () => {
         rows: 'label',
         columns: [
           { key: 'open', title: 'Open', match: { status: ['open'] } },
-          { key: 'news', title: 'New', match: { status: ['open'], labels: ['new'] } },
+          { key: 'news', title: 'New', match: { status: ['open'], labels: ['mmm'] } },
         ],
       },
     });
     const readToken = (await harness.store.projects.findOne({ _id: project.id }))!.readToken;
     const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
-    assert.match(page.body, /<div class="lane" data-lane="old"/, 'the board is grouped by label');
-    assert.ok(!page.body.includes('data-lands='), 'and no column claims to decide a lane');
+
+    const landsFor = (slug: string, column: string): string => {
+      const form = page.body
+        .split('<form class="move"')
+        .slice(1)
+        .find((chunk) => chunk.includes(`name="slug" value="${slug}"`));
+      assert.ok(form, `${slug} has a move form`);
+      const within = form!.slice(0, form!.indexOf('</form>'));
+      return new RegExp(`<option value="${column}" data-lands="([^"]*)"`).exec(within)?.[1] ?? '(none)';
+    };
+
+    assert.equal(landsFor('bare', 'news'), 'mmm', 'a card with no labels lands in the one it gains');
+    assert.equal(
+      landsFor('already', 'news'),
+      'aaa',
+      'and a card whose first label sorts before it does not change lanes at all',
+    );
   });
 
   it('gives every field on a card one box with its own name in it', async () => {

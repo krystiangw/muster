@@ -51,18 +51,6 @@ export interface BoardCell {
   items: ItemDoc[];
   /** True when the column holds more than this response carries. */
   truncated: boolean;
-  /**
-   * Which swimlane a card moved into this column ends up in, when the column
-   * decides that itself.
-   *
-   * A column for one person's work assigns that person, so a move into it
-   * changes the row as well as the column on a board grouped by owner. The
-   * same column is drawn in every lane, so without this a drop onto it in
-   * somebody else's lane looks like it lands there and does not. Absent when
-   * the column leaves the row alone, which means the card stays in the lane it
-   * was already in.
-   */
-  lands?: string;
 }
 
 export interface BoardRow {
@@ -181,29 +169,14 @@ export function buildBoard(
     const row: BoardRow = {
       key,
       title,
-      columns: config.columns.map((column) => {
-        const apply = applyForColumn(column);
-        // Owner only. A lane keyed by label is the card's *first* label and a
-        // move unions what it adds with what is already there, so adding one
-        // moves nothing unless the card had none, and removing one can change
-        // the first label while looking like it changes nothing. Neither
-        // direction can be promised from the column alone, so a label board
-        // says nothing and falls back to "the lane you dropped it in".
-        //
-        // Null is a lane too: a column that unassigns lands the card in the one
-        // `rowKeyFor` gives work nobody owns, which is the empty key.
-        const lands =
-          config.rows === 'owner' && apply.owner !== undefined ? (apply.owner ?? '') : undefined;
-        return {
-          key: column.key,
-          title: column.title,
-          ...(column.hint ? { hint: column.hint } : {}),
-          ...(lands === undefined ? {} : { lands }),
-          count: 0,
-          items: [],
-          truncated: false,
-        };
-      }),
+      columns: config.columns.map((column) => ({
+        key: column.key,
+        title: column.title,
+        ...(column.hint ? { hint: column.hint } : {}),
+        count: 0,
+        items: [],
+        truncated: false,
+      })),
     };
     lanes.set(key, row);
     return row;
@@ -225,19 +198,6 @@ export function buildBoard(
     if (cell.items.length < COLUMN_ITEM_LIMIT) cell.items.push(item);
     else cell.truncated = true;
     totals[index]!.count += 1;
-  }
-
-  // A column can only land a card in a lane this board is drawing. Until
-  // somebody owns work, that person has no lane, and a column naming them
-  // would have been a drop target with nowhere to land: every copy of it
-  // refused, and the column unreachable by drag for as long as the owner had
-  // nothing. Where the lane is not on the board the column says nothing, which
-  // makes it an ordinary column again, droppable in the lane it is drawn in.
-  const drawn = new Set(lanes.keys());
-  for (const lane of lanes.values()) {
-    for (const cell of lane.columns) {
-      if (cell.lands !== undefined && !drawn.has(cell.lands)) delete cell.lands;
-    }
   }
 
   const rows = [...lanes.values()].sort((a, b) => {
@@ -562,6 +522,38 @@ export async function boardFacets(store: Store, project: ProjectDoc): Promise<Bo
  * column can always spell it out with `apply` when the filter is cleverer than
  * the move.
  */
+/**
+ * Which swimlane this card ends up in if it is moved into this column.
+ *
+ * Per card, because that is what it depends on: a column that assigns an owner
+ * decides the lane for everybody, and a column that adds a label decides it
+ * only for a card that had no labels, or had ones that sort after it. Anything
+ * worked out from the column alone is right for some cards and wrong for
+ * others, which is worse than not answering.
+ *
+ * The label arithmetic mirrors the write exactly, including that `$setUnion`
+ * comes back sorted, which is why the first label after a move is the
+ * alphabetically first one and not the one that was added.
+ */
+export function landingLane(
+  item: Pick<ItemDoc, 'owner' | 'labels'>,
+  column: BoardColumn,
+  rows: BoardConfig['rows'],
+): string {
+  const apply = applyForColumn(column);
+  if (rows === 'owner') {
+    return apply.owner === undefined ? (item.owner ?? '') : (apply.owner ?? '');
+  }
+  if (rows === 'label') {
+    const had = item.labels ?? [];
+    if (!apply.addLabels && !apply.removeLabels) return had[0] ?? '';
+    const remove = new Set(apply.removeLabels ?? []);
+    const after = [...new Set([...had.filter((label) => !remove.has(label)), ...(apply.addLabels ?? [])])];
+    return after.sort()[0] ?? '';
+  }
+  return '';
+}
+
 export function applyForColumn(column: BoardColumn): BoardApply {
   if (column.apply) return column.apply;
 

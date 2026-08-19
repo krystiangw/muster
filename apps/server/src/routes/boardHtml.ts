@@ -1,7 +1,7 @@
 import type { AgentFacet, BoardFacets, BoardFilter, BoardView } from '../board.js';
 import { normalizeHandle } from '../ids.js';
-import { OPERATOR_ACTOR } from '../types.js';
-import { BOARD_PRESETS, COLUMN_RENDER_LIMIT, applyForColumn, unsatisfiableBy } from '../board.js';
+import { OPERATOR_ACTOR, type BoardColumn, type BoardConfig } from '../types.js';
+import { BOARD_PRESETS, COLUMN_RENDER_LIMIT, applyForColumn, landingLane, unsatisfiableBy } from '../board.js';
 import { boardConfigJson } from '../serialize.js';
 import { chip, escapeHtml, when } from '../html.js';
 import { who } from '../identity.js';
@@ -49,6 +49,8 @@ function moveForm(
   targets: MoveTarget[],
   action: string,
   keep: BoardFilter,
+  /** How this board is grouped, which decides what a move does to the row. */
+  rows: BoardConfig['rows'] = 'none',
 ): string {
   const options = targets.filter((target) => target.key !== from);
   if (options.length === 0) return '';
@@ -62,7 +64,16 @@ function moveForm(
     <label class="sr-only" for="mv-${escapeHtml(from)}-${escapeHtml(item.slug)}">Move ${escapeHtml(item.slug)} to</label>
     <select id="mv-${escapeHtml(from)}-${escapeHtml(item.slug)}" name="column">
 ${options
-  .map((target) => `      <option value="${escapeHtml(target.key)}">${escapeHtml(target.title)}</option>`)
+  .map(
+    (target) =>
+      // Where this card lands if it goes here, worked out per card because
+      // that is what it depends on. The drag reads it and refuses a drop onto
+      // a lane the card would not end up in; the button ignores it, as it
+      // always has.
+      `      <option value="${escapeHtml(target.key)}" data-lands="${escapeHtml(
+        landingLane(item, target.column, rows),
+      )}">${escapeHtml(target.title)}</option>`,
+  )
   .join('\n')}
     </select>
     <button type="submit" title="Move this item">move</button>
@@ -502,6 +513,8 @@ function editForms(item: ItemDoc, facets: BoardFacets, action: string, keep: Boa
 interface MoveTarget {
   key: string;
   title: string;
+  /** The column itself, so each card can be asked where it would land. */
+  column: BoardColumn;
 }
 
 export interface BoardQuestion {
@@ -644,7 +657,7 @@ export function renderBoard(view: BoardView, options: BoardRenderOptions = {}): 
             // control that lies at the moment somebody uses it.
             unsatisfiableBy(column).length === 0,
         )
-        .map((column) => ({ key: column.key, title: column.title }))
+        .map((column) => ({ key: column.key, title: column.title, column }))
     : [];
   const lanes = view.rows.length > 0 ? view.rows : [{ key: '', title: '', columns: [] }];
   const shown = lanes.flatMap((lane) =>
@@ -715,9 +728,7 @@ ${lanes
   <div class="cols">
 ${lane.columns
   .map(
-    (cell) => `    <section class="col" data-column="${escapeHtml(cell.key)}"${
-      cell.lands === undefined ? '' : ` data-lands="${escapeHtml(cell.lands)}"`
-    }>
+    (cell) => `    <section class="col" data-column="${escapeHtml(cell.key)}">
       <header><h2>${escapeHtml(cell.title)}</h2><span class="n">${cell.count}</span></header>
       ${cell.hint ? `<p class="why">${escapeHtml(cell.hint)}</p>` : ''}
       ${
@@ -730,7 +741,7 @@ ${lane.columns
                   item,
                   now,
                   options.moveAction
-                    ? moveForm(item, cell.key, targets, options.moveAction, view.filter)
+                    ? moveForm(item, cell.key, targets, options.moveAction, view.filter, view.config.rows)
                     : '',
                   sheetUrl(item),
                   options.questions?.get(item.slug)?.length ?? 0,
