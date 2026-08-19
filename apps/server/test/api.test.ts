@@ -1993,12 +1993,33 @@ describe('a database that was never there', () => {
         { method: 'POST' as const, url: '/mcp', payload: { jsonrpc: '2.0', id: 1, method: 'tools/list' } },
         { method: 'GET' as const, url: '/r/r_whatever/board' },
         { method: 'GET' as const, url: '/operator' },
+        // The browser's way to the same write as POST /p, which a list of
+        // prefixes aimed at the API door walked straight past.
+        {
+          method: 'POST' as const,
+          url: '/signup',
+          payload: 'name=nope',
+          headers: { 'content-type': 'application/x-www-form-urlencoded' },
+        },
       ]) {
         const answer = await server.inject(call);
         assert.equal(answer.statusCode, 503, `${call.method} ${call.url}: ${answer.body.slice(0, 120)}`);
         assert.equal(answer.json().error, 'store_unavailable');
         assert.equal(answer.headers['retry-after'], '5');
       }
+
+      // Static pages keep serving, including the two a prefix match would
+      // have taken down with the door beside them: /pricing starts with /p,
+      // and the signup form is a page until somebody posts it.
+      for (const url of ['/pricing', '/signup', '/docs', '/llms.txt']) {
+        const page = await server.inject({ method: 'GET', url, headers: { accept: 'text/html' } });
+        assert.equal(page.statusCode, 200, `${url} answered ${page.statusCode}`);
+      }
+
+      // And the reason is the same sentence whatever the driver said, because
+      // a duplicate key error quotes the value it tripped on, which here can
+      // be a read link or somebody's address, and this endpoint needs no token.
+      assert.doesNotMatch(health.json().message, /E11000|dup key|@/);
     } finally {
       limiter.stop();
       await server.close();

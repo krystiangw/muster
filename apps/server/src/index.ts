@@ -38,11 +38,17 @@ async function bringUp(store: Store, log: FastifyBaseLogger): Promise<void> {
       // is for, is a broken deployment: retrying it every thirty seconds for
       // ever changes nothing, and the only honest thing is to keep saying so
       // out loud while the routes that need it go on refusing.
+      // The driver's own words stay in the log. A duplicate key error quotes
+      // the value that was duplicated, which here can be a read link or an
+      // operator's address, and `why` is read out by an endpoint anybody can
+      // call: the public half says which of the two failures it is and
+      // nothing else.
       const reachable = !storeUnreachable(error);
-      const why = error instanceof Error ? error.message : String(error);
       store.ready = {
         ok: false,
-        why: reachable ? `it will not start: ${why}` : 'the database is not answering',
+        why: reachable
+          ? 'the store connected but did not finish starting'
+          : 'the database is not answering',
       };
       log[reachable ? 'error' : 'warn'](
         { err: error },

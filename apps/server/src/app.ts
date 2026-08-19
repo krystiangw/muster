@@ -325,15 +325,23 @@ export async function buildApp(
    * the database is doing, and answers everything else the way it would answer
    * an unreachable store, which is what this is.
    *
-   * Listed by prefix rather than by exclusion. Missing an entry here leaves a
+   * Listed by route rather than by exclusion. Missing an entry here leaves a
    * route answering the driver's own failure, which is where it was before;
    * missing one the other way round would take a page down for no reason.
+   *
+   * Matched on a segment boundary, not on a prefix: `/p` as a prefix also
+   * matches `/pricing`, which is a static page and has no business refusing.
+   * `GET /signup` is the same page in the other direction, a form nobody has
+   * posted yet, while the POST behind it creates a project and is exactly the
+   * write this is here to hold back.
    */
-  const NEEDS_THE_STORE = ['/v1/', '/p', '/mcp', '/r/', '/operator', '/oauth/'];
+  const NEEDS_THE_STORE = ['/p', '/v1', '/mcp', '/r', '/operator', '/oauth', '/signup'];
   server.addHook('onRequest', async (request, reply) => {
     if (store.ready.ok) return;
     const path = request.url.split('?')[0] ?? '';
-    if (!NEEDS_THE_STORE.some((prefix) => path === prefix || path.startsWith(prefix))) return;
+    const wanted = NEEDS_THE_STORE.some((route) => path === route || path.startsWith(`${route}/`));
+    if (!wanted) return;
+    if (request.method === 'GET' && path === '/signup') return;
     return reply
       .code(503)
       .header('retry-after', '5')
