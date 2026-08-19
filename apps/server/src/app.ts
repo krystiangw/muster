@@ -96,16 +96,34 @@ function schemaSays(request: FastifyRequest, error: FastifyError): string {
       known.length > 0 ? `. It takes ${known.join(', ')}` : ''
     }`;
   }
+  // A value outside a closed set. AJV says "must be equal to one of the
+  // allowed values" and does not say which, which on this service is the
+  // refusal an agent is most likely to meet: the statuses are four and the
+  // fifth one everybody reaches for, "in_progress", is deliberately not one
+  // of them. Reading them out of the error costs nothing and saves a trip to
+  // the OpenAPI document.
+  const allowed = (first.params as { allowedValues?: unknown[] } | undefined)?.allowedValues;
+  const listed =
+    Array.isArray(allowed) && allowed.length > 0
+      ? `. It takes ${
+          allowed.length === 1
+            ? String(allowed[0])
+            : `${allowed.slice(0, -1).join(', ')} or ${allowed[allowed.length - 1]}`
+        }`
+      : '';
+
   const field =
     (first.params as { missingProperty?: string } | undefined)?.missingProperty ??
     String(first.instancePath ?? '')
       .split('/')
       .filter(Boolean)[0];
-  if (!field) return '';
+  if (!field) return listed;
   const where = (error as { validationContext?: string }).validationContext ?? 'body';
   const schema = (request.routeOptions?.schema as Record<string, any> | undefined)?.[where];
   const said = schema?.properties?.[field]?.description;
-  return typeof said === 'string' && said !== '' ? `. ${said}` : '';
+  // Both, when there are both: the list says what will be accepted and the
+  // description says what the values mean.
+  return `${listed}${typeof said === 'string' && said !== '' ? `. ${said}` : ''}`;
 }
 
 /**

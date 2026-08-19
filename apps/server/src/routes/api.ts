@@ -666,7 +666,12 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
               title: { type: 'string', maxLength: 300 },
               body: { type: 'string', maxLength: 20000 },
               owner: { type: ['string', 'null'], maxLength: 48 },
-              status: { type: 'string', enum: [...ITEM_STATUSES] },
+              status: {
+                type: 'string',
+                enum: [...ITEM_STATUSES],
+                description:
+                  'There is no "in progress": an item is in progress when somebody holds a claim on it, and blocked means waiting on a person rather than on other work.',
+              },
               priority: {
                 type: 'integer',
                 minimum: -10,
@@ -797,7 +802,12 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           querystring: {
             type: 'object',
             properties: {
-              status: { type: 'string', enum: [...ITEM_STATUSES] },
+              status: {
+                type: 'string',
+                enum: [...ITEM_STATUSES],
+                description:
+                  'There is no "in progress": an item is in progress when somebody holds a claim on it, and blocked means waiting on a person rather than on other work.',
+              },
               owner: { type: 'string' },
               label: { type: 'string' },
               source: { type: 'string' },

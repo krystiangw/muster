@@ -2291,6 +2291,37 @@ describe('a database that does not answer', () => {
   });
 });
 
+describe('a value outside a closed set', () => {
+  it('names the values it does take, and the one nobody has', async () => {
+    // "must be equal to one of the allowed values" is the refusal that does
+    // not say which, and on this service it is the one an agent is most
+    // likely to meet: the statuses are four, and the fifth everybody reaches
+    // for is deliberately not one of them.
+    const project = await createProject(harness);
+    const refused = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'ops:cutover', status: 'in_progress' },
+    });
+    assert.equal(refused.statusCode, 400);
+    const message = refused.json().message as string;
+    assert.match(message, /open, blocked, done or dropped/);
+    assert.match(message, /in progress/);
+
+    // The same reading applied to every other closed set, without anybody
+    // writing a sentence per field.
+    const priority = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/escalations`,
+      headers: authed(project),
+      payload: { question: 'Bridge it?', priority: 'catastrophic' },
+    });
+    assert.equal(priority.statusCode, 400);
+    assert.match(priority.json().message as string, /It takes .* or /);
+  });
+});
+
 describe('a field this service does not have', () => {
   it('is refused rather than deleted, on the body as well as the query', async () => {
     // The promise is published in those words, and the query string kept it
