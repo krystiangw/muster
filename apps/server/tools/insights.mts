@@ -127,17 +127,21 @@ console.log('  (events, not documents: anything that happened before this log st
 // about us. Subtracting them silently would have been worse than leaving them
 // in, because then nobody can tell whether the tools ran at all.
 console.log(`  ${''.padEnd(28)} ${'strangers'.padStart(7)} ${'ours'.padStart(9)}`);
-// The window the second column actually covers, said out loud for the same
-// reason as the line above it. Everything recorded before the service learned
-// to ask carries no mark and therefore counts as a stranger, so on the day
-// this shipped the first column still held thirteen of our own boards. A split
-// printed without its start date would state that in the confident voice of a
-// number, which is the thing it was built to stop doing.
-console.log(
-  report.ourOwn.since === null
-    ? '  (nothing has been marked as ours yet, so the second column is empty rather than zero)'
-    : `  (ours has been marked since ${report.ourOwn.since.toISOString().slice(0, 10)}; anything older counts as a stranger)`,
-);
+// What the date qualifies, in both directions, because it does not mean the
+// same thing on both lines. A board that has said who it is counts as ours for
+// its whole life, since the boards our tools reuse are older than the field. A
+// read of the protocol carries no board and can never be attributed, so on the
+// day this shipped the first column still held every read our own audits made.
+// Saying only the first half would have been a confident wrong number, which
+// is the thing this column exists to stop.
+if (report.ourOwn.since === null) {
+  console.log('  (nothing has been marked as ours yet, so the second column is empty rather than zero)');
+} else {
+  const day = report.ourOwn.since.toISOString().slice(0, 10);
+  console.log(`  (marked as ours since ${day}: a board that has said who it is counts as ours from`);
+  console.log('   its first day, but a read of the protocol carries no board, so earlier reads');
+  console.log('   count as strangers until they age out)');
+}
 both('reads of the protocol', funnel.discovered, mine.discovered);
 // Beside it, never inside it. One of these says whether the files are being
 // indexed, the other says whether agents are reading them and walking away, and

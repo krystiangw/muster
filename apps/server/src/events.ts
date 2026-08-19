@@ -488,14 +488,17 @@ export interface Insights {
     claimed: number;
     outsideWindow: number;
     /**
-     * When the marking started, which is the beginning of the only window
-     * these two columns describe.
+     * When the marking started, which the two columns mean two things by.
      *
-     * Everything older carries no mark and therefore reads as a stranger, so a
-     * report that printed the split without this date would state, in the
-     * confident voice of a number, the exact thing it was built to stop
-     * saying. Null until something has been marked at all, which on a fresh
-     * deployment is the honest answer rather than a date.
+     * A board that has ever said who it is counts as ours for its whole life,
+     * earlier events included, because the boards our tools reuse are older
+     * than the field. A read of the protocol carries no board, so one recorded
+     * before this date can never be attributed and counts as a stranger for
+     * the ninety days it is kept. Both halves have to be said, or the date
+     * qualifies the split with something false about one of them.
+     *
+     * Null until something has been marked at all, which on a fresh deployment
+     * is the honest answer rather than a date.
      */
     since: Date | null;
   };
