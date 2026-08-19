@@ -501,6 +501,7 @@ export interface BoardRenderOptions {
    * find, which is the one thing a stopped search did not establish.
    */
   searchStopped?: string;
+  cardMissing?: string;
   /**
    * The board's own URL, which turns the sheets from fragments into addresses.
    *
@@ -569,6 +570,7 @@ export function renderBoard(view: BoardView, options: BoardRenderOptions = {}): 
   // confirmation nobody scrolls to is not a confirmation.
   return `${options.notice ? `<p class="notice">${escapeHtml(options.notice)}</p>` : ''}
 ${options.searchStopped ? `<p class="notice warn">${escapeHtml(options.searchStopped)}</p>` : ''}
+${options.cardMissing ? `<p class="notice warn">${escapeHtml(options.cardMissing)}</p>` : ''}
 ${options.filters ?? ''}
 ${
     // Every way of narrowing, not only two of the four. A search or a label

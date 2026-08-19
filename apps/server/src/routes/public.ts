@@ -1448,6 +1448,17 @@ ${
     // refresh either: `?card=` naming a card this project never had is an
     // ordinary board that would otherwise quietly stop keeping itself true.
     const sheetOpen = openNew || openItem !== null;
+    // And it says so. The lookup above falls back to the whole project, so a
+    // card that is merely off the board, finished months ago or dropped, still
+    // opens; nothing left here means nothing by that name exists. Answering
+    // with the plain board was the same silence the API doors were taught out
+    // of this morning, one door over: a link somebody followed did not do what
+    // it said, and the page let them believe it had. The board still draws,
+    // because a person who followed a stale link still wants the board.
+    const cardMissing =
+      openCard !== '' && openItem === null
+        ? `This project has no card called "${openCard}", so this is the board without it. The link may have a typo in it, or it may point at another project's board.`
+        : undefined;
     const agents = await agentDescriptions(store, project._id, view, openItem);
 
     // A question can be answered from a card now, and an answer that reloads
@@ -1583,6 +1594,7 @@ ${renderBoard(view, {
   projectId: project._id,
   ...(notice ? { notice } : {}),
   ...(searchStopped ? { searchStopped } : {}),
+  ...(cardMissing ? { cardMissing } : {}),
 })}
 
 ${

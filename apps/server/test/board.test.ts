@@ -2635,6 +2635,69 @@ describe('a layout that would trap finished work', () => {
   });
 });
 
+describe('a card link that names nothing', () => {
+  /**
+   * The operator's page links straight to a card with `?card=<slug>`, and a
+   * link like that outlives what it points at. Naming a card this project
+   * never had drew the plain board and said nothing, so somebody who followed
+   * a stale link was shown a page that looked like it had worked.
+   *
+   * The lookup falls back to the whole project rather than to what the board
+   * happens to be drawing, so a card that is merely off the board still opens.
+   * Nothing left means nothing by that name exists here.
+   */
+  let harness: Harness;
+  before(async () => {
+    harness = await startHarness();
+  });
+  after(async () => {
+    await harness.stop();
+  });
+
+  it('says so, and still draws the board', async () => {
+    const project = await createProject(harness, 'a stale link');
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'ops:real', title: 'a card that is really here' },
+    });
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    const missing = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?card=ops:never-existed`,
+    });
+    assert.equal(missing.statusCode, 200, 'the board is still worth drawing');
+    // Quoted in the sentence, so quoted as an entity by the time it is HTML.
+    assert.match(missing.body, /has no card called &quot;ops:never-existed&quot;/);
+    assert.match(missing.body, /a card that is really here/, 'and the board is under it');
+
+    // The name is echoed back, so it is escaped like anything else somebody
+    // put in a URL.
+    const injected = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?card=${encodeURIComponent('<script>alert(1)</script>')}`,
+    });
+    assert.equal(injected.statusCode, 200);
+    assert.ok(!injected.body.includes('<script>alert(1)</script>'), 'not as markup');
+    assert.match(injected.body, /&lt;script&gt;/, 'as the text it is');
+
+    // A card that exists says nothing of the sort, whether or not the board is
+    // currently drawing it.
+    const found = await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board?card=ops:real`,
+    });
+    assert.ok(!found.body.includes('has no card called'), 'a card that is here opens quietly');
+    assert.match(found.body, /a card that is really here/);
+
+    // And a board asked for without a card is unchanged.
+    const plain = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.ok(!plain.body.includes('has no card called'));
+  });
+});
+
 describe('a board with nothing on it', () => {
   it('names this project, because the protocol starts by making a new one', async () => {
     // Advice that produces a second board is worse than no advice: skill.md
