@@ -262,6 +262,31 @@ export class MusterError extends Error {
   }
 }
 
+/**
+ * Tolerance belongs on the way out, not on the way in.
+ *
+ * An answer that says it worked has to be readable, or it is not the answer
+ * the call promised. Handing back what could not be parsed would give the
+ * caller an object with every field undefined and let it carry on as though
+ * the write had been described back to it, which is worse than the parse error
+ * it used to get. It still arrives as a MusterError rather than a SyntaxError,
+ * so the status and the delay survive.
+ */
+function readable<T>(response: { status: number; headers: Headers }, text: string): T {
+  if (!text) return {} as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new MusterError(
+      response.status,
+      'unreadable_answer',
+      'The answer said it worked and was not JSON. Something between you and the service rewrote it.',
+      { body: text },
+      retryAfterOf(response, {}),
+    );
+  }
+}
+
 function parsed(text: string): Record<string, unknown> {
   if (!text) return {};
   try {
@@ -317,17 +342,23 @@ export class Muster {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: input.name, description: input.description }),
     });
-    const body = (await response.json()) as CreatedProject & { error?: string; message?: string };
+    // Read once, as text, and decide after. Calling `.json()` here threw a
+    // SyntaxError before any of the handling below on exactly the answer this
+    // handling is for, and signup is the first call an agent ever makes: the
+    // status, the code and the delay were lost together on the one request
+    // there is no client yet to retry with.
+    const text = await response.text();
     if (!response.ok) {
+      const refused = parsed(text);
       throw new MusterError(
         response.status,
-        body.error ?? 'error',
-        body.message ?? 'Failed',
-        body,
-        retryAfterOf(response, body as unknown as Record<string, unknown>),
+        String(refused.error ?? 'error'),
+        String(refused.message ?? response.statusText ?? 'Failed'),
+        refused,
+        retryAfterOf(response, refused),
       );
     }
-    return body;
+    return readable<CreatedProject>(response, text);
   }
 
   /** Convenience: create a project and return a client already pointed at it. */
@@ -373,22 +404,23 @@ export class Muster {
     });
 
     const text = await response.text();
-    // Not every answer is this service's. A proxy in front of it having a bad
-    // minute sends HTML or plain text, and parsing it threw a SyntaxError from
-    // inside this method: the caller got a JSON complaint instead of the 503
-    // that had actually arrived, with the status, the code and the delay all
-    // lost on the way. What could not be read is kept as text, so the error
-    // still carries what came back.
-    const body = parsed(text);
 
-    // A contested claim is the one 409 that is an answer rather than a failure:
-    // "somebody else is on it" is information the caller acts on. Every other
-    // 409, a full project or a heartbeat from the wrong agent, is an error and
-    // must not be handed back as if the write had happened.
-    const isContestedClaim =
-      response.status === 409 && body.ok === false && typeof body.held_by === 'string';
+    if (!response.ok) {
+      // Not every answer is this service's. A proxy in front of it having a
+      // bad minute sends HTML or plain text, and parsing it threw a
+      // SyntaxError from inside this method: the caller got a JSON complaint
+      // instead of the 503 that had actually arrived, with the status, the
+      // code and the delay all lost on the way. What cannot be read is kept
+      // as text, so the error still carries what came back.
+      const body = parsed(text);
 
-    if (!response.ok && !isContestedClaim) {
+      // A contested claim is the one 409 that is an answer rather than a
+      // failure: "somebody else is on it" is information the caller acts on.
+      // Every other 409, a full project or a heartbeat from the wrong agent,
+      // is an error and must not be handed back as if the write had happened.
+      const isContestedClaim = body.ok === false && typeof body.held_by === 'string';
+      if (response.status === 409 && isContestedClaim) return body as T;
+
       throw new MusterError(
         response.status,
         String(body.error ?? 'error'),
@@ -397,7 +429,7 @@ export class Muster {
         retryAfterOf(response, body),
       );
     }
-    return body as T;
+    return readable<T>(response, text);
   }
 
   // ------------------------------------------------------------- agents

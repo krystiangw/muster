@@ -302,6 +302,50 @@ describe('the typed SDK', () => {
       assert.equal(said.retryable, false);
       return true;
     });
+
+    // Signup is the first call an agent makes and the one there is no client
+    // yet to retry with, and it read its answer a different way: `.json()`
+    // threw before any of this, on exactly the answer this is for.
+    await assert.rejects(
+      Muster.createProject({
+        name: 'behind a bad proxy',
+        baseUrl,
+        fetch: async () =>
+          new Response('<html>502 Bad Gateway</html>', {
+            status: 502,
+            headers: { 'content-type': 'text/html', 'retry-after': '11' },
+          }),
+      }),
+      (error: unknown) => {
+        const said = error as { status?: number; retryAfterSeconds?: number | null; name?: string };
+        assert.equal(said.name, 'MusterError', 'and not a complaint about JSON');
+        assert.equal(said.status, 502);
+        assert.equal(said.retryAfterSeconds, 11);
+        return true;
+      },
+    );
+
+    // Tolerance belongs on the way out and not on the way in. An answer that
+    // says it worked and cannot be read is not the answer the call promised,
+    // and handing it back would give the caller an object with every field
+    // undefined to carry on with.
+    const lying = new Muster({
+      project: client.project,
+      token: 'irrelevant',
+      baseUrl,
+      fetch: async () =>
+        new Response('<html>hello from a proxy</html>', {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        }),
+    });
+    await assert.rejects(lying.items(), (error: unknown) => {
+      const said = error as { code?: string; status?: number; name?: string };
+      assert.equal(said.name, 'MusterError');
+      assert.equal(said.code, 'unreadable_answer');
+      assert.equal(said.status, 200);
+      return true;
+    });
   });
 
   /**
