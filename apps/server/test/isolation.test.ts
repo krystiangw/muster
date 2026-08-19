@@ -297,7 +297,7 @@ describe('a token from one project, at every door of another', () => {
     assert.deepEqual(leaked, [], `a token reached somebody else's board:\n${leaked.join('\n')}`);
   });
 
-  it('refuses their question and their key at my own doors', async () => {
+  it('refuses their card, their question and their key at my own doors', async () => {
     // The other direction, and the one an attacker takes. The first sweep asks
     // somebody else's address with my token, which the check in front of every
     // route settles. This is a request that check is happy with: my token, my
@@ -307,15 +307,19 @@ describe('a token from one project, at every door of another', () => {
     // forgets is invisible until somebody notices their question was answered
     // by a stranger.
     //
-    // Only the references that can cross. A slug and an agent handle are names
-    // inside one board, so `their-card` at my door is not their card, it is a
-    // card I do not have, and counting those nine refusals as isolation would
-    // be counting the shape of the data model twice. What crosses is what is
-    // globally unique: the id of a question and the id of a key.
+    // Every reference, not only the globally unique ones. An earlier version
+    // of this kept the question and the key and dropped the slugs and handles,
+    // on the argument that a name belongs to one board so there is nothing to
+    // cross. That is true of the data model and not of the code: a handler
+    // that looks a card up by slug alone finds the other board's card, and
+    // dropping those doors dropped the only thing that would notice.
     const crossable = (await doors(mine.id, 'their')).filter(
-      (door) => door.url.includes(theirEscalation) || door.url.includes(theirKey),
+      (door) =>
+        door.url.includes(theirEscalation) ||
+        door.url.includes(theirKey) ||
+        /their-(card|agent)/.test(door.url),
     );
-    assert.ok(crossable.length >= 3, `the doors that take a global id: ${crossable.length}`);
+    assert.ok(crossable.length >= 10, `the doors that carry a reference: ${crossable.length}`);
 
     const reached: string[] = [];
     for (const door of crossable) {
@@ -337,23 +341,31 @@ describe('a token from one project, at every door of another', () => {
     assert.deepEqual(reached, [], `a reference reached across boards:\n${reached.join('\n')}`);
   });
 
-  it('does not find a card or an agent named on another board, because names are local', async () => {
-    // Said once, plainly, rather than folded into the sweep above. This is the
-    // data model rather than a check: two boards can both have a card called
-    // `todo` and neither can name the other's.
-    for (const url of [
-      `${mine.api}/items/their-card`,
-      `${mine.api}/board/facets`,
-    ]) {
-      const answer = await harness.server.inject({ method: 'GET', url, headers: authed(mine) });
-      assert.doesNotMatch(answer.body, /their work/, `${url} does not carry their card`);
-    }
+  it('shows nothing of theirs on the lists my board draws', async () => {
+    // The reading half, where a leak is not an id in a path but a name in a
+    // list. Each one asserted against what that answer actually carries: the
+    // card list carries titles, and the facets carry handles, so looking for a
+    // title in the facets is a check that cannot fail.
+    const cards = await harness.server.inject({
+      method: 'GET',
+      url: `${mine.api}/items`,
+      headers: authed(mine),
+    });
+    assert.doesNotMatch(cards.body, /their work/, 'their card is not in my list');
+
+    const facets = await harness.server.inject({
+      method: 'GET',
+      url: `${mine.api}/board/facets`,
+      headers: authed(mine),
+    });
+    assert.doesNotMatch(facets.body, /their-agent/, 'and their agent is not among mine');
+
     const card = await harness.server.inject({
       method: 'GET',
       url: `${mine.api}/items/their-card`,
       headers: authed(mine),
     });
-    assert.equal(card.statusCode, 404);
+    assert.equal(card.statusCode, 404, 'and their slug names nothing here');
   });
 
   it('leaves their key working after somebody tried to revoke it from another board', async () => {
