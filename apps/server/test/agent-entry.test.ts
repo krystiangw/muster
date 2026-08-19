@@ -450,6 +450,50 @@ describe('A. discovery', () => {
       assert.equal(response.statusCode, 200, path);
     }
   });
+
+  it('advertises every page it links to', async () => {
+    // The other direction, which is the one that drifts. The list of pages in
+    // the sitemap is written out by hand, and the router already knows: two
+    // pages had to be linked from the footer before anything following links
+    // could find them, and the sitemap is the same fact in a second place. A
+    // page nobody advertises is a page only somebody already on the site can
+    // reach.
+    const sitemap = await harness.server.inject({ method: 'GET', url: '/sitemap.xml' });
+    const advertised = new Set(
+      [...sitemap.body.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => new URL(match[1]!).pathname),
+    );
+
+    // Follow what the pages themselves link, which is what a crawler does.
+    const found = new Set<string>(['/']);
+    const queue = ['/'];
+    const pages = new Set<string>();
+    while (queue.length > 0) {
+      const path = queue.shift()!;
+      const rendered = await harness.server.inject({
+        method: 'GET',
+        url: path,
+        headers: { accept: 'text/html' },
+      });
+      if (rendered.statusCode !== 200) continue;
+      // Only what a person is meant to read and a crawler is meant to keep:
+      // the markdown and the json this service serves are for agents and are
+      // named in llms.txt instead, and a capability link is deliberately not
+      // advertised anywhere.
+      if (!String(rendered.headers['content-type'] ?? '').startsWith('text/html')) continue;
+      pages.add(path);
+      for (const [, href] of rendered.body.matchAll(/href="(\/[^"#?]*)"/g)) {
+        const next = href!.replace(/\/$/, '') || '/';
+        if (found.has(next) || next.startsWith('/r/') || next.startsWith('/style-')) continue;
+        found.add(next);
+        queue.push(next);
+      }
+    }
+
+    assert.ok(pages.size >= 5, `crawled ${pages.size} pages`);
+    for (const page of pages) {
+      assert.ok(advertised.has(page), `${page} is a page this site links to but does not advertise`);
+    }
+  });
 });
 
 describe('B. agent entry', () => {
