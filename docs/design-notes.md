@@ -1510,13 +1510,18 @@ board passes the point where a namespace filter stops being enough to work in.
 in one project, eight areas, one card in twenty still open, with both competing
 indexes present.
 
-| query | keys | docs | index chosen |
-|---|---|---|---|
-| `prefix=ops:` | 2501 | 2500 | `{projectId, slug}` |
-| `q=ops` alone | 20000 | 20000 | `{projectId, status, priority, touchedAt}` |
-| `q=ops` with `status=open` | 1000 | 1000 | the same status index |
-| `q=ops` with `label=ops` | 20000 | 20000 | the same status index |
-| `q=card` with `prefix=ops:` | 2501 | 2500 | `{projectId, slug}` |
+Documents fetched, on twenty thousand cards in one project: eight areas, one in
+twenty still open, one in forty owned, one in twenty five carrying a source.
+
+| query | docs fetched | index chosen |
+|---|---|---|
+| `prefix=ops:` alone | 2500 | `{projectId, slug}` |
+| `q=ops` alone | 20000 | whichever the planner picks; it reads the project |
+| `q=` with `label=` | 20000 | no help at all |
+| `q=` with `prefix=` | 2500 | `{projectId, slug}` |
+| `q=` with `status=` | 1000 | `{projectId, status, priority, touchedAt}` |
+| `q=` with `source=` | 800 | `{projectId, source}` |
+| `q=` with `owner=` | 500 | `{projectId, status, owner}` |
 
 Two things this corrects, both of which were published as guesses first. The
 queries do not ride the same index: an unhinted `q` takes the status index and
@@ -1525,10 +1530,13 @@ index. And `q` does not always fetch everything: it fetches whatever the filters
 beside it have not already narrowed away, which is the whole project only when
 it stands alone.
 
-Not every filter beside a search helps, either. `label=` narrows the answer and
-not the read: labels carry no index on purpose, so the same twenty thousand
-documents come off disk and the label is checked on each one. Only a filter the
-index can act on, `status=` or `prefix=`, makes the search cheaper.
+Not every filter beside a search helps. `label=` narrows the answer and not the
+read: labels carry no index on purpose, so the same twenty thousand documents
+come off disk and the label is checked on each one. The four that do help are
+`status=`, `owner=`, `source=` and `prefix=`, because each one is a key the index
+can act on before a document is fetched. That distinction is the whole content of
+the `search_too_slow` advice, which for a while named `label=` among the
+remedies and would have sent a caller round the same failure.
 
 So the difference is not indexed against unindexed. A substring over two fields
 cannot be answered from an index at all, and `prefix=` can, which is why one of

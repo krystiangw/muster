@@ -855,7 +855,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
               prefix: {
                 type: 'string',
                 description:
-                  'Slug starts with this. Boards name their cards `area:thing`, so `prefix=ops:` is everything in one area. Anchored, so it bounds the read to its own stretch of the slug index, which q= cannot do: a substring over two fields is not answerable from an index. The two combine, and this is the half that makes the search cheaper. status= narrows the read too; label= narrows the answer and not the read, because labels carry no index here.',
+                  'Slug starts with this. Boards name their cards `area:thing`, so `prefix=ops:` is everything in one area. Anchored, so it bounds the read to its own stretch of the slug index, which q= cannot do: a substring over two fields is not answerable from an index. The two combine, and this is the half that makes the search cheaper. status=, owner= and source= narrow the read too; label= narrows the answer and not the read, because labels carry no index here.',
               },
               stale: { type: 'boolean' },
               claimed: {
@@ -866,7 +866,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
               q: {
                 type: 'string',
                 description:
-                  'Words to look for in the slug or the title, case insensitive: every word has to appear, in either field, in any order. The same search the board offers a person, so both doors answer alike. Anything past 120 characters or six words is cut rather than refused, for the same reason. A search that reads for longer than it is allowed is refused with 503 search_too_slow, never answered with an empty page: narrow it with another word, or with status, owner or label beside it.',
+                  'Words to look for in the slug or the title, case insensitive: every word has to appear, in either field, in any order. The same search the board offers a person, so both doors answer alike. Anything past 120 characters or six words is cut rather than refused, for the same reason. A search that reads for longer than it is allowed is refused with 503 search_too_slow, never answered with an empty page: narrow it with status=, owner=, source= or prefix= beside it, which are the ones that bound what gets read. Another word narrows the answer but not the read, and neither does label=.',
               },
               limit: { type: 'integer', minimum: 1, maximum: 200 },
               order: {

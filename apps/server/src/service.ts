@@ -2355,7 +2355,7 @@ export function searchTooSlow(store: Store, error: unknown): ServiceError | null
   return new ServiceError(
     503,
     'search_too_slow',
-    `That search read for longer than ${SEARCH_BUDGET_MS}ms without finishing, so it was stopped rather than answered with a page that might be missing rows. Narrow it: another word, or status=, owner= or label= beside it. An empty answer would have said there is nothing to find, which is not what happened.`,
+    `That search read for longer than ${SEARCH_BUDGET_MS}ms without finishing, so it was stopped rather than answered with a page that might be missing rows. Narrow it with status=, owner=, source= or prefix= beside it, which are the ones that bound what gets read. Another word narrows the answer but not the read, and neither does label=. An empty answer would have said there is nothing to find, which is not what happened.`,
   );
 }
 

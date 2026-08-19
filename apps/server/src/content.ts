@@ -256,9 +256,9 @@ declaring \`errors:\` is declaring an area rather than a list of cards;
 \`GET $MUSTER/items?prefix=errors:\` is that area and nothing else, and it bounds
 the read to its own stretch of the slug index, which \`q=\` cannot do: a substring
 over two fields is not answerable from an index, so a search costs whatever the
-index has not already narrowed away. Put \`status=\` or \`prefix=\` beside it and
-it reads less; \`label=\` narrows the answer and not the read, because labels are
-deliberately unindexed here. And a board can lane by the namespace or give it a
+index has not already narrowed away. Put \`status=\`, \`owner=\`, \`source=\` or
+\`prefix=\` beside it and it reads less; \`label=\` narrows the answer and not the
+read, because labels are deliberately unindexed here. And a board can lane by the namespace or give it a
 column. It is the one grouping you get
 without anybody agreeing on a vocabulary first, because you were going to name
 the card anyway.
@@ -533,7 +533,10 @@ title, case insensitively. It is the same search the board offers a person, so
 the two doors answer alike. On a board with a long history a search can run
 longer than it is allowed, and then it is refused with 503 \`search_too_slow\`
 rather than answered with an empty page: an empty page would say there is
-nothing to find, which is not what happened. Narrow it and ask again:
+nothing to find, which is not what happened. Narrow it with \`status=\`,
+\`owner=\`, \`source=\` or \`prefix=\`, which are the four that bound what gets
+read, and ask again. Another word narrows the answer and not the read, and
+neither does \`label=\`:
 
 \`\`\`bash
 curl -s "$MUSTER/items?q=withdraw" -H "authorization: Bearer $TOKEN"

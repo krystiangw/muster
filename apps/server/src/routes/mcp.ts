@@ -577,7 +577,7 @@ const TOOLS: ToolDefinition[] = [
         prefix: {
           type: 'string',
           description:
-            'Slug starts with this. Boards name their cards `area:thing`, so prefix "ops:" is everything in one area. Anchored, so it bounds the read to its own stretch of the slug index, which q cannot do: a substring over two fields is not answerable from an index. The two combine, and this is the half that makes the search cheaper. status narrows the read too; label narrows the answer and not the read, because labels carry no index here. board_facets lists the namespaces this board has.',
+            'Slug starts with this. Boards name their cards `area:thing`, so prefix "ops:" is everything in one area. Anchored, so it bounds the read to its own stretch of the slug index, which q cannot do: a substring over two fields is not answerable from an index. The two combine, and this is the half that makes the search cheaper. status, owner and source narrow the read too; label narrows the answer and not the read, because labels carry no index here. board_facets lists the namespaces this board has.',
         },
         stale: { type: 'boolean' },
         claimed: {
@@ -588,7 +588,7 @@ const TOOLS: ToolDefinition[] = [
         q: {
           type: 'string',
           description:
-            'Words to look for in the slug or the title, case insensitive: every word has to appear, in either field, in any order. Past 120 characters or six words it is cut, not refused. A search that reads for longer than it is allowed is refused with search_too_slow rather than answered with an empty list: narrow it with another word, or with status, owner or label beside it.',
+            'Words to look for in the slug or the title, case insensitive: every word has to appear, in either field, in any order. Past 120 characters or six words it is cut, not refused. A search that reads for longer than it is allowed is refused with search_too_slow rather than answered with an empty list: narrow it with status=, owner=, source= or prefix= beside it, which are the ones that bound what gets read. Another word narrows the answer but not the read, and neither does label=.',
         },
         limit: { type: 'integer', minimum: 1, maximum: 200 },
         order: {
