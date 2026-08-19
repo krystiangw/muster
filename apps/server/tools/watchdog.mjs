@@ -22,11 +22,15 @@
  *   node apps/server/tools/watchdog.mjs            # one round, quiet unless it matters
  *   node apps/server/tools/watchdog.mjs --status   # what it thinks right now
  */
+import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
-const HOME = join(homedir(), '.muster');
+// The operator's, unless a test says otherwise. A monitor nobody has watched
+// fail is a cron entry, not a monitor, and the only thing standing between this
+// script and a test was the one line that decided where its state lives.
+const HOME = process.env.MUSTER_HOME || join(homedir(), '.muster');
 const STATE = join(HOME, 'watchdog.state.json');
 const TIMEOUT_MS = 15_000;
 const ALERT_TO = process.env.MUSTER_ALERT_TO || 'gwizdala.kr@gmail.com';
@@ -72,7 +76,11 @@ async function probe(url, options = {}) {
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
     const response = await fetch(url, { ...options, signal: controller.signal });
-    const body = options.json ? await response.json().catch(() => null) : null;
+    const body = options.json
+      ? await response.json().catch(() => null)
+      : options.text
+        ? await response.text().catch(() => null)
+        : null;
     return { ok: response.ok, status: response.status, body };
   } catch (error) {
     return { ok: false, status: 0, error: String(error).slice(0, 120) };
@@ -139,6 +147,46 @@ if (readUrl) {
     status: form.status || form.error,
   });
 }
+
+/**
+ * Does the board still carry the code it says it carries?
+ *
+ * Every check above is answered by the server rendering HTML, and until this
+ * week that was the whole product. It is not any more: the fields on a board
+ * become lists somebody can arrow through, and a card can be dragged, and all
+ * of that lives in one file the page names in a script tag. A deploy that
+ * shipped the page without the file, or shipped a page pointing at the previous
+ * build's file, leaves every check here green while the board quietly loses the
+ * half of itself that only a browser sees. That is this monitor's whole subject.
+ *
+ * The assertion costs nothing and knows nothing about what the script says,
+ * because the URL is the file's own name: the path carries the first twelve hex
+ * of the sha256 of the body it serves. Hashing what came back and comparing it
+ * to what it was fetched as proves three things at once, that the page names a
+ * script, that the script is served, and that the two came out of the same
+ * build. Coupling the check to any string inside the script would instead make
+ * it fail the next time somebody edits a comment.
+ */
+if (readUrl) {
+  const page = await probe(`${readUrl}/board`, { text: true });
+  const named = /\/board-([0-9a-f]{12})\.js/.exec(page.body ?? '');
+  let script = { ok: false, why: 'the board page names no script' };
+  if (page.status !== 200) {
+    script = { ok: false, why: `board page ${page.status || page.error}` };
+  } else if (named) {
+    const served = await probe(`${base}${named[0]}`, { text: true });
+    const digest =
+      served.status === 200 && served.body !== null
+        ? createHash('sha256').update(served.body).digest('hex').slice(0, 12)
+        : null;
+    script =
+      digest === named[1]
+        ? { ok: true, why: named[1] }
+        : { ok: false, why: digest === null ? `script ${served.status || served.error}` : `page wants ${named[1]}, server serves ${digest}` };
+  }
+  checks.push({ name: 'board script', ok: script.ok, status: script.why });
+}
+
 const broken = checks.filter((check) => !check.ok);
 const now = new Date().toISOString();
 
