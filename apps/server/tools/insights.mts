@@ -324,6 +324,13 @@ const refusedRows = Object.entries(report.behaviour.refusedForms).sort((a, b) =>
 console.log('\nRefused, by reason');
 row('all of them', refusedRows.reduce((total, [, n]) => total + n, 0));
 for (const [reason, n] of refusedRows) row(`  ${reason}`, n);
+// Printed at zero as well, unlike the rest, because this one is a trigger
+// somebody wrote down and a row that is simply absent reads as unreported
+// rather than as never. Measured 2026-08-19: zero, ever.
+if (!refusedRows.some(([reason]) => reason === 'search_too_slow')) {
+  row('  search_too_slow', 0);
+  console.log('    never, so the search question in docs/design-notes.md stays deferred');
+}
 
 console.log('\nLast seven days');
 row('signups', weekSignups);

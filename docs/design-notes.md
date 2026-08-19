@@ -1541,3 +1541,12 @@ remedies and would have sent a caller round the same failure.
 So the difference is not indexed against unindexed. A substring over two fields
 cannot be answered from an index at all, and `prefix=` can, which is why one of
 them has a time budget and the other does not.
+
+**Both triggers, measured 2026-08-19.** The note above says a trigger nobody
+measures is a sentence in a document, so: `search_too_slow` has been recorded
+**zero** times, ever, and the refusal is wired at exactly one place in the
+service, so zero means never rather than never looked. The largest board in
+production holds 187 items against a threshold of fifty thousand. The search
+question stays deferred, and now says so out loud: `tools/insights.mts` prints
+that row at zero as well, because a row that is simply absent reads as
+unreported rather than as never happened.
