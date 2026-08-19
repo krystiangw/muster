@@ -85,8 +85,18 @@ export function nobodyWasTold(shareWith: string, inbox: string): string {
  * later run reads, and a question waiting there with nothing coming looks
  * exactly like a question somebody is thinking about.
  */
-export function nobodyIsListening(waiting: number, shareWith: string): string {
+export function nobodyIsListening(waiting: number, shareWith: string, offered = false): string {
   const subject = waiting === 1 ? 'That question is' : `Those ${waiting} questions are`;
+  // An offer already out is the case where telling an agent to share again is
+  // actively wrong: the board stays unclaimed until somebody clicks, and every
+  // repeat is another mail to a person who already has one unread.
+  if (offered) {
+    return (
+      `${subject} waiting on a board that has been offered to somebody and not accepted yet, so ` +
+      'nothing has been sent about them. Do not offer it again: wait for the address it went to, ' +
+      'or send them the read link yourself.'
+    );
+  }
   return (
     `${subject} waiting on a board nobody has claimed, so nobody was told and nobody is coming. ` +
     `Hand it to a person with ${shareWith} and their address, or send them the read link yourself.`

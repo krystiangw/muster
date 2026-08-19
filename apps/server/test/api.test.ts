@@ -1913,6 +1913,25 @@ describe('a question filed on a board nobody owns', () => {
     assert.match(inbox.json().hint, /nobody was told and nobody is coming/);
     assert.match(inbox.json().hint, /share/);
 
+    // Offered and not accepted yet, which is the case where telling an agent
+    // to share again is actively wrong: the board stays unclaimed until
+    // somebody clicks, and every repeat is another mail to a person who
+    // already has one unread.
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/share`,
+      headers: authed(project),
+      payload: { email: 'human@example.com' },
+    });
+    const offered = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/inbox?agent=a`,
+      headers: authed(project),
+    });
+    assert.match(offered.json().hint, /not accepted yet/);
+    assert.match(offered.json().hint, /Do not offer it again/);
+    assert.doesNotMatch(offered.json().hint, /nobody is coming/);
+
     // Claimed, and neither hint applies: somebody will be told.
     await harness.store.projects.updateOne(
       { _id: project.id },

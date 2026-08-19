@@ -543,14 +543,28 @@ export async function readInbox(
   store: Store,
   project: ProjectDoc,
   options: { agent?: string; includeActed?: boolean } = {},
-): Promise<{ answers: EscalationDoc[]; waiting: EscalationDoc[]; handovers: HandoverRequestDoc[] }> {
+): Promise<{
+  answers: EscalationDoc[];
+  waiting: EscalationDoc[];
+  handovers: HandoverRequestDoc[];
+  /**
+   * Offers of this board that nobody has accepted yet.
+   *
+   * A board stays unclaimed from the moment it is offered until the person
+   * clicks, which is minutes at best and a night at worst. Reading "unclaimed"
+   * as "nobody has been asked" over that window tells an agent to offer it
+   * again, and offering it again sends another mail to somebody who has one
+   * sitting unread.
+   */
+  offers: number;
+}> {
   // A handle, not a query: this value is spread into the filter below, and an
   // `agent` of `{"$ne": null}` read every agent's inbox instead of refusing.
   if (options.agent !== undefined && typeof options.agent !== 'string') {
     throw badRequest('bad_agent', 'agent is the handle whose inbox this is.');
   }
   const forAgent = options.agent ? { agent: options.agent } : {};
-  const [answers, waiting, handovers] = await Promise.all([
+  const [answers, waiting, handovers, offers] = await Promise.all([
     store.escalations
       .find({
         projectId: project._id,
@@ -569,11 +583,19 @@ export async function readInbox(
       .limit(50)
       .toArray(),
     project.claimedBy ? Promise.resolve([]) : listHandoverRequests(store, project._id),
+    // Only asked about on a board that has no owner, because that is the only
+    // board where the difference between "offered" and "nobody has been asked"
+    // decides what an agent should do next. An offer expires on its own, so
+    // this counts the live ones the way everything else here does.
+    project.claimedBy
+      ? Promise.resolve(0)
+      : store.shares.countDocuments({ projectId: project._id, expiresAt: { $gt: new Date() } }),
   ]);
   return {
     answers: answers as EscalationDoc[],
     waiting: waiting as EscalationDoc[],
     handovers,
+    offers,
   };
 }
 

@@ -1487,7 +1487,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         // could not tell "the human has not answered yet" from "my question
         // was never filed", and somebody asking for the board is the other
         // thing it would otherwise never see.
-        const { answers, waiting, handovers } = await readInbox(store, project, {
+        const { answers, waiting, handovers, offers } = await readInbox(store, project, {
           ...(agent ? { agent } : {}),
           ...(includeActed ? { includeActed: true } : {}),
         });
@@ -1509,7 +1509,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
               // Somebody asking for the board wins the slot, because handing
               // it over is the answer to both.
               !project.claimedBy && waiting.length > 0
-              ? { hint: nobodyIsListening(waiting.length, 'POST /share') }
+              ? { hint: nobodyIsListening(waiting.length, 'POST /share', offers > 0) }
               : {}),
         };
       },

@@ -1280,7 +1280,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         // question fell off the end once a project had fifty answered ones,
         // and an answer already acted on kept coming back for ever.
         const asking = text(args.agent, 'agent');
-        const { answers, waiting, handovers } = await readInbox(store, project, {
+        const { answers, waiting, handovers, offers } = await readInbox(store, project, {
           ...(asking ? { agent: asking } : {}),
         });
         return {
@@ -1296,7 +1296,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
                 hint: `Somebody wants this board. Hand it over with the share_project tool and their address. Never send them the project token.`,
               }
             : !project.claimedBy && waiting.length > 0
-              ? { hint: nobodyIsListening(waiting.length, 'the share_project tool') }
+              ? { hint: nobodyIsListening(waiting.length, 'the share_project tool', offers > 0) }
               : {}),
         };
       }
