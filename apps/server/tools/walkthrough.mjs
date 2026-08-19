@@ -423,6 +423,29 @@ const run = async () => {
   check('while somebody who does not hold it is refused', notMine.result?.isError === true);
   const handed = await lease('release', { slug: `${SLUG}-mcp`, agent: 'probe_loop', note: 'walkthrough' });
   check('and handed back rather than left to lapse', handed.result?.structuredContent?.item?.claim === null);
+
+  // The history, not the count of it. Every list on this door hands back
+  // `timeline_count` and never the entries, so until there was a call for
+  // them a client could see that four things had happened to a card and had
+  // nothing that would say what.
+  const history = await lease('read_item', { slug: `${SLUG}-mcp` });
+  const card = history.result?.structuredContent?.item;
+  check(
+    'a card hands over its history and not just a count of it',
+    Array.isArray(card?.timeline) && card.timeline.length > 0,
+    JSON.stringify(Object.keys(card ?? {})),
+  );
+  check(
+    'and the notes it carries are the words somebody wrote',
+    (card?.timeline ?? []).some((entry) => String(entry.message ?? '').includes('walkthrough')),
+    JSON.stringify((card?.timeline ?? []).map((entry) => entry.message)).slice(0, 160),
+  );
+
+  // Not the lapse. A lease is over the moment it runs out rather than the
+  // moment hygiene notices, and there is no way to see that from out here
+  // without waiting out the shortest lease this service takes. The test that
+  // pushes an expiry into the past covers it; a check here that took a lease
+  // and read it back would have proved only the half that was never in doubt.
   // On the answered question from earlier, not on an id nobody has: a missing
   // escalation is refused whether or not the guard exists, so checking that
   // would have proved the guard was there while it was gone.
