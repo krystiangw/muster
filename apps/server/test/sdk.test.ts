@@ -246,6 +246,64 @@ describe('the typed SDK', () => {
     });
   });
 
+  it('carries the wait, and says whether coming back is the move', async () => {
+    // The service publishes this twice on every answer that means later: the
+    // `retry-after` header and `retry_after` in the body. It survived neither
+    // trip through the SDK, which read no headers and handed the body back as
+    // `unknown`, so a caller had to know the field name and cast to reach it.
+    // A loop that cannot see the number either hammers a door that already
+    // said when to knock, or invents a delay of its own.
+    const { client } = await Muster.start({ name: 'waiting', actor: 'a', baseUrl });
+
+    // A rate limit, taken from the door that publishes the smallest budget
+    // rather than by hammering a real one.
+    const limited = new Response(
+      JSON.stringify({ error: 'rate_limited', limit: 'writes', message: 'Too many.', retry_after: 7 }),
+      { status: 429, headers: { 'content-type': 'application/json', 'retry-after': '7' } },
+    );
+    const patient = new Muster({
+      project: client.project,
+      token: 'irrelevant',
+      baseUrl,
+      fetch: async () => limited.clone(),
+    });
+    await assert.rejects(patient.items(), (error: unknown) => {
+      const said = error as { retryAfterSeconds?: number | null; retryable?: boolean; code?: string };
+      assert.equal(said.code, 'rate_limited');
+      assert.equal(said.retryAfterSeconds, 7, 'the number arrives');
+      assert.equal(said.retryable, true, 'and it says coming back is the move');
+      return true;
+    });
+
+    // The header wins over the body, because it is where HTTP puts this and it
+    // survives an answer that is not JSON at all.
+    const headerOnly = new Response('upstream is having a minute', {
+      status: 503,
+      headers: { 'content-type': 'text/plain', 'retry-after': '5' },
+    });
+    const patientAgain = new Muster({
+      project: client.project,
+      token: 'irrelevant',
+      baseUrl,
+      fetch: async () => headerOnly.clone(),
+    });
+    await assert.rejects(patientAgain.items(), (error: unknown) => {
+      const said = error as { retryAfterSeconds?: number | null; retryable?: boolean };
+      assert.equal(said.retryAfterSeconds, 5);
+      assert.equal(said.retryable, true);
+      return true;
+    });
+
+    // And an answer that means the request was wrong says nothing about
+    // waiting, because waiting will not help.
+    await assert.rejects(client.item('nothing-here'), (error: unknown) => {
+      const said = error as { retryAfterSeconds?: number | null; retryable?: boolean };
+      assert.equal(said.retryAfterSeconds, null);
+      assert.equal(said.retryable, false);
+      return true;
+    });
+  });
+
   /**
    * The types are a published promise about the responses, and they are
    * released separately from them. A field added to a serializer and not to the

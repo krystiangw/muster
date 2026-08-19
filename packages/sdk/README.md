@@ -11,7 +11,7 @@ npm install musterboard
 ## Signing up, which needs no human
 
 ```ts
-import { Muster } from 'musterboard';
+import { Muster, MusterError } from 'musterboard';
 
 const { client, created } = await Muster.start({
   name: 'my-project',
@@ -95,6 +95,32 @@ Every failure throws a `MusterError` carrying the HTTP status, the server's
 error code and its message. A contested claim is not an error: `claim()` and
 `withClaim()` report it in the return value, because "somebody else is on it" is
 an answer, not a failure.
+
+Two of those answers mean later rather than wrong, and the error says so
+without you having to read the body:
+
+```ts
+try {
+  await client.upsert({ slug: 'deploy:eu', title: 'Deploy to eu-west' });
+} catch (error) {
+  if (error instanceof MusterError && error.retryable) {
+    // 429 over a published limit, or 503 with the store out of reach. The
+    // server says how long in both places it can: the retry-after header and
+    // retry_after in the body. Null means it did not say.
+    const wait = error.retryAfterSeconds ?? 30;
+    console.log(`${error.code}: coming back in ${wait}s`);
+  } else {
+    throw error;
+  }
+}
+```
+
+Nothing is retried for you. A write that came back 503 may have landed, and a
+loop that assumes otherwise is how one board ends up with two of everything, so
+the SDK reports and you decide. An answer that is not JSON at all, which is what
+a proxy in front of the service sends when it is having a minute, still arrives
+as a `MusterError` with the status and the delay intact; whatever came back is
+kept on `error.body`.
 
 ## Licence
 

@@ -225,15 +225,69 @@ export interface MusterOptions {
 export const DEFAULT_BASE_URL = 'https://musterboard.dev';
 
 export class MusterError extends Error {
+  /**
+   * How long to wait, when the answer said to wait.
+   *
+   * The service publishes this twice on every answer that means later: as the
+   * `retry-after` header, and as `retry_after` in the body. Until this field
+   * existed it survived neither trip through here: nothing read a header, and
+   * the body arrived as `unknown`, so a caller had to know the field name and
+   * cast to reach it. The number is the difference between a loop that comes
+   * back when it is welcome and one that hammers a door that already said when
+   * to knock.
+   */
+  readonly retryAfterSeconds: number | null;
+
+  /**
+   * Whether coming back is the right move. True for a rate limit and for a
+   * store out of reach, and for nothing else: this service separates 503,
+   * which means come back, from 500, which means it is broken and a retry
+   * changes nothing. Deliberately not acted on here. Retrying a write nobody
+   * knows landed is how one board gets two of everything, so the SDK reports
+   * and the caller decides.
+   */
+  readonly retryable: boolean;
+
   constructor(
     readonly status: number,
     readonly code: string,
     message: string,
     readonly body: unknown,
+    retryAfterSeconds: number | null = null,
   ) {
     super(message);
     this.name = 'MusterError';
+    this.retryAfterSeconds = retryAfterSeconds;
+    this.retryable = status === 429 || status === 503;
   }
+}
+
+function parsed(text: string): Record<string, unknown> {
+  if (!text) return {};
+  try {
+    const value = JSON.parse(text) as unknown;
+    return value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : { body: value };
+  } catch {
+    return { body: text };
+  }
+}
+
+/**
+ * The header first, because it is where HTTP puts this and it survives an
+ * answer that is not JSON at all, which is what a proxy in front of a service
+ * having a bad minute tends to send.
+ */
+function retryAfterOf(response: { headers: Headers }, body: Record<string, unknown>): number | null {
+  // Asking for the value before asking whether there is one: a missing header
+  // reads as null, `Number(null)` is 0, and 0 seconds is "come back now",
+  // which is the opposite of the nothing that was actually said.
+  const header = response.headers.get('retry-after');
+  if (header !== null) {
+    const seconds = Number(header);
+    if (Number.isFinite(seconds) && seconds >= 0) return seconds;
+  }
+  const said = body.retry_after;
+  return typeof said === 'number' && Number.isFinite(said) ? said : null;
 }
 
 export class Muster {
@@ -265,7 +319,13 @@ export class Muster {
     });
     const body = (await response.json()) as CreatedProject & { error?: string; message?: string };
     if (!response.ok) {
-      throw new MusterError(response.status, body.error ?? 'error', body.message ?? 'Failed', body);
+      throw new MusterError(
+        response.status,
+        body.error ?? 'error',
+        body.message ?? 'Failed',
+        body,
+        retryAfterOf(response, body as unknown as Record<string, unknown>),
+      );
     }
     return body;
   }
@@ -313,7 +373,13 @@ export class Muster {
     });
 
     const text = await response.text();
-    const body = text ? (JSON.parse(text) as Record<string, unknown>) : {};
+    // Not every answer is this service's. A proxy in front of it having a bad
+    // minute sends HTML or plain text, and parsing it threw a SyntaxError from
+    // inside this method: the caller got a JSON complaint instead of the 503
+    // that had actually arrived, with the status, the code and the delay all
+    // lost on the way. What could not be read is kept as text, so the error
+    // still carries what came back.
+    const body = parsed(text);
 
     // A contested claim is the one 409 that is an answer rather than a failure:
     // "somebody else is on it" is information the caller acts on. Every other
@@ -328,6 +394,7 @@ export class Muster {
         String(body.error ?? 'error'),
         String(body.message ?? response.statusText),
         body,
+        retryAfterOf(response, body),
       );
     }
     return body as T;
