@@ -5,14 +5,14 @@ import { describe, it } from 'node:test';
 import ts from 'typescript';
 
 /**
- * The SDK's front page, compiled.
+ * The pages that print TypeScript, compiled.
  *
  * Same argument as the curl commands in `protocol.test.ts`, one door along.
- * The README is what somebody reads before they install anything, and every
- * line of TypeScript on it is a promise about a method that exists, an option
- * that is spelled that way and a field the answer carries. Nothing checked it,
- * so a rename would have been correct in the types, correct in the tests, and
- * wrong on the page a reader starts from.
+ * Both READMEs are read before anybody installs anything, and every line of
+ * TypeScript on them is a promise about a method that exists, an option that
+ * is spelled that way and a field the answer carries. Nothing checked them, so
+ * a rename would have been correct in the types, correct in the tests, and
+ * wrong on the two pages a reader starts from.
  *
  * Compiled rather than run, because a fragment is not a program: the page
  * shows an array being mapped without saying where it came from, and shows two
@@ -20,7 +20,12 @@ import ts from 'typescript';
  * is given its own scope and the one free name it borrows is declared, which is
  * exactly the context the surrounding prose supplies to a reader.
  */
-const README = fileURLToPath(new URL('../../../packages/sdk/README.md', import.meta.url));
+const PAGES = [
+  { name: 'the SDK README', path: '../../../packages/sdk/README.md', least: 5 },
+  // The repository's own front page shows the client too, in one shorter
+  // snippet, and is read by more people than the package page is.
+  { name: 'the repository README', path: '../../../README.md', least: 1 },
+];
 const SDK = fileURLToPath(new URL('../../../packages/sdk/src/index.ts', import.meta.url));
 const SNIPPETS = fileURLToPath(new URL('../../../packages/sdk/readme-snippets.ts', import.meta.url));
 const MANIFEST = fileURLToPath(new URL('../../../packages/sdk/package.json', import.meta.url));
@@ -46,7 +51,7 @@ function asOneModule(snippets: string[]): string {
     // package. Rewriting the specifier and keeping the names is the whole
     // point: an import of a symbol this SDK does not export has to fail here,
     // and it would not if the line were replaced with a correct one.
-    ...importsIn(snippets).map((line) => line.replace(/'[^']+'/, JSON.stringify(SDK))),
+    ...importsIn(snippets).map((line) => line.replace(/(['"])[^'"]+\1/, JSON.stringify(SDK))),
     // The two names the prose carries between snippets: the client the page
     // makes twice over, once from a signup and once from an environment, and
     // the reader's own errors, which it maps over without making them. A
@@ -58,19 +63,29 @@ function asOneModule(snippets: string[]): string {
   ].join('\n\n');
 }
 
-describe('the SDK README', () => {
-  it('type checks against the SDK it documents', () => {
-    const markdown = readFileSync(README, 'utf8');
+describe('every page that prints TypeScript', () => {
+  for (const page of PAGES) it(`${page.name} type checks against the SDK it documents`, () => {
+    const markdown = readFileSync(fileURLToPath(new URL(page.path, import.meta.url)), 'utf8');
     const snippets = snippetsIn(markdown);
-    assert.ok(snippets.length >= 5, `the README shows TypeScript: found ${snippets.length}`);
+    assert.ok(
+      snippets.length >= page.least,
+      `${page.name} shows TypeScript: found ${snippets.length}`,
+    );
 
     // The specifier is a string, so the compiler cannot check it: pointing the
     // import at the source is exactly what stops it noticing a wrong package
     // name. It is checked against the manifest instead, together with the
     // install line above it, because those two and the import are one claim.
     const name = JSON.parse(readFileSync(MANIFEST, 'utf8')).name as string;
-    assert.match(markdown, new RegExp(`npm install ${name}\\b`), 'the page installs this package');
-    const specifiers = importsIn(snippets).map((line) => /'([^']+)'/.exec(line)?.[1]);
+    // A word boundary is not a delimiter here: it sits happily between the `d`
+    // of this name and the hyphen of a different package.
+    const literal = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    assert.match(
+      markdown,
+      new RegExp(`npm install ${literal}(\\s|$)`, 'm'),
+      'the page installs this package',
+    );
+    const specifiers = importsIn(snippets).map((line) => /['"]([^'"]+)['"]/.exec(line)?.[1]);
     assert.ok(specifiers.length > 0, 'and imports from it');
     for (const specifier of specifiers) assert.equal(specifier, name, 'and imports from it');
 

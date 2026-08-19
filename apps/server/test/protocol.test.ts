@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { authed, createProject, startHarness, type Harness } from './helper.js';
 
 /**
  * The documents, executed.
  *
- * `skill.md` is what an agent reads instead of documentation, and the docs
- * pages are what a person copies from, so every curl printed on either is a
- * promise: this route exists, and this body is accepted. Nothing checked that.
+ * `skill.md` is what an agent reads instead of documentation, the docs pages
+ * are what a person copies from, and the repository README is read before
+ * either, so every curl printed on any of them is a promise: this route
+ * exists, and this body is accepted. Nothing checked that.
  * The tests around them check that the files are served, that their links
  * resolve and that they name the right package; the commands inside them were
  * prose.
@@ -193,7 +196,7 @@ async function seed(): Promise<Fixtures> {
   };
 }
 
-describe('every curl this service prints', () => {
+describe('every curl these documents print', () => {
   it('walks the protocol document from its own signup', async () => {
     const doc = (await harness.server.inject({ method: 'GET', url: '/skill.md' })).body;
     const commands = commandsIn(doc);
@@ -218,7 +221,7 @@ describe('every curl this service prints', () => {
       // test that invented an escalation id would be testing its own guess.
       if (/[<>]/.test(command.url) || (command.body && /[<>]/.test(command.body))) continue;
       const answer = await runAsPrinted(command, fill, token);
-      if (command.url.endsWith('/p') && answer.statusCode === 201) {
+      if (!project && command.url.endsWith('/p') && answer.statusCode === 201) {
         project = answer.json().project;
         token = answer.json().token;
       }
@@ -249,7 +252,7 @@ describe('every curl this service prints', () => {
 
     for (const command of commands) {
       const answer = await runAsPrinted(command, fill, token);
-      if (command.url.endsWith('/p') && answer.statusCode === 201) {
+      if (!project && command.url.endsWith('/p') && answer.statusCode === 201) {
         project = answer.json().project;
         token = answer.json().token;
       }
@@ -261,6 +264,45 @@ describe('every curl this service prints', () => {
     assert.ok(posted.length > 0, 'the claim in the document actually asked for a code');
     const owned = await harness.store.projects.findOne({ _id: project });
     assert.equal(owned?.claimedBy, 'human@example.com', 'and the verification took');
+  });
+
+  it('walks the repository README, which is read before any of them', async () => {
+    // Not served by this service, so it is read from the tree, and it names
+    // the production host rather than a variable. Everything else is the same
+    // promise, made to somebody who has not decided to use this yet.
+    const doc = readFileSync(fileURLToPath(new URL('../../../README.md', import.meta.url)), 'utf8');
+    const commands = commandsIn(doc.replaceAll('https://musterboard.dev', harness.config.baseUrl));
+    assert.ok(commands.length >= 8, `the README has commands in it: found ${commands.length}`);
+
+    let project = '';
+    let token = '';
+    // The card the page assumes a reader already has. Its own quickstart makes
+    // one further down and claims it there; this is the one the board section
+    // moves, which comes first on the page and cannot be made yet.
+    let slug = '';
+    const fill = (text: string): string =>
+      text
+        .replace('$MUSTER', `/v1/${project}`)
+        .replace(harness.config.baseUrl, '')
+        .replace('$SLUG', slug);
+
+    for (const command of commands) {
+      const answer = await runAsPrinted(command, fill, token);
+      // The first signup only. The page shows a second one to make the point
+      // that a project can be named, and a reader keeps the token they have.
+      if (!project && command.url.endsWith('/p') && answer.statusCode === 201) {
+        project = answer.json().project;
+        token = answer.json().token;
+        slug = 'ops:cutover';
+        await harness.server.inject({
+          method: 'POST',
+          url: `/v1/${project}/items`,
+          headers: { authorization: `Bearer ${token}` },
+          payload: { slug, title: 'Cut traffic over to the new venue' },
+        });
+      }
+    }
+    assert.ok(project, 'the signup the page opens with handed back a project');
   });
 
   it('answers every command the docs pages print', async () => {

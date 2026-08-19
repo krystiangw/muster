@@ -98,7 +98,7 @@ A column also says what belongs in it, so nobody has to work out that
 "Monitoring" means a label:
 
 ```bash
-curl -sX POST $MUSTER/items/errors:withdraw-stuck/move \
+curl -sX POST $MUSTER/items/$SLUG/move \
   -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{"column":"investigating","actor":"errors-loop"}'
 ```
