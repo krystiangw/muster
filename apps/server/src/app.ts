@@ -384,7 +384,7 @@ export async function buildApp(
       // `'unsafe-inline'` stays for the style attributes on the page itself: a
       // handle's colour is computed from the handle, so it cannot live in a
       // stylesheet written before the handle existed.
-      "default-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+      "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
     );
     // Only meaningful over TLS, and the deploy terminates TLS at the router.
     if (request.headers['x-forwarded-proto'] === 'https') {

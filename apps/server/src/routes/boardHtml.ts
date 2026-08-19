@@ -108,7 +108,11 @@ function card(
     .join(' ');
   // The title is the one thing a column is too narrow for, so it is clamped to
   // two lines here and shown whole in the preview the card links to.
-  return `<article class="${classes}">
+  // Draggable only where there is a form to submit, because the drop does not
+  // move anything itself: it sets the column on this card's own move form and
+  // sends it. A board rendered without one is a board a reader cannot move
+  // cards on, and offering the gesture there would be a lie the mouse tells.
+  return `<article class="${classes}"${move ? ` draggable="true" data-slug="${escapeHtml(item.slug)}"` : ''}>
   <a class="peek" href="${escapeHtml(open)}">
     <span class="slug">${escapeHtml(item.slug)}</span>
     <span class="t">${escapeHtml(item.title || '(no title)')}</span>
@@ -650,7 +654,7 @@ ${lanes
   <div class="cols">
 ${lane.columns
   .map(
-    (cell) => `    <section class="col">
+    (cell) => `    <section class="col" data-column="${escapeHtml(cell.key)}">
       <header><h2>${escapeHtml(cell.title)}</h2><span class="n">${cell.count}</span></header>
       ${cell.hint ? `<p class="why">${escapeHtml(cell.hint)}</p>` : ''}
       ${

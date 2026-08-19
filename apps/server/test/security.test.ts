@@ -238,12 +238,21 @@ describe('capability links', () => {
 });
 
 describe('the response headers', () => {
-  it('carry a policy that suits a page with no scripts at all', async () => {
+  it('carry a policy that allows this service and nothing else to execute', async () => {
     const page = await harness.server.inject({ method: 'GET', url: '/docs' });
     const csp = page.headers['content-security-policy'] as string;
     assert.match(csp, /default-src 'none'/);
     assert.match(csp, /frame-ancestors 'none'/, 'those pages carry one click forms');
-    assert.ok(!csp.includes('script-src'), 'nothing may execute, so nothing is allowed to');
+    // One source and no keywords. The board has a script now, for dragging a
+    // card into a column, and it is a file this service serves under a name
+    // that is the hash of what is in it. `'self'` is the narrowest thing that
+    // can say so: no inline, no eval, no other origin, so a string that
+    // reached a page could still not run.
+    const scriptSrc = /script-src ([^;]+)/.exec(csp)?.[1]?.trim();
+    assert.equal(scriptSrc, "'self'", 'one source, no keywords');
+    // Styles have carried `unsafe-inline` since before this, which is a
+    // different question and a much smaller one: a style cannot call anything.
+    assert.match(csp, /style-src 'self' 'unsafe-inline'/);
     // Not `no-referrer`, on purpose and load bearing: under it a browser posts
     // our own forms with `Origin: null`, and the same-site check refused every
     // one of them. `same-origin` strips the header on everything that leaves

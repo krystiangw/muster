@@ -12,7 +12,7 @@ import {
   skillMd,
 } from '../content.js';
 import { APPLE_TOUCH_PNG, FAVICON_ICO, FAVICON_SVG } from '../favicon.js';
-import { STYLE_CSS, STYLE_PATH } from '../html.js';
+import { SCRIPT_BODY, SCRIPT_PATH, STYLE_CSS, STYLE_PATH } from '../html.js';
 
 /**
  * The agent-facing surface. Every file here is static text generated once at
@@ -101,6 +101,17 @@ export function registerAgentFiles(app: FastifyInstance, config: Config, store: 
       .type('text/css; charset=utf-8')
       .header('cache-control', 'public, max-age=31536000, immutable')
       .send(STYLE_CSS);
+  });
+
+  // Named by the hash of what it contains, like the stylesheet, so the
+  // immutable year is a promise this file can keep: a change to it changes the
+  // address, and nothing has to be told to forget the old one.
+  app.get(SCRIPT_PATH, { schema: { hide: true } }, (_request, reply) => {
+    reply.compressible = true;
+    return reply
+      .type('text/javascript; charset=utf-8')
+      .header('cache-control', 'public, max-age=31536000, immutable')
+      .send(SCRIPT_BODY);
   });
 
   app.get('/favicon.svg', { schema: { hide: true } }, icon('image/svg+xml', FAVICON_SVG));

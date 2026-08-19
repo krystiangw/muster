@@ -304,17 +304,80 @@ describe('a project’s own layout', () => {
 });
 
 describe('the board in the browser', () => {
-  it('renders columns, cards and the layout editor without JavaScript', async () => {
+  it('renders columns, cards and the layout editor, and needs no JavaScript to', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'visible', title: 'a visible card', actor: 'a' });
     const readToken = (await harness.store.projects.findOne({ _id: project.id }))!.readToken;
 
     const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
     assert.equal(page.statusCode, 200);
-    assert.doesNotMatch(page.body, /<script/i);
     assert.match(page.body, /a visible card/);
     assert.match(page.body, /To do/);
     assert.match(page.body, /<textarea name="board"/);
+
+    // One script, and it is the drag: a second way to pick the column in the
+    // move form that is already on every card. Everything above is here
+    // without it, which is the whole shape of the thing. It is a file this
+    // service serves, deferred, with no inline anything.
+    const scripts = [...page.body.matchAll(/<script\b[^>]*>/gi)].map((match) => match[0]);
+    assert.equal(scripts.length, 1, `scripts on the board: ${scripts.join(' ')}`);
+    assert.match(scripts[0]!, /src="\/board-[0-9a-f]{12}\.js" defer/);
+    // Nothing between the tags, on any of them. A script with a `src` still
+    // carries a closing tag, so the question is whether anything is written
+    // between the two, and the answer has to stay no: inline is what the
+    // policy above refuses and what an escaped page could otherwise smuggle.
+    assert.deepEqual(
+      [...page.body.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].map((match) => match[1]),
+      [''],
+    );
+    assert.ok(!/\son[a-z]+=/i.test(page.body), 'and no handlers in attributes either');
+  });
+
+  it('gives the drag the two names it needs, and no third source of truth', async () => {
+    // The drop does not move anything itself. It picks the column in the move
+    // form already on the card and submits it, so the server sees the request
+    // the button makes and the rules stay in one place: the columns a card may
+    // go to are that form's options, and a column outside them refuses the
+    // drop rather than posting something the board would reject.
+    const project = await createProject(harness, 'dragging');
+    await post(project, '/items', { slug: 'draggable', title: 'a card to carry', actor: 'a' });
+    const readToken = (await harness.store.projects.findOne({ _id: project.id }))!.readToken;
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+
+    assert.match(page.body, /<article class="card"[^>]*draggable="true"[^>]*data-slug="draggable"/);
+    assert.match(page.body, /<section class="col" data-column="[a-z-]+"/);
+
+    // Every column the markup offers as a target is a column some card's form
+    // actually lists, and every draggable card has a form to submit.
+    const columns = [...page.body.matchAll(/<section class="col" data-column="([^"]+)"/g)].map(
+      (match) => match[1]!,
+    );
+    assert.ok(columns.length >= 3, `columns: ${columns.join(', ')}`);
+    const offered = new Set(
+      [...page.body.matchAll(/<option value="([^"]+)">/g)].map((match) => match[1]!),
+    );
+    assert.ok(
+      columns.some((column) => offered.has(column)),
+      'the drop targets and the form options are the same words',
+    );
+    const cards = [...page.body.matchAll(/<article class="card[^"]*"([^>]*)>/g)].map((m) => m[1]!);
+    for (const attributes of cards.filter((one) => one.includes('draggable'))) {
+      assert.match(attributes, /data-slug="/, 'a draggable card says which card it is');
+    }
+
+    // A board nobody can move cards on does not offer the gesture.
+    const readOnly = await harness.server.inject({ method: 'GET', url: '/' });
+    assert.ok(!readOnly.body.includes('draggable="true"'), 'no drag where there is no move form');
+  });
+
+  it('carries no script on the pages that draw no board', async () => {
+    // The board asks for it. Nowhere else does, because everywhere else it
+    // would be a request that buys the reader nothing.
+    for (const url of ['/', '/docs', '/pricing', '/signup', '/docs/api', '/docs/keys']) {
+      const page = await harness.server.inject({ method: 'GET', url, headers: { accept: 'text/html' } });
+      assert.equal(page.statusCode, 200, url);
+      assert.doesNotMatch(page.body, /<script/i, url);
+    }
   });
 
   it('saves a layout from the form and from a preset', async () => {
@@ -1567,7 +1630,10 @@ describe('moving an item into a column', () => {
     const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
     assert.match(page.body, /<form class="move" method="post"/);
     assert.match(page.body, /name="column"/);
-    assert.ok(!/<script/i.test(page.body), 'still no JavaScript on the page');
+    // One script, and the move above happened without it: this is the form the
+    // drag ends up submitting, exercised the way a browser with scripting off
+    // submits it.
+    assert.equal([...page.body.matchAll(/<script\b/gi)].length, 1, 'the drag, and nothing else');
 
     const moved = await harness.server.inject({
       method: 'POST',
@@ -2088,7 +2154,12 @@ describe('the card preview', () => {
     assert.match(page.body, /three tickets from the same user and one from support/);
     assert.match(page.body, /a 230px column has no room for/);
     assert.match(page.body, /queued behind a maintenance window/, 'and the recent timeline');
-    assert.ok(!/<script/i.test(page.body), 'still nothing to execute');
+    // The sheet itself carries nothing to execute. The one script the page
+    // links is the drag, which is about the columns and not about this.
+    assert.ok(
+      !/<div class="peeked[\s\S]*?<script/i.test(page.body),
+      'still nothing to execute inside the sheet',
+    );
   });
 });
 

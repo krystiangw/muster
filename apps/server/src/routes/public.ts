@@ -1613,6 +1613,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
             title: `${project.name} board`,
             description: project.description,
             wide: true,
+            board: true,
             // Every minute, except while a sheet is open. A reload throws away
             // whatever is half typed in it, and the note somebody was writing
             // is the one thing on this page that nothing else can recover.

@@ -277,6 +277,13 @@ button.ghost, .btn.ghost { background:transparent; color:var(--accent); }
 .col .card .prio { font-family:var(--mono); font-size:11.5px; font-weight:600;
   font-variant-numeric:tabular-nums; color:var(--ink-2); }
 .col .card.is-stale { border-left:2px solid var(--warn); }
+/* Dragging, which exists only where the script does. The card being carried
+   fades rather than disappearing, because a column that empties under the
+   pointer is a column that moves the target while somebody is aiming at it. */
+.col .card[draggable] { cursor:grab; }
+.col .card.dragging { opacity:.45; cursor:grabbing; }
+.col.drop-here { outline:2px solid var(--accent); outline-offset:-2px;
+  background:var(--accent-soft); }
 .col .card.is-claimed { border-left:2px solid var(--accent); }
 /* The move control. A select and a button, because a drag needs JavaScript and
    this page has none. It stays quiet until the card is hovered or the select is
@@ -437,6 +444,92 @@ let siteVerification = '';
  * fetches the sheet still gets every word.
  */
 export const STYLE_CSS = CSS;
+/**
+ * The one script this service serves, and it moves nothing by itself.
+ *
+ * Everything here works with scripting off: every card carries a form with the
+ * columns it may go to and a button that posts it. Dragging is a second way to
+ * pick the value in that same form, so the drop does one thing, sets the select
+ * and submits, and the server sees exactly the request the button makes. No
+ * endpoint of its own, no optimistic redraw, no state that can disagree with
+ * the page: if the move is refused, the refusal arrives the way it always did.
+ *
+ * The set of columns a card may go to is the server's answer, already in the
+ * markup as that form's options. A column that is not among them refuses the
+ * drop rather than posting something the board would reject, so the rule lives
+ * in one place and the mouse reads it rather than repeating it.
+ */
+const SCRIPT = `(() => {
+  const board = document.querySelector('.board');
+  if (!board || !('draggable' in document.createElement('div'))) return;
+
+  let dragging = null;
+
+  const formFor = (card) => card && card.querySelector('form.move');
+  const optionFor = (card, column) => {
+    const select = formFor(card) && formFor(card).querySelector('select[name="column"]');
+    if (!select) return null;
+    return [...select.options].some((option) => option.value === column) ? select : null;
+  };
+  const clear = () => {
+    for (const marked of board.querySelectorAll('.drop-here')) marked.classList.remove('drop-here');
+  };
+
+  board.addEventListener('dragstart', (event) => {
+    const card = event.target.closest('.card[draggable]');
+    if (!card) return;
+    dragging = card;
+    card.classList.add('dragging');
+    event.dataTransfer.effectAllowed = 'move';
+    // Firefox will not start a drag without something on the transfer.
+    event.dataTransfer.setData('text/plain', card.dataset.slug || '');
+  });
+
+  board.addEventListener('dragend', () => {
+    if (dragging) dragging.classList.remove('dragging');
+    dragging = null;
+    clear();
+  });
+
+  board.addEventListener('dragover', (event) => {
+    const column = event.target.closest('.col[data-column]');
+    if (!dragging || !column) return;
+    if (column.contains(dragging)) return;
+    if (!optionFor(dragging, column.dataset.column)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    if (!column.classList.contains('drop-here')) {
+      clear();
+      column.classList.add('drop-here');
+    }
+  });
+
+  board.addEventListener('dragleave', (event) => {
+    const column = event.target.closest('.col[data-column]');
+    if (column && !column.contains(event.relatedTarget)) column.classList.remove('drop-here');
+  });
+
+  board.addEventListener('drop', (event) => {
+    const column = event.target.closest('.col[data-column]');
+    if (!dragging || !column) return;
+    const select = optionFor(dragging, column.dataset.column);
+    if (!select) return;
+    event.preventDefault();
+    clear();
+    select.value = column.dataset.column;
+    const form = formFor(dragging);
+    dragging = null;
+    // The same submit the button does, so the kept filter and the csrf token
+    // go with it and the answer is the page the server already renders.
+    if (form.requestSubmit) form.requestSubmit();
+    else form.submit();
+  });
+})();
+`;
+
+export const SCRIPT_PATH = `/board-${createHash('sha256').update(SCRIPT).digest('hex').slice(0, 12)}.js`;
+export const SCRIPT_BODY = SCRIPT;
+
 export const STYLE_PATH = `/style-${createHash('sha256').update(CSS).digest('hex').slice(0, 12)}.css`;
 
 export function setSiteVerification(token: string): void {
@@ -463,6 +556,12 @@ export interface LayoutOptions {
   nav?: boolean;
   /** Widens the column for a board, which needs room rather than 66 characters. */
   wide?: boolean;
+  /**
+   * Links the one script this service has, which adds dragging a card to the
+   * move form that is already on it. Only the page that draws a board asks for
+   * it: everywhere else it would be a request that buys the reader nothing.
+   */
+  board?: boolean;
   /**
    * Whether this page is being rendered for somebody already signed in. Only
    * the nav label depends on it, and only pages that already hold a session
@@ -503,7 +602,7 @@ ${(options.verification ?? siteVerification) ? `<meta name="google-site-verifica
 <link rel="ai-catalog" href="/.well-known/ai-catalog.json">
 <meta name="theme-color" content="#0e5f59">
 <link rel="stylesheet" href="${STYLE_PATH}">
-</head>
+${options.board ? `<script src="${SCRIPT_PATH}" defer></script>\n` : ''}</head>
 <body>
 <div class="wrap${options.wide ? ' wide' : ''}">
 ${
