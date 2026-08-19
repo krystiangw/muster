@@ -1278,6 +1278,14 @@ describe('the MCP surface', () => {
       return answer.json().result;
     };
 
+    const listing = await harness.server.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: { authorization: `Bearer ${project.token}` },
+      payload: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+    });
+    const listedTools = listing.json().result.tools as { name: string; description: string }[];
+
     await call('upsert_item', { slug: 'ops:why', title: 'a card with a history', actor: 'first' });
     await call('append_note', { slug: 'ops:why', message: 'the venue answered on the second try', actor: 'first' });
 
@@ -1290,7 +1298,10 @@ describe('the MCP surface', () => {
     assert.equal(read.isError, undefined);
     const item = read.structuredContent.item;
     assert.equal(item.slug, 'ops:why');
-    assert.equal(item.timeline.length, fromList.timeline_count, 'as many entries as the list counted');
+    // Up to fifty: the timeline keeps a window and `timeline_count` keeps
+    // counting, so on a long-running card the two differ and the description
+    // says which one is the total.
+    assert.equal(item.timeline.length, Math.min(fromList.timeline_count, 50));
     assert.ok(
       item.timeline.some((entry: { message?: string }) =>
         String(entry.message ?? '').includes('the venue answered on the second try'),
@@ -1302,6 +1313,22 @@ describe('the MCP surface', () => {
     const missing = await call('read_item', { slug: 'ops:never-filed' });
     assert.equal(missing.isError, true);
     assert.equal(missing.structuredContent.code, 'not_found');
+
+    // Past the window the entries stop and the count does not, which is what
+    // the description now says rather than promising every one of them.
+    for (let n = 0; n < 55; n += 1) {
+      await call('append_note', { slug: 'ops:why', message: `note ${n}`, actor: 'first' });
+    }
+    const long = await call('read_item', { slug: 'ops:why' });
+    const kept = long.structuredContent.item;
+    assert.equal(kept.timeline.length, 50, 'the window');
+    assert.ok(kept.timeline_count > 50, 'and the count past it');
+    assert.match(
+      (listedTools.find((tool: { name: string }) => tool.name === 'read_item') as { description: string })
+        .description,
+      /last fifty entries are kept, and timeline_count is the true total/,
+      'and the tool says so before anybody finds out',
+    );
   });
 
   it('says an argument arrived beside the envelope rather than inside it', async () => {

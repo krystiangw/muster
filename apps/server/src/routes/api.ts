@@ -922,6 +922,10 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       async (request) => {
         const { project } = auth(request);
         const { slug } = request.params as { slug: string };
+        // Like every other read here. This one did not sweep, so a lease that
+        // had run out came back looking held while listing the same card
+        // called it free.
+        void maybeExpireClaims(store, project).catch(() => undefined);
         const item = await getItem(store, project._id, slug);
         return { item: itemJson(item, true) };
       },

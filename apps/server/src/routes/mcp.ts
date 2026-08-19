@@ -517,7 +517,7 @@ const TOOLS: ToolDefinition[] = [
     name: 'read_item',
     title: 'Read one item with its history',
     description:
-      'One card by slug, with the timeline: every note, every move and who wrote it. The lists hand back timeline_count and not the entries, so this is the call that answers why a card is where it is.',
+      'One card by slug, with its timeline: the notes, the moves and who wrote them. The lists hand back timeline_count and never the entries, so this is the call that answers why a card is where it is. The last fifty entries are kept, and timeline_count is the true total, so the two differ on a long-running card and the count is the one to trust.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -1252,6 +1252,13 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         // entries, so a client could see that four things had happened to a
         // card and had no call that would tell it what. The timeline is where
         // this product keeps the why, and the other door has always had it.
+        //
+        // Sweeping first, like every other read here. Reading one card was the
+        // path that did not, on either door, so a lease that had run out came
+        // back looking held while listing the same card called it free: one
+        // service with two answers about one card, chosen by which call you
+        // happened to make.
+        void maybeExpireClaims(store, project).catch(() => undefined);
         const item = await getItem(store, project._id, required(args.slug, 'slug'));
         return { item: itemJson(item, true) };
       }
