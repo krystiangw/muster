@@ -1,6 +1,12 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { RATE_LIMIT_SCOPES, type Config } from '../config.js';
-import { READ_LINK_GRANTS, TOKEN_IS_SHOWN_ONCE, ownerNotSent } from '../content.js';
+import {
+  READ_LINK_GRANTS,
+  TOKEN_IS_SHOWN_ONCE,
+  nobodyIsListening,
+  nobodyWasTold,
+  ownerNotSent,
+} from '../content.js';
 import type { Store } from '../db.js';
 import { maybeExpireClaims, maybeSweep, sweepProject } from '../hygiene.js';
 import {
@@ -1338,7 +1344,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           // situations it is in, and what to do about the second one.
           hint: project.claimedBy
             ? 'Keep working on something else and read /inbox on your next iteration.'
-            : 'Nobody has claimed this board, so no message was sent to anybody. Hand it to a person with POST /share, or send them the read link yourself, then read /inbox on your next iteration.',
+            : nobodyWasTold('POST /share', '/inbox'),
         });
       },
     );
@@ -1497,7 +1503,14 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
                 })),
                 hint: `Somebody wants this board. Hand it over with POST ${config.baseUrl}/v1/${project._id}/share and their address, which puts the offer in their operator view. Never send them the project token.`,
               }
-            : {}),
+            : // Said at filing time to whoever was running then. This is the
+              // call the next run makes, and a question waiting here with
+              // nothing coming looks exactly like one somebody is considering.
+              // Somebody asking for the board wins the slot, because handing
+              // it over is the answer to both.
+              !project.claimedBy && waiting.length > 0
+              ? { hint: nobodyIsListening(waiting.length, 'POST /share') }
+              : {}),
         };
       },
     );

@@ -3,7 +3,13 @@ import { record, recordFirstWrite } from '../events.js';
 import { clientIp } from './api.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
-import { STORE_UNAVAILABLE, TOKEN_IS_SHOWN_ONCE, ownerNotSent } from '../content.js';
+import {
+  STORE_UNAVAILABLE,
+  TOKEN_IS_SHOWN_ONCE,
+  nobodyIsListening,
+  nobodyWasTold,
+  ownerNotSent,
+} from '../content.js';
 import { storeUnreachable, type Store } from '../db.js';
 import { maybeExpireClaims, maybeSweep } from '../hygiene.js';
 import type { Notifier } from '../notify.js';
@@ -1172,7 +1178,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           // way of knowing that from the answer.
           hint: project.claimedBy
             ? 'Keep working on something else and read the inbox on your next iteration.'
-            : 'Nobody has claimed this board, so no message was sent to anybody. Hand it to a person with share_project, or send them the read link yourself, then read the inbox on your next iteration.',
+            : nobodyWasTold('share_project', 'the inbox'),
         };
       }
       case 'acknowledge': {
@@ -1289,7 +1295,9 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
                 })),
                 hint: `Somebody wants this board. Hand it over with the share_project tool and their address. Never send them the project token.`,
               }
-            : {}),
+            : !project.claimedBy && waiting.length > 0
+              ? { hint: nobodyIsListening(waiting.length, 'the share_project tool') }
+              : {}),
         };
       }
       default:

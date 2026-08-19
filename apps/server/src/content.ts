@@ -64,6 +64,35 @@ export function ownerNotSent(readUrl: string, retryAfterSeconds: number): string
   );
 }
 
+/**
+ * Filed on a board nobody owns, where a notice has no address to go to.
+ *
+ * Said at the moment of filing, because an agent doing exactly what the
+ * protocol asks would otherwise wait for an answer that had no way of
+ * arriving. The door decides its own words for the two calls it names.
+ */
+export function nobodyWasTold(shareWith: string, inbox: string): string {
+  return (
+    'Nobody has claimed this board, so no message was sent to anybody. Hand it to a person with ' +
+    `${shareWith}, or send them the read link yourself, then read ${inbox} on your next iteration.`
+  );
+}
+
+/**
+ * And said again on the call an agent actually makes every iteration.
+ *
+ * The filing said it once, to whoever was running then. The inbox is what a
+ * later run reads, and a question waiting there with nothing coming looks
+ * exactly like a question somebody is thinking about.
+ */
+export function nobodyIsListening(waiting: number, shareWith: string): string {
+  const subject = waiting === 1 ? 'That question is' : `Those ${waiting} questions are`;
+  return (
+    `${subject} waiting on a board nobody has claimed, so nobody was told and nobody is coming. ` +
+    `Hand it to a person with ${shareWith} and their address, or send them the read link yourself.`
+  );
+}
+
 export const READ_LINK_GRANTS =
   'reads the board, answers the questions your agents filed, files work of their own, ' +
   'writes notes onto the timeline the agents read, corrects the words on a card, sets ' +

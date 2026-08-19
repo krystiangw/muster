@@ -1900,7 +1900,20 @@ describe('a question filed on a board nobody owns', () => {
     assert.match(asked.json().hint, /Nobody has claimed this board/);
     assert.match(asked.json().hint, /share/);
 
-    // Claimed, and the hint is the ordinary one again.
+    // And again on the call a later run actually makes. Filing said it once,
+    // to whoever was running then; the inbox is what the next iteration reads,
+    // and a question waiting there with nothing coming looks exactly like a
+    // question somebody is thinking about.
+    const inbox = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/inbox?agent=a`,
+      headers: authed(project),
+    });
+    assert.equal(inbox.json().waiting.length, 1);
+    assert.match(inbox.json().hint, /nobody was told and nobody is coming/);
+    assert.match(inbox.json().hint, /share/);
+
+    // Claimed, and neither hint applies: somebody will be told.
     await harness.store.projects.updateOne(
       { _id: project.id },
       { $set: { claimedBy: 'owner@example.com', claimedAt: new Date(), expiresAt: null } },
@@ -1912,6 +1925,12 @@ describe('a question filed on a board nobody owns', () => {
       payload: { agent: 'a', question: 'And this one?' },
     });
     assert.doesNotMatch(owned.json().hint, /Nobody has claimed/);
+    const heard = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/inbox?agent=a`,
+      headers: authed(project),
+    });
+    assert.equal(heard.json().hint, undefined, 'a claimed board needs no warning about being unheard');
   });
 });
 
