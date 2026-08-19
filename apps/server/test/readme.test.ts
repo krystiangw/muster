@@ -23,9 +23,15 @@ import ts from 'typescript';
 const README = fileURLToPath(new URL('../../../packages/sdk/README.md', import.meta.url));
 const SDK = fileURLToPath(new URL('../../../packages/sdk/src/index.ts', import.meta.url));
 const SNIPPETS = fileURLToPath(new URL('../../../packages/sdk/readme-snippets.ts', import.meta.url));
+const MANIFEST = fileURLToPath(new URL('../../../packages/sdk/package.json', import.meta.url));
 
 function snippetsIn(markdown: string): string[] {
   return [...markdown.matchAll(/```ts\n([\s\S]*?)```/g)].map((found) => found[1]!);
+}
+
+/** The import lines the page prints, in the order it prints them. */
+function importsIn(snippets: string[]): string[] {
+  return snippets.flatMap((snippet) => snippet.match(/^import[^;]*;$/gm) ?? []);
 }
 
 function asOneModule(snippets: string[]): string {
@@ -36,7 +42,11 @@ function asOneModule(snippets: string[]): string {
     return `async function snippet${index}() {\n${body}\n}\nvoid snippet${index};`;
   });
   return [
-    `import { Muster } from ${JSON.stringify(SDK)};`,
+    // The page's own import, pointed at the source rather than the published
+    // package. Rewriting the specifier and keeping the names is the whole
+    // point: an import of a symbol this SDK does not export has to fail here,
+    // and it would not if the line were replaced with a correct one.
+    ...importsIn(snippets).map((line) => line.replace(/'[^']+'/, JSON.stringify(SDK))),
     // The two names the prose carries between snippets: the client the page
     // makes twice over, once from a signup and once from an environment, and
     // the reader's own errors, which it maps over without making them. A
@@ -50,8 +60,20 @@ function asOneModule(snippets: string[]): string {
 
 describe('the SDK README', () => {
   it('type checks against the SDK it documents', () => {
-    const snippets = snippetsIn(readFileSync(README, 'utf8'));
+    const markdown = readFileSync(README, 'utf8');
+    const snippets = snippetsIn(markdown);
     assert.ok(snippets.length >= 5, `the README shows TypeScript: found ${snippets.length}`);
+
+    // The specifier is a string, so the compiler cannot check it: pointing the
+    // import at the source is exactly what stops it noticing a wrong package
+    // name. It is checked against the manifest instead, together with the
+    // install line above it, because those two and the import are one claim.
+    const name = JSON.parse(readFileSync(MANIFEST, 'utf8')).name as string;
+    assert.match(markdown, new RegExp(`npm install ${name}\\b`), 'the page installs this package');
+    const specifiers = importsIn(snippets).map((line) => /'([^']+)'/.exec(line)?.[1]);
+    assert.ok(specifiers.length > 0, 'and imports from it');
+    for (const specifier of specifiers) assert.equal(specifier, name, 'and imports from it');
+
     const source = asOneModule(snippets);
 
     const options: ts.CompilerOptions = {
