@@ -123,33 +123,33 @@ await step('tools/list', async () => {
 });
 // Flat, unlike the HTTP route's `{agent: ...}`: over MCP a tool result is read
 // by a model, and one level of nesting is one more thing to get wrong.
-await step('register_agent', async () => (await call('register_agent', { project, handle: 'mcp-smoke', scope: ['smoke:'] }, token)).handle);
-await step('upsert_item', async () => (await call('upsert_item', { project, slug: 'smoke:mcp', title: 'work an MCP client wrote', status: 'open', actor: 'mcp-smoke' }, token)).item.slug);
+await step('register_agent', async () => (await call('register_agent', { handle: 'mcp-smoke', scope: ['smoke:'] }, token)).handle);
+await step('upsert_item', async () => (await call('upsert_item', { slug: 'smoke:mcp', title: 'work an MCP client wrote', status: 'open', actor: 'mcp-smoke' }, token)).item.slug);
 await step('claim_item', async () => {
-  const claimed = await call('claim_item', { project, slug: 'smoke:mcp', agent: 'mcp-smoke' }, token);
+  const claimed = await call('claim_item', { slug: 'smoke:mcp', agent: 'mcp-smoke' }, token);
   return claimed.ok ? 'held' : `refused: ${claimed.held_by}`;
 });
-await step('append_note', async () => `${(await call('append_note', { project, slug: 'smoke:mcp', actor: 'mcp-smoke', message: 'the other door writes too' }, token)).item.timeline_count} timeline entries`);
-await step('list_items', async () => `${(await call('list_items', { project, q: 'work' }, token)).items.length} found by search`);
+await step('append_note', async () => `${(await call('append_note', { slug: 'smoke:mcp', actor: 'mcp-smoke', message: 'the other door writes too' }, token)).item.timeline_count} timeline entries`);
+await step('list_items', async () => `${(await call('list_items', { q: 'work' }, token)).items.length} found by search`);
 await step('next_item', async () => {
-  const next = await call('next_item', { project, agent: 'mcp-smoke' }, token);
+  const next = await call('next_item', { agent: 'mcp-smoke' }, token);
   return next.item ? next.item.slug : `nothing: ${next.reason}`;
 });
 let asked = null;
 await step('escalate', async () => {
-  asked = (await call('escalate', { project, question: 'Does the MCP door reach the inbox?', agent: 'mcp-smoke', item_slug: 'smoke:mcp' }, token)).escalation.id;
+  asked = (await call('escalate', { question: 'Does the MCP door reach the inbox?', agent: 'mcp-smoke', item_slug: 'smoke:mcp' }, token)).escalation.id;
   return asked;
 });
 await step('inbox', async () => {
-  const inbox = await call('inbox', { project }, token);
+  const inbox = await call('inbox', { agent: 'mcp-smoke' }, token);
   return `${inbox.waiting.length} waiting, ${inbox.answers.length} answered`;
 });
 await step('board', async () => {
-  const view = await call('board', { project, items: false }, token);
+  const view = await call('board', { items: false }, token);
   return view.totals.map((column) => `${column.key}:${column.count}`).join(' ');
 });
 await step('move', async () => {
-  const moved = await call('move', { project, slug: 'smoke:mcp', column: 'done', actor: 'mcp-smoke' }, token);
+  const moved = await call('move', { slug: 'smoke:mcp', column: 'done', agent: 'mcp-smoke' }, token);
   return `landed in ${moved.landed_in ?? 'nowhere'}`;
 });
 // Closed rather than left waiting, so a reused board does not collect one open
