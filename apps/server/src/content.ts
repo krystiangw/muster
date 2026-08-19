@@ -257,8 +257,9 @@ declaring \`errors:\` is declaring an area rather than a list of cards;
 the read to its own stretch of the slug index, which \`q=\` cannot do: a substring
 over two fields is not answerable from an index, so a search costs whatever the
 filters beside it have not already narrowed away. Put one beside it. And a board
-can lane by the namespace or give it a column. It is the one grouping you get without anybody agreeing on a
-vocabulary first, because you were going to name the card anyway.
+can lane by the namespace or give it a column. It is the one grouping you get
+without anybody agreeing on a vocabulary first, because you were going to name
+the card anyway.
 
 ### 2b. Rewriting something you just read
 
