@@ -608,6 +608,23 @@ export async function insights(store: Store): Promise<Insights> {
   const stage = (...kinds: string[]): Record<string, unknown> => ({
     $and: kinds.map((kind) => ({ $in: [kind, '$kinds'] })),
   });
+  /**
+   * Every board that has ever identified itself as one of our own.
+   *
+   * Asked separately, and over every kind of event rather than the five the
+   * funnel is made of, because the boards our tools reuse are older than the
+   * marking. The walkthrough keeps one board for weeks: its signup predates
+   * this field and will never carry it, while every request it makes today
+   * says who it is. Reading only the funnel kinds would leave that board in
+   * the strangers column for as long as it lives, which is the whole failure
+   * this was written to end, surviving inside the fix for it.
+   */
+  const marked = new Set(
+    (await store.events.distinct('projectId', { ours: true, projectId: { $ne: null } })).filter(
+      (id): id is string => typeof id === 'string',
+    ),
+  );
+
   const cohortRows = store.events
     .aggregate<{
       _id: boolean;
@@ -627,12 +644,16 @@ export async function insights(store: Store): Promise<Insights> {
         $group: {
           _id: '$projectId',
           kinds: { $addToSet: '$kind' },
-          // A board is ours if any event about it said so, which in practice
-          // means its signup did. Taken as a maximum rather than from the
-          // signup row alone so that a board we started and a stranger later
-          // wrote to still reads as ours, which is the honest direction to
-          // round in a report about strangers.
+          // A board is ours if any of these five events said so. The other
+          // kinds cannot be seen from here, because the match above keeps the
+          // funnel counting one population, so they arrive as the set built
+          // before this pipeline and are folded in below.
           ours: { $max: { $cond: [{ $eq: ['$ours', true] }, true, false] } },
+        },
+      },
+      {
+        $set: {
+          ours: { $or: ['$ours', { $in: ['$_id', [...marked]] }] },
         },
       },
       {

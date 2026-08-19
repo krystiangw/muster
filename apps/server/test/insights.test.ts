@@ -839,6 +839,32 @@ describe('our own traffic, kept out of the count', () => {
     assert.equal(stored?.projectId !== null, true);
   });
 
+  it('moves a board we reuse to our side the moment it says who it is', async () => {
+    // The walkthrough keeps one board for weeks, so the board our tools reuse
+    // is older than the marking: its signup will never carry the field, while
+    // every request it makes today says who it is. Counting only the five
+    // funnel kinds would leave that board among the strangers for as long as
+    // it lives, which is this whole defect surviving inside its own fix.
+    const reused = await createProject(harness, 'a board our tools reuse');
+    await flushEvents();
+    await harness.store.events.updateMany({ projectId: reused.id }, { $unset: { ours: '' } });
+    const asStranger = await insights(harness.store);
+
+    // Something that is not a funnel kind at all, sent the way our tools send.
+    const asked = await harness.server.inject({
+      method: 'POST',
+      url: `/v1/${reused.id}/escalations`,
+      headers: { ...AS_US, authorization: `Bearer ${reused.token}`, 'content-type': 'application/json' },
+      payload: { agent: 'ours', question: 'is this board ours?' },
+    });
+    assert.equal(asked.statusCode, 201, asked.body);
+    await flushEvents();
+
+    const after = await insights(harness.store);
+    assert.equal(after.ourOwn.signups, asStranger.ourOwn.signups + 1, 'the board changed sides');
+    assert.equal(after.funnel.signups, asStranger.funnel.signups - 1);
+  });
+
   it('reads an unmarked event as somebody else, not as an unknown', async () => {
     // Everything written before 2026-08-19 has no field at all, and a report
     // that dropped those rows would quietly lose ninety days of history.
@@ -851,7 +877,11 @@ describe('our own traffic, kept out of the count', () => {
     assert.equal(after.ourOwn.signups, 0);
     assert.equal(after.ourOwn.discovered, 0);
     assert.equal(after.ourOwn.since, null, 'and with nothing marked, no window is claimed');
-    assert.equal(after.funnel.signups, before.funnel.signups + 1, 'it moved sides rather than vanishing');
-    assert.equal(after.funnel.discovered, before.funnel.discovered + 1);
+    assert.equal(
+      after.funnel.signups,
+      before.funnel.signups + before.ourOwn.signups,
+      'they moved sides rather than vanishing',
+    );
+    assert.equal(after.funnel.discovered, before.funnel.discovered + before.ourOwn.discovered);
   });
 });
