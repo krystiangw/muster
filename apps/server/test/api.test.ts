@@ -2009,6 +2009,32 @@ describe('a database that does not answer', () => {
     }
   });
 
+  it('waits for a slow ping rather than starting a second one', async () => {
+    // The case this matters in is the outage itself. Server selection is
+    // allowed five seconds and the answer is kept for one, so a probe that has
+    // not come back yet looks expired to anybody measuring its age, and every
+    // caller after the first second started another: several commands at once,
+    // aimed at the pool this cache exists to spare.
+    const real = harness.store.db.command.bind(harness.store.db);
+    let pings = 0;
+    harness.store.db.command = (() => {
+      pings += 1;
+      return new Promise((resolve) => setTimeout(() => resolve({ ok: 1 }), 1_500));
+    }) as typeof harness.store.db.command;
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 1_100));
+      const first = harness.server.inject({ method: 'GET', url: '/health' });
+      // Well past the cached second, and the first ping is still out.
+      await new Promise((resolve) => setTimeout(resolve, 1_100));
+      const second = harness.server.inject({ method: 'GET', url: '/health' });
+      const answers = await Promise.all([first, second]);
+      assert.ok(answers.every((answer) => answer.statusCode === 200));
+      assert.equal(pings, 1, `a ping in flight was joined, not repeated: ${pings} sent`);
+    } finally {
+      harness.store.db.command = real;
+    }
+  });
+
   it('says later rather than "something broke", and says it is not your request', async () => {
     // 5xx is the class this protocol tells an agent to retry, so a bug and an
     // outage answered the same way meant a fleet retried the bug at full speed

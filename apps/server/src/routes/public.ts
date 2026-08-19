@@ -267,7 +267,7 @@ function keptParams(form: KeptFilter): Record<string, string> {
  * against the pool the boards need, which is the opposite of what the cache
  * was for.
  */
-const health = new WeakMap<object, { at: number; probe: Promise<boolean> }>();
+const health = new WeakMap<object, { at: number; done: boolean; probe: Promise<boolean> }>();
 const HEALTH_CACHE_MS = 1_000;
 
 export function registerPublic(app: FastifyInstance, deps: PublicDeps): void {
@@ -295,10 +295,27 @@ export function registerPublic(app: FastifyInstance, deps: PublicDeps): void {
   app.get('/health', { schema: { hide: true } }, async (_request, reply) => {
     const now = Date.now();
     const remembered = health.get(store);
-    const fresh =
-      remembered && now - remembered.at < HEALTH_CACHE_MS
-        ? remembered
-        : { at: now, probe: store.db.command({ ping: 1 }).then(() => true, () => false) };
+    // A ping still in flight is always the one to wait for, whatever the clock
+    // says. Server selection is allowed five seconds and the answer is kept
+    // for one, so measuring the age of an unfinished probe meant every caller
+    // after the first second started another during an outage: several
+    // commands at once, aimed at the pool this exists to spare.
+    const usable = remembered && (!remembered.done || now - remembered.at < HEALTH_CACHE_MS);
+    let fresh = usable ? remembered! : undefined;
+    if (!fresh) {
+      const started = { at: now, done: false, probe: Promise.resolve(false) };
+      started.probe = store.db
+        .command({ ping: 1 })
+        .then(() => true, () => false)
+        .then((ok) => {
+          started.done = true;
+          // From when it landed, not from when it was sent: a probe that took
+          // five seconds to fail is not a second old the moment it answers.
+          started.at = Date.now();
+          return ok;
+        });
+      fresh = started;
+    }
     // Before the await, so the next caller in the same tick joins this ping
     // rather than starting another.
     health.set(store, fresh);
