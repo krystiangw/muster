@@ -397,6 +397,30 @@ const run = async () => {
     JSON.stringify(over.result?.structuredContent?.warnings),
   );
 
+  // The whole lease, on the door where it was missing until today. A client
+  // that can take a claim and not extend or return it is a client that either
+  // holds work through a crash or drops it on a slow job, and both look fine
+  // in a tools/list.
+  const lease = (name, args) => mcp(token, 'tools/call', { name, arguments: args });
+  const took = await lease('claim_item', { slug: `${SLUG}-mcp`, agent: 'probe_loop' });
+  check('a lease can be taken through it', took.result?.structuredContent?.ok === true);
+  const beat = await lease('heartbeat', { slug: `${SLUG}-mcp`, agent: 'probe_loop', ttl_minutes: 120 });
+  check(
+    'and held past its first expiry',
+    Date.parse(beat.result?.structuredContent?.expires_at ?? 0) >
+      Date.parse(took.result?.structuredContent?.expires_at ?? 0),
+  );
+  const notMine = await lease('heartbeat', { slug: `${SLUG}-mcp`, agent: 'somebody-else' });
+  check('while somebody who does not hold it is refused', notMine.result?.isError === true);
+  const handed = await lease('release', { slug: `${SLUG}-mcp`, agent: 'probe_loop', note: 'walkthrough' });
+  check('and handed back rather than left to lapse', handed.result?.structuredContent?.item?.claim === null);
+  const nameless = await lease('acknowledge', { id: 'e_nothing' });
+  check(
+    'acknowledging on behalf of nobody is refused',
+    nameless.result?.isError === true,
+    JSON.stringify(nameless.result?.content?.[0]?.text ?? '').slice(0, 120),
+  );
+
   console.log(
     `\n${failures.length === 0 ? 'all clear' : `${failures.length} broken:\n  - ${failures.join('\n  - ')}`}`,
   );
