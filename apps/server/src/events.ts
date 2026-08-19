@@ -487,6 +487,17 @@ export interface Insights {
     withWork: number;
     claimed: number;
     outsideWindow: number;
+    /**
+     * When the marking started, which is the beginning of the only window
+     * these two columns describe.
+     *
+     * Everything older carries no mark and therefore reads as a stranger, so a
+     * report that printed the split without this date would state, in the
+     * confident voice of a number, the exact thing it was built to stop
+     * saying. Null until something has been marked at all, which on a fresh
+     * deployment is the honest answer rather than a date.
+     */
+    since: Date | null;
   };
   /**
    * Projects where a person asked the agents to hand the board over.
@@ -661,6 +672,7 @@ export async function insights(store: Store): Promise<Insights> {
     discovered,
     discoveredByCrawlers,
     discoveredByUs,
+    firstMarked,
     cohort,
     asked,
     doorRows,
@@ -684,6 +696,7 @@ export async function insights(store: Store): Promise<Insights> {
     store.events.countDocuments({ kind: 'discover', crawler: { $ne: true }, ours: { $ne: true } }),
     store.events.countDocuments({ kind: 'discover', crawler: true, ours: { $ne: true } }),
     store.events.countDocuments({ kind: 'discover', ours: true }),
+    store.events.find({ ours: true }).sort({ at: 1 }).limit(1).next(),
     // Every stage of the funnel, counted over one population of boards. Both
     // doors into ownership are in it: a board handed over by its agents and
     // accepted by a person is owned exactly as much as one claimed with a code,
@@ -802,6 +815,7 @@ export async function insights(store: Store): Promise<Insights> {
       withWork: mine.withWork,
       claimed: mine.claimed,
       outsideWindow: mine.outsideWindow,
+      since: firstMarked?.at ?? null,
     },
     handoverRequests: asked[0]?.n ?? 0,
     doors: Object.fromEntries(doorRows.map((row) => [row._id, row.count])),

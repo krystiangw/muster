@@ -823,6 +823,11 @@ describe('our own traffic, kept out of the count', () => {
     // project to work back from, so it has to be marked as it happens.
     assert.equal(report.funnel.discovered, 1, 'one stranger read the protocol');
     assert.equal(report.ourOwn.discovered, 1, 'and we read it once ourselves');
+
+    // And the window the second column covers, because everything recorded
+    // before this service learned to ask carries no mark and counts as a
+    // stranger. A split without its start date is a confident wrong number.
+    assert.ok(report.ourOwn.since instanceof Date, 'the report says when marking began');
   });
 
   it('marks a write that happens several layers below the request', async () => {
@@ -845,6 +850,7 @@ describe('our own traffic, kept out of the count', () => {
     const after = await insights(harness.store);
     assert.equal(after.ourOwn.signups, 0);
     assert.equal(after.ourOwn.discovered, 0);
+    assert.equal(after.ourOwn.since, null, 'and with nothing marked, no window is claimed');
     assert.equal(after.funnel.signups, before.funnel.signups + 1, 'it moved sides rather than vanishing');
     assert.equal(after.funnel.discovered, before.funnel.discovered + 1);
   });

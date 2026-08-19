@@ -127,6 +127,17 @@ console.log('  (events, not documents: anything that happened before this log st
 // about us. Subtracting them silently would have been worse than leaving them
 // in, because then nobody can tell whether the tools ran at all.
 console.log(`  ${''.padEnd(28)} ${'strangers'.padStart(7)} ${'ours'.padStart(9)}`);
+// The window the second column actually covers, said out loud for the same
+// reason as the line above it. Everything recorded before the service learned
+// to ask carries no mark and therefore counts as a stranger, so on the day
+// this shipped the first column still held thirteen of our own boards. A split
+// printed without its start date would state that in the confident voice of a
+// number, which is the thing it was built to stop doing.
+console.log(
+  report.ourOwn.since === null
+    ? '  (nothing has been marked as ours yet, so the second column is empty rather than zero)'
+    : `  (ours has been marked since ${report.ourOwn.since.toISOString().slice(0, 10)}; anything older counts as a stranger)`,
+);
 both('reads of the protocol', funnel.discovered, mine.discovered);
 // Beside it, never inside it. One of these says whether the files are being
 // indexed, the other says whether agents are reading them and walking away, and
