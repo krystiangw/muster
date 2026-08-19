@@ -3,7 +3,7 @@ import { record, recordFirstWrite } from '../events.js';
 import { clientIp } from './api.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
-import type { Store } from '../db.js';
+import { storeUnreachable, type Store } from '../db.js';
 import { maybeExpireClaims, maybeSweep } from '../hygiene.js';
 import type { Notifier } from '../notify.js';
 import type { RateLimiter } from '../rateLimit.js';
@@ -819,13 +819,25 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           };
       }
     } catch (error) {
-      const status = error instanceof ServiceError ? error.statusCode : 500;
-      const text = error instanceof Error ? error.message : 'Unexpected error';
+      // The store being out of reach is not this service having a bug, and a
+      // client branching on the code should read the same one here as over
+      // HTTP: 503 store_unavailable means come back, 500 internal does not.
+      const unreachable = storeUnreachable(error);
+      const status = error instanceof ServiceError ? error.statusCode : unreachable ? 503 : 500;
+      const text = unreachable
+        ? 'The database did not answer, so this is not something about your call. Retry in a few seconds: anything keyed on a slug lands once however often it is sent.'
+        : error instanceof Error
+          ? error.message
+          : 'Unexpected error';
       // The code as well as the sentence. The sentence is for whoever reads the
       // transcript; the code is what a loop branches on, and over HTTP it has
       // always been there. Without it this door left an agent matching prose to
       // tell "somebody wrote to it first" from "you are over the cap".
-      const code = error instanceof ServiceError ? error.code : 'internal';
+      const code = error instanceof ServiceError
+        ? error.code
+        : unreachable
+          ? 'store_unavailable'
+          : 'internal';
       return {
         jsonrpc: '2.0',
         id,

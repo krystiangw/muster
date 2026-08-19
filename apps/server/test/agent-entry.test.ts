@@ -1111,6 +1111,39 @@ describe('the MCP surface', () => {
     assert.equal(still.structuredContent.answers.length, 1);
   });
 
+  it('says the store is unreachable in the same words the other door uses', async () => {
+    // A client branches on the code. Told "internal" it cannot tell a bug it
+    // should report from an outage it should wait out, and this door was
+    // giving both the same one while the HTTP door had just learned to
+    // separate them.
+    const project = await createProject(harness, 'store-down');
+    const { MongoServerSelectionError } = await import('mongodb');
+    const real = harness.store.items.find.bind(harness.store.items);
+    harness.store.items.find = (() => {
+      throw new MongoServerSelectionError('no primary reachable', new Map() as never);
+    }) as typeof harness.store.items.find;
+    try {
+      const answer = await harness.server.inject({
+        method: 'POST',
+        url: '/mcp',
+        headers: { authorization: `Bearer ${project.token}` },
+        payload: {
+          jsonrpc: '2.0',
+          id: 1,
+          method: 'tools/call',
+          params: { name: 'list_items', arguments: {} },
+        },
+      });
+      const result = answer.json().result;
+      assert.equal(result.isError, true);
+      assert.equal(result.structuredContent.code, 'store_unavailable');
+      assert.equal(result.structuredContent.status, 503);
+      assert.match(result.structuredContent.error, /slug/);
+    } finally {
+      harness.store.items.find = real;
+    }
+  });
+
   it('charges a tool that writes against the write budget', async () => {
     // The two budgets are published apart and a batch is many calls in one
     // request, so this door counts per call. Which bucket was a set of names

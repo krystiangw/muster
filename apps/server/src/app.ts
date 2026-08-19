@@ -5,7 +5,7 @@ import swagger from '@fastify/swagger';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import { gzipSync } from 'node:zlib';
 import type { Config } from './config.js';
-import type { Store } from './db.js';
+import { storeUnreachable, type Store } from './db.js';
 import { createMailer, type Mailer } from './email.js';
 import { escapeHtml, setContactEmail, setSiteVerification } from './html.js';
 import { createNotifier, type Notifier } from './notify.js';
@@ -512,6 +512,36 @@ ${rows
         message: error.message,
         docs: `${config.baseUrl}/openapi.json`,
       });
+    }
+    /**
+     * The store being out of reach is not this service having a bug.
+     *
+     * Both answered 500 "something broke on our side", which tells a fleet
+     * nothing about whether to come back: 5xx is the class this protocol says
+     * to retry, so an agent retried a bug at full speed and backed off from an
+     * outage exactly as fast, which is to say not at all. 503 with a
+     * `retry-after` is the one answer that means later, and these are the
+     * failures where later is the right advice: no node was reachable, the
+     * socket went, the client is shut down, the operation ran out of time.
+     *
+     * What it does not claim is that nothing happened. Server selection fails
+     * before anything leaves this process, but a socket dropped mid-write may
+     * have been written all the same, and a message saying otherwise would be
+     * a guess dressed as a fact. The retry advice is keyed to what the caller
+     * can know instead: a write named by a slug lands once however many times
+     * it is sent.
+     */
+    if (storeUnreachable(error)) {
+      request.log.warn({ err: error }, 'store unreachable');
+      return reply
+        .code(503)
+        .header('retry-after', '5')
+        .send({
+          error: 'store_unavailable',
+          message:
+            'The database did not answer, so this is not something about your request. Retry in a few seconds: anything keyed on a slug lands once however often it is sent, and a lease is taken the same way.',
+          retry_after: 5,
+        });
     }
     request.log.error({ err: error }, 'unhandled error');
     return reply.code(500).send({

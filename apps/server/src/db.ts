@@ -146,6 +146,29 @@ export async function connectStore(uri: string, dbName: string): Promise<Store> 
   return store;
 }
 
+/**
+ * Driver errors that mean the store, not the request.
+ *
+ * Named rather than matched on a prefix, because MongoServerError is a query
+ * this service got wrong and reads as one of these to any pattern loose enough
+ * to be convenient. Shared by both doors, because a client that branches on
+ * the code should get the same one whichever it came in through.
+ */
+const UNREACHABLE = new Set([
+  'MongoServerSelectionError',
+  'MongoNetworkError',
+  'MongoNetworkTimeoutError',
+  'MongoNotConnectedError',
+  'MongoServerClosedError',
+  'MongoTopologyClosedError',
+  'MongoClientClosedError',
+  'MongoOperationTimeoutError',
+]);
+
+export function storeUnreachable(error: unknown): boolean {
+  return UNREACHABLE.has((error as { name?: string } | null)?.name ?? '');
+}
+
 export async function createStore(uri: string, dbName: string): Promise<Store> {
   const store = await connectStore(uri, dbName);
   await ensureIndexes(store);

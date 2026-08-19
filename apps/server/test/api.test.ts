@@ -1951,6 +1951,58 @@ describe('a refusal that clears by waiting', () => {
   });
 });
 
+describe('a database that does not answer', () => {
+  it('says later rather than "something broke", and says it is not your request', async () => {
+    // 5xx is the class this protocol tells an agent to retry, so a bug and an
+    // outage answered the same way meant a fleet retried the bug at full speed
+    // and backed off from the outage exactly as fast, which is not at all.
+    const project = await createProject(harness);
+    const { MongoServerSelectionError } = await import('mongodb');
+    const real = harness.store.items.find.bind(harness.store.items);
+    harness.store.items.find = (() => {
+      throw new MongoServerSelectionError('no primary reachable', new Map() as never);
+    }) as typeof harness.store.items.find;
+    try {
+      const answer = await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/items`,
+        headers: authed(project),
+      });
+      assert.equal(answer.statusCode, 503, answer.body);
+      assert.equal(answer.json().error, 'store_unavailable');
+      assert.equal(answer.headers['retry-after'], '5');
+      // Not "nothing was written": a socket dropped mid-write may have been.
+      // What the caller can act on is that repeating a slug is safe.
+      assert.match(answer.json().message, /slug/);
+    } finally {
+      harness.store.items.find = real;
+    }
+  });
+
+  it('keeps a query this service got wrong out of that answer', async () => {
+    // MongoServerError is the store answering, and answering that the query
+    // was bad. Reading it as an outage would tell a fleet to come back later
+    // for a bug that will still be there.
+    const project = await createProject(harness);
+    const { MongoServerError } = await import('mongodb');
+    const real = harness.store.items.find.bind(harness.store.items);
+    harness.store.items.find = (() => {
+      throw new MongoServerError({ message: 'unknown operator: $nope' });
+    }) as typeof harness.store.items.find;
+    try {
+      const answer = await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/items`,
+        headers: authed(project),
+      });
+      assert.equal(answer.statusCode, 500, answer.body);
+      assert.equal(answer.json().error, 'internal');
+    } finally {
+      harness.store.items.find = real;
+    }
+  });
+});
+
 describe('a field this service does not have', () => {
   it('is refused rather than deleted, on the body as well as the query', async () => {
     // The promise is published in those words, and the query string kept it
