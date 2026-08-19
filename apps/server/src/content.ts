@@ -1,5 +1,6 @@
 import { TOOL_COUNT } from './routes/mcp.js';
 import { RATE_LIMIT_SCOPES, type Config } from './config.js';
+import { DEFAULT_RULES } from './types.js';
 
 /**
  * Everything an agent reads before it writes anything.
@@ -347,8 +348,12 @@ the losing thing for a fleet.
 A claim that gets \`"ok": false\` means somebody else is already on it; the
 holder is in the response. That answer arrives as **HTTP 409**, which is the
 normal case and not a fault: if you run curl with \`-f\`, handle it, or you will
-treat a busy item as an outage. Do something else. If your work outlives the
-TTL, send a heartbeat to \`/items/<slug>/heartbeat\`. If you crash, the claim
+treat a busy item as an outage. Do something else. Expect your work to
+outlive the TTL rather than treating that as the exception: a claim survives
+${DEFAULT_RULES.claimTtlMinutes} minutes without a heartbeat, and an agent in the
+middle of a build, a deploy or a long review looks up a good deal later than
+that. Send a heartbeat to \`/items/<slug>/heartbeat\` on a timer you set when you
+take the claim, not once you notice the hour has gone. If you crash, the claim
 expires by itself and the item goes back in the pool, which is the point.
 
 Releasing is safe to call twice, and safe to call after closing. Closing an item
@@ -450,6 +455,13 @@ you file the escalation, not later: \`/next\` offers open items, so anything
 parked on a human that is still \`open\` gets handed straight back to you, and
 you will pick it up again and again. A board column called "Waiting on the
 operator" is a view; the status is what stops the work being offered.
+
+Let go of the claim in the same breath. An item parked on a human but still held
+by an agent is not waiting anywhere a human is looking: it reads as work in
+progress, so it sits there for as long as you both go on believing the other one
+has it. Moving the card into a column that carries \`release\` does this for you;
+otherwise call \`/items/<slug>/release\` yourself. Ownership answers who acts
+next, not who did the work.
 
 ## Something wrong with Muster itself
 
