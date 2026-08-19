@@ -245,6 +245,36 @@ describe('the watchdog, watched', () => {
     assert.equal(saved().backupMisses, 0, 'and a bad afternoon does not count as a night');
   });
 
+  // The one thing about a monitor you cannot try, because trying it is the
+  // thing it does: file an urgent question on somebody's board and mail them.
+  it('rehearses a bad night without filing, mailing or remembering it', async () => {
+    backupWritten(Date.now() - 72 * 3_600_000);
+    state.landing = 500;
+    const rehearsal = async () =>
+      (
+        await run(process.execPath, ['tools/watchdog.mjs', '--dry-run'], {
+          cwd: HERE,
+          encoding: 'utf8',
+          env: { ...process.env, MUSTER_HOME: home, MUSTER_RESEND_KEY: 'test-key', MUSTER_ALERT_TO: 'nobody@example.com' },
+        })
+      ).stdout;
+
+    // Rehearsed from where the machine already is, not from nothing: a dry run
+    // writes no state, so it can never walk itself up to the second miss, and
+    // a rehearsal that could not reach the alert would be rehearsing the quiet
+    // half only.
+    const before = JSON.stringify({ failures: 1, alerted: false, lastOk: null, backupMisses: 1 });
+    writeFileSync(join(home, 'watchdog.state.json'), before);
+
+    const out = await rehearsal();
+    assert.match(out, /dry run, would have mailed/);
+    assert.match(out, /dry run, would have filed/);
+    // Unchanged to the byte. The counters decide whether the next real round
+    // alerts, so a rehearsal that moved them would change the thing it was
+    // rehearsing.
+    assert.equal(readFileSync(join(home, 'watchdog.state.json'), 'utf8'), before);
+  });
+
   it('waits the full two nights, not the rounded ones', async () => {
     backupWritten(Date.now() - 47.6 * 3_600_000);
     await round();

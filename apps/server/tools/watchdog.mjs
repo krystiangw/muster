@@ -21,6 +21,15 @@
  *
  *   node apps/server/tools/watchdog.mjs            # one round, quiet unless it matters
  *   node apps/server/tools/watchdog.mjs --status   # what it thinks right now
+ *   node apps/server/tools/watchdog.mjs --dry-run  # every check, nothing sent
+ *
+ * `--dry-run` exists because seeing what this does on a bad night is the one
+ * thing you cannot try. Pointed at a real deployment it files an urgent
+ * question on somebody's board and mails them, which on 2026-08-19 is exactly
+ * what it did three times to the operator of this very product, at eleven at
+ * night, because the person checking it was the person who wrote it. It runs
+ * every check and prints what it would have done, writing nothing and sending
+ * nothing, not even the state file.
  */
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
@@ -68,6 +77,9 @@ const state = {
   keyCheckedAt: typeof saved.keyCheckedAt === 'string' ? saved.keyCheckedAt : null,
   keyAlerted: saved.keyAlerted === true,
 };
+
+// Read once, so nothing further down has to remember to ask.
+const dryRun = process.argv.includes('--dry-run');
 
 if (process.argv.includes('--status')) {
   console.log(JSON.stringify(state, null, 1));
@@ -274,6 +286,7 @@ const now = new Date().toISOString();
 const alertKey = process.env.MUSTER_RESEND_KEY || read(join(HOME, 'resend.key'));
 
 async function mail(subject, lines) {
+  if (dryRun) return `dry run, would have mailed "${subject}"`;
   const key = alertKey;
   if (!key) return 'no key';
   const response = await fetch('https://api.resend.com/emails', {
@@ -295,6 +308,7 @@ async function mail(subject, lines) {
 
 /** Best effort, and never allowed to break the round. */
 async function fileOnTheBoard(question, context) {
+  if (dryRun) return `dry run, would have filed "${question.slice(0, 60)}"`;
   try {
     const response = await fetch(`${base}/v1/${projectId}/escalations`, {
       method: 'POST',
@@ -632,4 +646,7 @@ if (broken.length === 0 && !hygieneBehind && !noticesStuck && !backupsStale && !
 }
 
 mkdirSync(HOME, { recursive: true });
-writeFileSync(STATE, JSON.stringify(state, null, 1), { mode: 0o600 });
+// Nothing written on a dry run either: the counters are what decide whether the
+// next real round alerts, so a rehearsal that moved them would change the thing
+// it was rehearsing.
+if (!dryRun) writeFileSync(STATE, JSON.stringify(state, null, 1), { mode: 0o600 });

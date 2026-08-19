@@ -109,6 +109,15 @@ to what a document holds. The tool enumerates collections from the database
 rather than from a list somebody has to remember to extend, so a collection
 added tomorrow is in tomorrow's archive without anybody touching this file.
 
+Seeing what the watchdog does on a bad night is the one thing you cannot try,
+because trying it is the thing it does: `node tools/watchdog.mjs --dry-run` runs
+every check against the real deployment and prints what it would have filed and
+mailed, writing nothing and sending nothing, not even its own state file. It
+rehearses from wherever the counters already are, since a run that wrote them
+would change the thing it was rehearsing. Use it instead of pointing a scratch
+`MUSTER_HOME` at production, which on 2026-08-19 put three urgent questions on
+the operator's board and mailed one of them at eleven at night.
+
 And the half that was missing until tonight: **nothing noticed when the archives
 stopped.** The cron runs on this machine, not on the dyno, so every check the
 service makes stays green through a laptop asleep at the wrong hour or a moved
