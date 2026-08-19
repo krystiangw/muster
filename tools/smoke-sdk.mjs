@@ -61,7 +61,12 @@ const step = async (name, run) => {
   }
 };
 
-const STATE = join(homedir(), '.muster', 'smoke.json');
+// The operator's, unless a caller says otherwise. This script points at
+// production by default and remembers what it made, and the only thing
+// standing between it and being run against a server a test controls was the
+// line that decides where that memory lives.
+const HOME = process.env.MUSTER_HOME || join(homedir(), '.muster');
+const STATE = join(HOME, 'smoke.json');
 const saved = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8'))[base] : null;
 
 /**
@@ -83,7 +88,7 @@ const signUp = async () => {
     baseUrl: base,
     fetch: asUs,
   });
-  mkdirSync(join(homedir(), '.muster'), { recursive: true });
+  mkdirSync(HOME, { recursive: true });
   const all = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8')) : {};
   all[base] = { project: created.project, token: created.token };
   // In a home directory rather than anywhere near a checkout, for the reason

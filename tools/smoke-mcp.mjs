@@ -22,7 +22,12 @@ import { join } from 'node:path';
 const argv = process.argv.slice(2);
 const at = argv.indexOf('--base');
 const base = (at === -1 ? 'https://musterboard.dev' : argv[at + 1]).replace(/\/+$/, '');
-const STATE = join(homedir(), '.muster', 'smoke.json');
+// The operator's, unless a caller says otherwise. This script points at
+// production by default and remembers what it made, and the only thing
+// standing between it and being run against a server a test controls was the
+// line that decides where that memory lives.
+const HOME = process.env.MUSTER_HOME || join(homedir(), '.muster');
+const STATE = join(HOME, 'smoke.json');
 
 /**
  * How this names itself to the service, on every request.
@@ -108,7 +113,7 @@ if (!project) {
   const created = await call('create_project', { name: 'mcp smoke test', description: 'Created by tools/smoke-mcp.mjs.' });
   project = created.project;
   token = created.token;
-  mkdirSync(join(homedir(), '.muster'), { recursive: true });
+  mkdirSync(HOME, { recursive: true });
   const all = existsSync(STATE) ? JSON.parse(readFileSync(STATE, 'utf8')) : {};
   all[base] = { project, token };
   writeFileSync(STATE, JSON.stringify(all, null, 1), { mode: 0o600 });
