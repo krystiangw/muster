@@ -1210,3 +1210,96 @@ each was last *looked at* turns the queue over. And a delivery of `discarded`,
 which is what a deployment with no mail provider answers, has to give the stamp
 back: keeping it marks the board as told for ever, including after somebody
 configures the provider.
+
+## Connected is not ready, 2026-08-19
+
+The process connected to MongoDB and then listened, so a database that was
+briefly out of reach at boot exited it. Heroku backs a crashing dyno off for
+minutes, which means a blip lasting twenty seconds left the site down long
+after the database came back, and the only trace was a restart count.
+
+Opening the handles without touching the network, listening, and bringing the
+store up behind the port fixes that, and it is only safe because of the work
+that came first: every route answers an unreachable store with 503, and
+`/health` says the same, so a process serving without a database tells the
+truth to an agent, to a person and to whatever is watching.
+
+The correction that followed is the part worth keeping. A connection is not
+readiness. Between the client connecting and the indexes being built, every
+query works and one of them is missing its unique constraint: a write landing
+in that window can break the invariant the index exists for and make the build
+fail with it, leaving a deployment that passes a ping and is quietly wrong. So
+readiness is a state the process knows about, the routes that need the database
+refuse until it is true, and the static pages serve through it. The port still
+waits ten seconds first, because the ordinary deploy takes a quarter of a
+second and a 503 window nobody needed is worse than a boot that is slower.
+
+And the retry loop cannot treat every failure alike. A store that cannot be
+reached will come back and asking again is right. An index that will not build
+because the data already breaks it will not build in thirty seconds either:
+that is a broken deployment, it says so at error level, and every board goes on
+refusing rather than serving without the constraint.
+
+## What a fleet does with a 5xx, 2026-08-19
+
+5xx is the class this protocol tells an agent to retry, and both doors answered
+every unhandled failure with 500 "something broke on our side". So a fleet
+retried a bug at full speed and backed off from an outage exactly as fast,
+which is to say not at all, and nothing in the answer let a loop tell the two
+apart.
+
+The driver already names them. A store that cannot be selected, a socket that
+went, a client shut down, an operation out of time: 503 `store_unavailable`
+with a `retry-after`, on the HTTP door and in the tool result, because a client
+branching on the code should read the same one whichever way it came in.
+Everything else keeps 500, including `MongoServerError`, which is the store
+answering that our query was wrong and will be just as wrong in five seconds.
+
+A failover has two halves and only one of them is a network error. Going down
+produces not-primary and shutdown codes; coming back up produces a read refused
+because the new primary has not committed a majority yet, which no
+retryable-write label covers and which lands on the read a fleet leans on
+hardest during a failover.
+
+What the answer does not claim is that nothing happened. Server selection fails
+before anything leaves the process, but a socket dropped mid-write may have
+been written. And it does not say "retry" flatly, which is the advice that
+turns one lost answer into two projects: a slug is an idempotency key and a
+minted id is not. It does not call a slug free either. Sending an upsert or a
+claim again cannot make a second card or take the lease off you, and it does
+add a line to the timeline both times, which is worth one clause to say.
+
+## Reading what somebody reads, 2026-08-19
+
+A night of tests that pass and a morning of reading the same surfaces as prose,
+and the reading found six things the tests could not, because nothing was
+broken.
+
+The signup reply over MCP said "store this token, it is shown once" and the
+same reply over HTTP did not, though it hands over the same one-time secret and
+it is the door every example uses. The inbox, which an agent reads every
+iteration, said nothing about a board nobody owns, so a question could wait
+there for ever looking exactly like a question somebody was thinking about. The
+operator page, where an owner actually answers, was the one place a question
+did not name the card it was about, and the cause was a projection that never
+fetched the field. Two fields an agent writes went into the mail unwrapped, in
+a message hard wrapped everywhere else, and one of them exists so somebody can
+decide on a phone. A closed set refused a value without ever saying which
+values it takes, on the field whose obvious wrong answer the protocol
+deliberately does not have. And a scalar where a list belonged was quietly
+wrapped into a list of one, on a service that refuses an unknown field in as
+many words.
+
+The common shape is not a bug in any of them. It is a fact that lives in one
+place and is silent in the place it is needed, and the only way to see it is to
+read the thing a person or an agent actually receives, in the order they
+receive it. A test asks whether the answer is correct. It cannot ask whether
+the answer is enough.
+
+The same night produced the other half of that: one fact in three places
+drifts. The outage sentence, the token warning, the names of the rate limit
+buckets and the names of the operations on the two doors all had two or three
+copies, and every one of them had already started to differ or was one edit
+from it. Where a sentence is load bearing, it gets one home and both doors
+import it.
+
