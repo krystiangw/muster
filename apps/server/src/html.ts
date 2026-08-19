@@ -300,10 +300,16 @@ button.ghost, .btn.ghost { background:transparent; color:var(--accent); }
    keyboard went quiet for one stop, with nothing on the screen moving and
    nothing to say where you were. It comes back into view while it holds focus, still out of
    flow, so nothing below it jumps. */
+/* Static and not absolute, which the first attempt got wrong and a screenshot
+   caught: an absolutely positioned child of a flex container with no offsets
+   is placed at the container's start corner, not at the spot its own place in
+   the markup suggests. The button is the last thing in the filter form and it
+   came back drawn over the first field, so focusing it hid the control next to
+   it. In flow it lands after the fields, where it is written. */
 .sr-only:focus-visible, .sr-only:focus {
-  width:auto; height:auto; margin:0; padding:4px 9px; overflow:visible;
-  clip:auto; background:var(--surface); color:var(--ink);
-  border:1px solid var(--accent); border-radius:2px; z-index:20; }
+  position:static; width:auto; height:auto; margin:0; padding:4px 9px;
+  overflow:visible; clip:auto; background:var(--surface); color:var(--ink);
+  border:1px solid var(--accent); border-radius:2px; }
 /* Anything holding one is positioned, and this is not tidiness.
    An absolutely positioned child whose ancestors are all static takes the page
    as its containing block, so it is laid out at its static position but

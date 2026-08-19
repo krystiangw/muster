@@ -1087,6 +1087,11 @@ describe('the shape a screen reader is handed', () => {
     assert.ok(focused, 'and it has something to say about being focused');
     assert.match(focused[1]!, /clip:auto/, 'the clip comes off');
     assert.match(focused[1]!, /width:auto/, 'and it takes up room again');
+    // Static, not absolute. An absolutely positioned child of a flex container
+    // with no offsets is placed at the container's start corner rather than
+    // where the markup puts it, so the first version of this came back drawn
+    // over the first filter field: focusing the control hid the one beside it.
+    assert.match(focused[1]!, /position:static/, 'and it lands where it is written');
   });
 });
 
