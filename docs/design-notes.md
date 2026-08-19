@@ -1350,3 +1350,62 @@ this up" was false in both directions.
 So: when a fact is derived, find every place that states it, and check they all
 derive it rather than one of them reading a copy. And when a check comes back
 empty, ask what else being empty could mean.
+
+## Counting ourselves out, 2026-08-19
+
+The funnel said seventeen boards had signed up. Thirteen were ours: the
+walkthrough runs a stranger's whole journey against production every morning,
+the smoke tests register clients, the watchdog reads a board every quarter of an
+hour. Every one of them arrives exactly the way a newcomer does, which is what
+makes them worth running and what made the report about adoption a report about
+us, at the moment it was about to be read in a decision about announcing this
+publicly.
+
+The obvious repair was to delete those boards, and the tool to do it already
+existed. Three facts, none of them visible from the outside, said otherwise.
+
+`discover` and `view` carry no project. They are the reads of the protocol, the
+top of the funnel, and there is nothing on them to work back from, so a purge
+cleans the denominator and leaves the numerator: reads per signup would have
+gone from 38 to 162, wrong, and wrong in the direction the decision was being
+made in. A number that moves against the truth when you clean the data is worse
+than the number you started with, because now it looks earned.
+
+An unclaimed project expires after seven days and its children carry the same
+date, but events keep their own ninety. So time tidies the list of boards and
+never tidies the funnel, and the thing that looked like it would fix itself was
+the half nobody was reading.
+
+The restore path replaces the whole database: delete every collection, insert
+the archive. There is no way to bring one board back, so undoing a purge would
+have taken the two real boards back to the last nightly, and the newest probe
+was not in any archive at all.
+
+Under all three there is a fourth, which is the one that decided it. The signup
+event is not wrong. The project really was created. What was wrong was the
+population in a report, and deleting true records so a report reads better is
+editing the evidence, which is the failure this whole service exists to make
+harder.
+
+So the mark goes on at write time, beside `crawler`, and its absence keeps
+meaning "not known to be ours" so that ninety days of history goes on counting.
+Twenty six places record an event and most sit several layers below the request
+that caused them, so the answer to "who is asking" is held in an
+AsyncLocalStorage entered by the first hook rather than threaded through every
+signature. Threading it would have worked today and rotted tomorrow: the next
+event somebody adds would be unmarked until they remembered, and nothing would
+say so.
+
+Two columns, not a subtraction, because "nobody outside has signed up yet" and
+"four boards signed up" are different sentences and only the first is true. And
+the date the marking began is printed with both halves of what it qualifies: a
+board that has ever said who it is counts as ours for its whole life, since the
+boards our tools reuse are older than the field, while a read of the protocol
+carries no board and can never be reclassified. Saying only the first half was
+its own confident wrong number, found one commit after the change that caused
+it.
+
+The five tools name themselves in a user agent. The published client
+deliberately does not: somebody else's agent using our SDK is a stranger, and a
+header inside the client would have broken the count this was built to keep
+honest.
