@@ -40,6 +40,10 @@ describe('the watchdog, watched', () => {
   const state = {
     landing: 200,
     summary: 200 as number,
+    /** What the summary says the board is open to. */
+    visibility: 'link' as string,
+    /** Whether a stranger can read the board page at all. */
+    private: false,
     swept: () => new Date().toISOString(),
     /** The script tag the board page carries, or none. */
     names: null as string | null,
@@ -68,7 +72,7 @@ describe('the watchdog, watched', () => {
           JSON.stringify({
             project: 'p_test',
             read_url: `${base}/r/r_test`,
-            visibility: 'link',
+            visibility: state.visibility,
             swept_at: state.swept(),
           }),
           'application/json',
@@ -80,6 +84,10 @@ describe('the watchdog, watched', () => {
         return send(400, '{"error":"unknown_status"}', 'application/json');
       }
       if (url.pathname === '/r/r_test/board') {
+        // What a board narrowed to its owner says to anybody without the
+        // owner's cookie: not that it is private, which would be a way to
+        // enumerate them, but that there is nothing here.
+        if (state.private) return send(404, 'not here');
         const tag = state.names === null ? '' : `<script src="/board-${state.names}.js" defer></script>`;
         return send(200, `<!doctype html><html><head>${tag}</head><body>a board</body></html>`, 'text/html');
       }
@@ -114,6 +122,8 @@ describe('the watchdog, watched', () => {
     state.swept = () => new Date().toISOString();
     state.names = hashOf(script);
     state.serves = script;
+    state.visibility = 'link';
+    state.private = false;
   });
 
   /**
@@ -171,6 +181,19 @@ describe('the watchdog, watched', () => {
   it('notices a script the server no longer has', async () => {
     state.serves = null;
     assert.match(await round(), /board script: script 404/);
+  });
+
+  it('does not page about a board that is private on purpose', async () => {
+    // The board the operator narrowed to themselves answers 404 to a stranger,
+    // and this check holds no session cookie. There is no page to read, so
+    // there is no script tag to miss, and demanding one would turn a setting
+    // into an outage every quarter of an hour.
+    state.visibility = 'owner';
+    state.private = true;
+    await round();
+    const out = await round();
+    assert.match(out, /board script not open by link/);
+    assert.equal(saved().failures, 0);
   });
 
   it('treats one failure as weather and the second as an outage', async () => {

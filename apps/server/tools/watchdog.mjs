@@ -171,7 +171,14 @@ if (readUrl) {
   const page = await probe(`${readUrl}/board`, { text: true });
   const named = /\/board-([0-9a-f]{12})\.js/.exec(page.body ?? '');
   let script = { ok: false, why: 'the board page names no script' };
-  if (page.status !== 200) {
+  // A board narrowed to its owner answers 404 to anybody without the owner's
+  // session cookie, which this has no way to hold. The same exception the form
+  // probe above makes, and for the same reason: on that board there is no page
+  // for a stranger to read, so there is no script tag to check and demanding
+  // one would page about the board being private.
+  if (page.status === 404 && formOpen.includes(404)) {
+    script = { ok: true, why: 'not open by link' };
+  } else if (page.status !== 200) {
     script = { ok: false, why: `board page ${page.status || page.error}` };
   } else if (named) {
     const served = await probe(`${base}${named[0]}`, { text: true });
