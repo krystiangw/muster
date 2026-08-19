@@ -518,13 +518,24 @@ const SCRIPT = `(() => {
   const board = document.querySelector('.board');
   if (!board || !('draggable' in document.createElement('div'))) return;
 
-  // A drag needs a pointer that can hold something down and move it. HTML5
-  // drag and drop has no touch equivalent, so on a phone the gesture does
-  // nothing at all: marking the cards there would put a grab cursor and an
-  // affordance on a board that cannot answer either. The move button is what
-  // that device has, and it always was.
-  if (!matchMedia('(pointer: fine)').matches) return;
-  for (const card of board.querySelectorAll('.card[data-slug]')) card.draggable = true;
+  /**
+   * A drag needs a pointer that can hold something down and move it.
+   *
+   * HTML5 drag and drop has no touch equivalent, so on a phone the gesture
+   * does nothing at all, and marking the cards there would put a grab cursor
+   * and an affordance on a board that cannot answer either. The move button is
+   * what that device has, and it always was.
+   *
+   * any-pointer and not pointer: the second asks about the primary one, so a
+   * tablet with a mouse plugged in, or a laptop whose screen also takes touch,
+   * would be told it cannot drag while a mouse sits next to it.
+   *
+   * Scoped to the drag and not to the script. Returning from the whole thing
+   * took the fields with it, so on exactly the device where a native datalist
+   * is at its worst the list somebody can see and filter went away too.
+   */
+  const canDrag = matchMedia('(any-pointer: fine)').matches;
+  if (canDrag) for (const card of board.querySelectorAll('.card[data-slug]')) card.draggable = true;
 
   let dragging = null;
 
@@ -539,7 +550,7 @@ const SCRIPT = `(() => {
     for (const marked of board.querySelectorAll('.drop-here')) marked.classList.remove('drop-here');
   };
 
-  board.addEventListener('dragstart', (event) => {
+  if (canDrag) board.addEventListener('dragstart', (event) => {
     const card = event.target.closest('.card[draggable]');
     if (!card) return;
     dragging = card;
@@ -549,7 +560,7 @@ const SCRIPT = `(() => {
     event.dataTransfer.setData('text/plain', card.dataset.slug || '');
   });
 
-  board.addEventListener('dragend', () => {
+  if (canDrag) board.addEventListener('dragend', () => {
     if (dragging) dragging.classList.remove('dragging');
     dragging = null;
     clear();
@@ -570,7 +581,7 @@ const SCRIPT = `(() => {
   const laneOf = (element) => element.closest('.lane')?.dataset.lane ?? '';
   const landsWhereDropped = (option, column) => option.dataset.lands === laneOf(column);
 
-  board.addEventListener('dragover', (event) => {
+  if (canDrag) board.addEventListener('dragover', (event) => {
     const column = event.target.closest('.col[data-column]');
     if (!dragging || !column) return;
     if (column.contains(dragging)) return;
@@ -584,12 +595,12 @@ const SCRIPT = `(() => {
     }
   });
 
-  board.addEventListener('dragleave', (event) => {
+  if (canDrag) board.addEventListener('dragleave', (event) => {
     const column = event.target.closest('.col[data-column]');
     if (column && !column.contains(event.relatedTarget)) column.classList.remove('drop-here');
   });
 
-  board.addEventListener('drop', (event) => {
+  if (canDrag) board.addEventListener('drop', (event) => {
     const column = event.target.closest('.col[data-column]');
     if (!dragging || !column) return;
     const target = optionFor(dragging, column.dataset.column);
