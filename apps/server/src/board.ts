@@ -473,11 +473,18 @@ export async function boardFacets(store: Store, project: ProjectDoc): Promise<Bo
     // hundred slugs has a couple of dozen areas, and the answer this list gives
     // is which areas exist, not which cards do.
     store.items
-      .aggregate<{ _id: string }>([
+      .aggregate<{ values: { _id: string }[]; total: { n: number }[] }>([
         { $match: { ...scope, slug: { $regex: ':' } } },
         { $group: { _id: { $arrayElemAt: [{ $split: ['$slug', ':'] }, 0] } } },
-        { $sort: { _id: 1 } },
-        { $limit: FACET_LIMIT + 1 },
+        // Counted before the cut, not after: a limit of N+1 can only ever
+        // report one name missing, which on a board with four hundred areas
+        // is the silent truncation `omitted` exists to prevent.
+        {
+          $facet: {
+            values: [{ $sort: { _id: 1 } }, { $limit: FACET_LIMIT }],
+            total: [{ $count: 'n' }],
+          },
+        },
       ])
       .toArray(),
     // Open work only. A list to pick a prerequisite from is a list of things
@@ -524,18 +531,23 @@ export async function boardFacets(store: Store, project: ProjectDoc): Promise<Bo
     registered: false,
   }))];
 
-  const prefixNames = names(prefixes.map((row) => row._id));
+  const grouped = prefixes[0] ?? { values: [], total: [] };
+  // With the delimiter, because this list is filter values rather than names to
+  // print: on a board holding both `ops:` and `ops2:`, `ops` is two namespaces
+  // and narrowing by it answers with work from an area nobody asked about.
+  const prefixNames = names(grouped.values.map((row) => row._id)).map((name) => `${name}:`);
+  const prefixTotal = grouped.total[0]?.n ?? prefixNames.length;
   return {
     owners: ownerNames.slice(0, FACET_LIMIT),
     labels: names(labels).slice(0, FACET_LIMIT),
-    prefixes: prefixNames.slice(0, FACET_LIMIT),
+    prefixes: prefixNames,
     slugs: names(slugs.map((row) => row.slug)),
     agents: agents.slice(0, FACET_LIMIT),
     omitted: {
       owners: Math.max(0, ownerNames.length - FACET_LIMIT),
       agents: Math.max(0, agents.length - FACET_LIMIT),
       labels: Math.max(0, names(labels).length - FACET_LIMIT),
-      prefixes: Math.max(0, prefixNames.length - FACET_LIMIT),
+      prefixes: Math.max(0, prefixTotal - prefixNames.length),
     },
   };
 }

@@ -216,6 +216,19 @@ describe('a project’s own layout', () => {
     );
     assert.equal(cell(view, 'rest', '').count, 1);
 
+    // Read the layout, save exactly what came back, and the column has to still
+    // be the column. A filter that survives the write and not the read is one
+    // that anybody editing their board deletes without being told.
+    const readBack = (await board(project)).board;
+    assert.equal(readBack.columns[0].match.slug_prefix, 'ops:');
+    assert.equal((await put(project, '/board', readBack)).statusCode, 200);
+    const again = await board(project);
+    assert.equal(again.board.columns[0].match.slug_prefix, 'ops:');
+    assert.deepEqual(
+      cell(again, 'ops', '').items.map((item: { slug: string }) => item.slug),
+      ['ops:sweep'],
+    );
+
     const refused = await put(project, '/board', {
       columns: [{ title: 'Ops', match: { slug_prefix: '  ' } }],
     });
@@ -2045,6 +2058,9 @@ describe('a board many agents write to', () => {
       actor: 'a',
     });
     await post(project, '/items', { slug: 'loose-end', title: 'loose end', actor: 'a' });
+    // Two namespaces one is a prefix of the other, which is what makes the
+    // delimiter part of the value rather than decoration.
+    await post(project, '/items', { slug: 'ops2:migrate', title: 'migrate', actor: 'a' });
 
     const facets = (
       await harness.server.inject({
@@ -2054,8 +2070,22 @@ describe('a board many agents write to', () => {
       })
     ).json();
     assert.deepEqual(facets.labels, ['build', 'ops', 'urgent']);
-    assert.deepEqual(facets.prefixes, ['build', 'ops']);
+    assert.deepEqual(facets.prefixes, ['build:', 'ops:', 'ops2:']);
     assert.equal(facets.omitted.prefixes, 0);
+
+    // Passed back as it was handed over, it answers with one area. Without the
+    // delimiter it would answer with two, which is the wrong board.
+    const narrowed = (
+      await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/items?prefix=ops:`,
+        headers: authed(project),
+      })
+    ).json();
+    assert.deepEqual(
+      narrowed.items.map((item: { slug: string }) => item.slug),
+      ['ops:sweep'],
+    );
 
     // Every name it offers has to answer with something, or the list is a set
     // of filters that read as an empty board.
@@ -2063,7 +2093,7 @@ describe('a board many agents write to', () => {
       const page = (
         await harness.server.inject({
           method: 'GET',
-          url: `${project.api}/items?prefix=${encodeURIComponent(prefix)}:`,
+          url: `${project.api}/items?prefix=${encodeURIComponent(prefix)}`,
           headers: authed(project),
         })
       ).json();

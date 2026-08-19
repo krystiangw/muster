@@ -212,8 +212,16 @@ export interface BoardFacets {
   agents: string[];
   /** What each agent said it is for. Only the ones that said something. */
   agentsDescribed: Array<{ handle: string; description: string; registered: boolean }>;
+  /** Every label on this board's work, for `label=`. */
+  labels: string[];
+  /**
+   * Every slug namespace on this board, for `prefix=`. Carries the delimiter,
+   * because this is the value to pass back rather than the name to print: on a
+   * board holding both `ops:` and `ops2:`, `ops` is two namespaces.
+   */
+  prefixes: string[];
   /** Names left out for length. Zero on every project anybody actually has. */
-  omitted: { owners: number; agents: number; labels: number };
+  omitted: { owners: number; agents: number; labels: number; prefixes: number };
 }
 
 export interface HygieneRules {

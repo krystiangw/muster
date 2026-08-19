@@ -149,6 +149,9 @@ export function boardConfigJson(config: BoardConfig): Record<string, unknown> {
         ...(column.match.claimed === undefined ? {} : { claimed: column.match.claimed }),
         ...(column.match.stale === undefined ? {} : { stale: column.match.stale }),
         ...(column.match.source ? { source: column.match.source } : {}),
+        ...(column.match.slugPrefix === undefined
+          ? {}
+          : { slug_prefix: column.match.slugPrefix }),
         ...(column.match.priorityMin === undefined
           ? {}
           : { priority_min: column.match.priorityMin }),

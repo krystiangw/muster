@@ -1379,7 +1379,7 @@ describe('the MCP surface', () => {
     // And this door can find out what the namespaces are, which until now it
     // could not: the facets were on the HTTP door only.
     const facets = await call('board_facets', {});
-    assert.deepEqual(facets.structuredContent.prefixes, ['build', 'ops']);
+    assert.deepEqual(facets.structuredContent.prefixes, ['build:', 'ops:']);
 
     const listed = await call('list_items', { q: 'ops:why' });
     const fromList = listed.structuredContent.items[0];
