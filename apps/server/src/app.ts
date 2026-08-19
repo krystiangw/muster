@@ -166,6 +166,82 @@ export function acceptsGzip(header: string | undefined): boolean {
  * Capability links are credentials in a URL. Anything that writes a URL
  * somewhere it will be kept has to drop the token first.
  */
+/**
+ * What the map says the service answers, kept level with what it answers.
+ *
+ * Every refusal this service writes carries `"docs": ".../openapi.json"`, so a
+ * caller that reads one is sent straight here. The document said `200` and
+ * nothing else for all 41 operations, which was not thin, it was wrong: eight
+ * of them answer `201`, and none of the refusals this service takes such care
+ * over existed on the map at all. A generated client had no idea 409 or 429
+ * were possible, and no name for any call either, because nothing carried an
+ * operationId.
+ *
+ * Written into the document rather than into `schema.response`, on purpose.
+ * Declaring a response schema turns on Fastify's serializer for that status,
+ * and the serializer drops what the schema does not list: the `unknown`,
+ * `accepted` and `belongs_in_body` fields a refusal carries would have gone
+ * quiet the moment they were documented. Documenting a thing must not change
+ * the thing.
+ */
+const CREATES = new Set([
+  'post /p',
+  'post /feedback',
+  'post /oauth/register',
+  'post /v1/{project}/agents',
+  'post /v1/{project}/items',
+  'post /v1/{project}/escalations',
+  'post /v1/{project}/keys',
+  'post /v1/{project}/share',
+]);
+
+// Only what the door in question can actually produce. Naming a 403 on a route
+// that has no scope to refuse is a second lie in the place the first one was.
+const OPEN_DOOR = ['400', '429', '503'];
+const TOKEN_DOOR = ['400', '401', '403', '429', '503'];
+
+/**
+ * Measured against the deployment, one request each, rather than derived from
+ * the shape of the path. The shape would have been wrong: every action on a
+ * card takes its slug in the address, and naming a card that is not there gets
+ * 400 from five of them and 404 from the two that only read or delete it. A
+ * guess would have put 404 on all seven and been wrong about five.
+ */
+const NOT_FOUND = new Set([
+  'get /v1/{project}/items/{slug}',
+  'delete /v1/{project}/items/{slug}',
+  'delete /v1/{project}/keys/{id}',
+  'post /v1/{project}/agents/{handle}/rename',
+  'patch /v1/{project}/escalations/{id}',
+  'post /v1/{project}/escalations/{id}/ack',
+  'post /feedback',
+]);
+
+// One. A lease is the only thing here two callers can want at the same instant
+// and only one can have; everything else that could collide was made a single
+// guarded write instead, and answers 200.
+const CONFLICTS = new Set(['post /v1/{project}/items/{slug}/claim']);
+
+const REFUSAL_SAYS: Record<string, string> = {
+  '400': 'The request was not understood, and the message says which part. A parameter this endpoint does not have, a value of the wrong shape, or a field outside its set.',
+  '401': 'No token, or one that is unknown or revoked. Get one from POST /p.',
+  '403': 'A real token for something else: another project, or a key without the scope this call needs.',
+  '404': 'No such thing under that name here.',
+  '409': 'Somebody else got there first, or the state you said you expected is not the state that is stored.',
+  '429': 'Over a published rate limit. The answer names which budget and carries retry-after.',
+  '503': 'The store is out of reach. This is not your request being wrong: come back, and the answer says when.',
+};
+
+function operationId(method: string, path: string): string {
+  const parts = path
+    .split('/')
+    .filter(Boolean)
+    .map((part) => (part.startsWith('{') ? `by-${part.slice(1, -1)}` : part))
+    .join('-')
+    .replace(/[^a-zA-Z0-9-]/g, '-');
+  return `${method}-${parts}`.replace(/-+/g, '-').replace(/-$/, '');
+}
+
 export function redactCapabilities(url: string): string {
   return url
     .replace(/\/r\/[^/?#]+/g, '/r/[redacted]')
@@ -445,6 +521,62 @@ export async function buildApp(
         { name: 'keys', description: 'Programmatic key provisioning' },
         { name: 'oauth', description: 'Dynamic client registration and tokens' },
       ],
+    },
+    transformObject: (given) => {
+      // The plugin's argument is a union: a swagger 2 document or an openapi
+      // one, and this deployment only ever produces the second.
+      const doc = (given as { openapiObject: unknown }).openapiObject as {
+        components?: { schemas?: Record<string, unknown> };
+        paths?: Record<string, Record<string, { responses?: Record<string, unknown>; operationId?: string }>>;
+      };
+      doc.components = doc.components ?? {};
+      doc.components.schemas = {
+        ...(doc.components.schemas ?? {}),
+        Refusal: {
+          type: 'object',
+          description:
+            'Every refusal this service writes, at both doors. The message is a sentence for whoever reads the transcript; the error is the word a loop branches on. Some carry extra fields naming what was wrong, which is why this shape is open.',
+          required: ['error', 'message'],
+          properties: {
+            error: { type: 'string', description: 'The stable word. Branch on this, not on the sentence.' },
+            message: { type: 'string', description: 'What went wrong and what to do about it.' },
+            docs: { type: 'string', format: 'uri', description: 'This document.' },
+          },
+          additionalProperties: true,
+        },
+      };
+
+      const refusal = (code: string) => ({
+        description: REFUSAL_SAYS[code] ?? 'Refused.',
+        content: { 'application/json': { schema: { $ref: '#/components/schemas/Refusal' } } },
+      });
+
+      for (const [path, item] of Object.entries(doc.paths ?? {})) {
+        for (const [method, operation] of Object.entries(item)) {
+          if (!['get', 'post', 'put', 'patch', 'delete'].includes(method)) continue;
+          operation.operationId ??= operationId(method, path);
+          const responses = operation.responses ?? {};
+          if (CREATES.has(`${method} ${path}`)) {
+            responses['201'] = responses['200'] ?? { description: 'Created.' };
+            // An upsert answers either, and which one it was is the whole
+            // point of the `created` field it sends back.
+            if (!path.endsWith('/keys') && !path.endsWith('/share') && !path.endsWith('/escalations') && path !== '/p' && path !== '/oauth/register') {
+              responses['200'] = responses['200'] ?? { description: 'Already existed, and was updated.' };
+            } else {
+              delete responses['200'];
+            }
+          }
+          const key = `${method} ${path}`;
+          const codes = [
+            ...(path.startsWith('/v1/') ? TOKEN_DOOR : path === '/p' || path === '/feedback' ? OPEN_DOOR : []),
+            ...(NOT_FOUND.has(key) ? ['404'] : []),
+            ...(CONFLICTS.has(key) ? ['409'] : []),
+          ];
+          for (const code of codes) responses[code] ??= refusal(code);
+          operation.responses = responses;
+        }
+      }
+      return doc as never;
     },
   });
 

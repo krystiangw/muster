@@ -1372,6 +1372,119 @@ describe('asking what changed', () => {
   });
 });
 
+describe('the map every refusal points at', () => {
+  /**
+   * Each refusal carries `"docs": ".../openapi.json"`, so a caller that reads
+   * one is sent straight to that document. It said `200` and nothing else for
+   * all 41 operations: not thin, wrong, because eight of them answer `201`,
+   * and none of the refusals this service takes such care over were on the map
+   * at all. A generated client had no name for any call either.
+   *
+   * The codes are written down in one place and this drives real requests to
+   * hold that place to what the service does. Written down rather than
+   * derived, because deriving them from the shape of the path was tried and
+   * was wrong about five routes out of seven.
+   */
+  const spec = async (): Promise<Record<string, Record<string, { operationId?: string; responses?: Record<string, unknown> }>>> =>
+    ((await harness.server.inject({ method: 'GET', url: '/openapi.json' })).json() as {
+      paths: Record<string, Record<string, { operationId?: string; responses?: Record<string, unknown> }>>;
+    }).paths;
+
+  const documents = (paths: Awaited<ReturnType<typeof spec>>, method: string, path: string, code: number): boolean =>
+    Object.keys(paths[path]?.[method]?.responses ?? {}).includes(String(code));
+
+  it('names every call, once', async () => {
+    const paths = await spec();
+    const ids: string[] = [];
+    for (const [path, item] of Object.entries(paths)) {
+      for (const [method, operation] of Object.entries(item)) {
+        if (!['get', 'post', 'patch', 'put', 'delete'].includes(method)) continue;
+        assert.ok(operation.operationId, `${method.toUpperCase()} ${path} has no operationId to generate a client from`);
+        ids.push(operation.operationId!);
+      }
+    }
+    assert.ok(ids.length >= 40, `only ${ids.length} operations`);
+    assert.equal(new Set(ids).size, ids.length, 'and no two calls share a name');
+  });
+
+  it('answers the codes it documents, and documents the ones it answers', async () => {
+    const paths = await spec();
+    const project = await createProject(harness);
+    // Two header sets, because saying "application/json" and then sending
+    // nothing is its own refusal here, and rightly: a DELETE that announces a
+    // body and has none is a caller that lost one.
+    const reading = { authorization: `Bearer ${project.token}` };
+    const admin = { ...reading, 'content-type': 'application/json' };
+
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: admin,
+      payload: { slug: 'held', title: 'a card somebody holds' },
+    });
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items/held/claim`,
+      headers: admin,
+      payload: { agent: 'first' },
+    });
+
+    // Each row is one request and the code it is expected to come back with.
+    // The document has to name that code for that operation.
+    const cases: { method: string; url: string; path: string; payload?: unknown; headers?: Record<string, string>; code: number }[] = [
+      { method: 'POST', url: '/p', path: '/p', payload: { name: 'created' }, headers: { 'content-type': 'application/json' }, code: 201 },
+      { method: 'POST', url: `${project.api}/items`, path: '/v1/{project}/items', payload: { slug: 'fresh', title: 'new' }, headers: admin, code: 201 },
+      { method: 'POST', url: `${project.api}/items`, path: '/v1/{project}/items', payload: { slug: 'fresh', title: 'again' }, headers: admin, code: 200 },
+      { method: 'POST', url: `${project.api}/agents`, path: '/v1/{project}/agents', payload: { handle: 'brand-new' }, headers: admin, code: 201 },
+      { method: 'POST', url: `${project.api}/escalations`, path: '/v1/{project}/escalations', payload: { question: 'well?' }, headers: admin, code: 201 },
+      { method: 'POST', url: `${project.api}/keys`, path: '/v1/{project}/keys', payload: { name: 'a key' }, headers: admin, code: 201 },
+      { method: 'POST', url: `${project.api}/items/held/claim`, path: '/v1/{project}/items/{slug}/claim', payload: { agent: 'second' }, headers: admin, code: 409 },
+      { method: 'GET', url: `${project.api}/items/not-here`, path: '/v1/{project}/items/{slug}', headers: reading, code: 404 },
+      { method: 'DELETE', url: `${project.api}/items/not-here`, path: '/v1/{project}/items/{slug}', headers: reading, code: 404 },
+      { method: 'DELETE', url: `${project.api}/keys/k_not_here`, path: '/v1/{project}/keys/{id}', headers: reading, code: 404 },
+      { method: 'PATCH', url: `${project.api}/escalations/e_not_here`, path: '/v1/{project}/escalations/{id}', payload: { status: 'answered' }, headers: admin, code: 404 },
+      { method: 'POST', url: `${project.api}/agents/not-here/rename`, path: '/v1/{project}/agents/{handle}/rename', payload: { to: 'other' }, headers: admin, code: 404 },
+      { method: 'GET', url: `${project.api}/items`, path: '/v1/{project}/items', headers: { authorization: 'Bearer nope' }, code: 401 },
+      { method: 'GET', url: `${project.api}/items?offset=1`, path: '/v1/{project}/items', headers: reading, code: 400 },
+    ];
+
+    for (const one of cases) {
+      const answer = await harness.server.inject({
+        method: one.method as 'GET',
+        url: one.url,
+        ...(one.headers ? { headers: one.headers } : {}),
+        ...(one.payload ? { payload: one.payload } : {}),
+      });
+      assert.equal(answer.statusCode, one.code, `${one.method} ${one.url} answered ${answer.statusCode}`);
+      assert.ok(
+        documents(paths, one.method.toLowerCase(), one.path, one.code),
+        `${one.method} ${one.path} answers ${one.code} and the map does not say so`,
+      );
+    }
+  });
+
+  it('keeps the refusals it documents in one shape, and does not narrow them', async () => {
+    const paths = await spec();
+    const refusal = paths['/v1/{project}/items']?.get?.responses?.['401'] as {
+      content?: Record<string, { schema?: { $ref?: string } }>;
+    };
+    assert.equal(refusal?.content?.['application/json']?.schema?.$ref, '#/components/schemas/Refusal');
+
+    // Documenting a response must not start serializing it. A refusal carries
+    // fields naming what was wrong, and those are exactly what a serializer
+    // built from a schema would drop.
+    const project = await createProject(harness);
+    const narrowed = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/items?offset=1`,
+      headers: authed(project),
+    });
+    assert.equal(narrowed.statusCode, 400);
+    assert.deepEqual(narrowed.json().unknown, ['offset'], 'the extra fields still arrive');
+    assert.ok(Array.isArray(narrowed.json().accepted));
+  });
+});
+
 describe('a parameter this door does not have', () => {
   it('refuses it by name, and says what was meant', async () => {
     // Reported twice by agents, and the second one had lost hours to the same
