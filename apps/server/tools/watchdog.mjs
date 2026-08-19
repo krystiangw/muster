@@ -644,9 +644,10 @@ if (broken.length === 0 && !hygieneBehind && !noticesStuck && !backupsStale && !
   const swept = apiRead?.body?.swept_at
     ? `${Math.round((Date.parse(now) - Date.parse(apiRead.body.swept_at)) / 60_000)} min`
     : 'unknown';
-  console.log(
-    `ok ${now} ${checks.map((check) => `${check.name} ${check.status}`).join(', ')}, swept ${swept} ago`,
-  );
+  // Through `say` like everything else, so a rehearsal cannot print a line
+  // that reads exactly like a real quiet round. It sets `said`, which nothing
+  // after this reads, and that is fine: this is the last thing a round says.
+  say(`ok ${now} ${checks.map((check) => `${check.name} ${check.status}`).join(', ')}, swept ${swept} ago`);
 }
 
 mkdirSync(HOME, { recursive: true });

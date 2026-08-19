@@ -247,6 +247,20 @@ describe('the watchdog, watched', () => {
 
   // The one thing about a monitor you cannot try, because trying it is the
   // thing it does: file an urgent question on somebody's board and mail them.
+  it('marks even a quiet rehearsal, so it cannot read as a real round', async () => {
+    // The heartbeat used to print straight to the console, so the one output a
+    // healthy rehearsal produces was the one without the marker.
+    await round();
+    const rehearsed = (
+      await run(process.execPath, ['tools/watchdog.mjs', '--dry-run'], {
+        cwd: HERE,
+        encoding: 'utf8',
+        env: { ...process.env, MUSTER_HOME: home, MUSTER_RESEND_KEY: 'test-key', MUSTER_ALERT_TO: 'nobody@example.com' },
+      })
+    ).stdout;
+    assert.match(rehearsed, /^\[rehearsal, nothing sent\] ok /);
+  });
+
   it('rehearses a bad night without filing, mailing or remembering it', async () => {
     backupWritten(Date.now() - 72 * 3_600_000);
     state.landing = 500;
