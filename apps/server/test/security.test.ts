@@ -1074,24 +1074,47 @@ describe('the shape a screen reader is handed', () => {
     }
   });
 
-  it('brings the invisible control back for whoever is tabbing', async () => {
-    // The filter form's submit is off the page on purpose, for a reader who
-    // hears it rather than sees it. It still takes focus like any other
-    // control, and the clip that hides it was hiding the focus ring too: one
-    // stop where the keyboard went quiet and nothing said where you were.
-    const page = await harness.server.inject({ method: 'GET', url: '/' });
-    const href = /<link rel="stylesheet" href="([^"]+)"/.exec(page.body)?.[1];
-    const sheet = (await harness.server.inject({ method: 'GET', url: href! })).body;
-    assert.match(sheet, /\.sr-only \{[^}]*clip:rect\(0 0 0 0\)/, 'it is hidden to begin with');
-    const focused = /\.sr-only:focus-visible[^{]*\{([^}]*)\}/.exec(sheet);
-    assert.ok(focused, 'and it has something to say about being focused');
-    assert.match(focused[1]!, /clip:auto/, 'the clip comes off');
-    assert.match(focused[1]!, /width:auto/, 'and it takes up room again');
-    // Static, not absolute. An absolutely positioned child of a flex container
-    // with no offsets is placed at the container's start corner rather than
-    // where the markup puts it, so the first version of this came back drawn
-    // over the first filter field: focusing the control hid the one beside it.
-    assert.match(focused[1]!, /position:static/, 'and it lands where it is written');
+  it('leaves nothing off the page that a keyboard can still land on', async () => {
+    // The filter form's submit is off the page on purpose: the operator asked
+    // for no button to press, and every browser needs one to exist for Enter
+    // to mean apply. It was still taking focus, and the clip that hides it was
+    // hiding the focus ring with it, so there was one stop where the keyboard
+    // went quiet and nothing said where you were.
+    //
+    // Revealing it on focus was tried twice and broke something else both
+    // times, so it is out of the tab order instead. Every filter is a text
+    // input and Enter submits from all of them, which is what this button is
+    // for; a stop that shows nothing and does nothing a keyboard cannot
+    // already do is worse than no stop. The invariant is the assertion: if it
+    // wears sr-only and it can be focused, it has to be visible.
+    const project = await createProject(harness);
+    const readToken = project.readUrl.split('/r/')[1]!;
+    // An empty board renders no filter form, so a bare project would have made
+    // this pass by finding nothing to check. One card is enough to draw it.
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'probe:one-card', title: 'so the filter bar exists', owner: 'somebody' },
+    });
+    const focusable = /^(a|button|input|select|textarea|summary)$/;
+    let checked = 0;
+
+    for (const page of ['/', '/docs', '/pricing', '/signup', `/r/${readToken}/board`]) {
+      const rendered = await harness.server.inject({ method: 'GET', url: page, headers: { accept: 'text/html' } });
+      for (const [tag, attrs] of [...rendered.body.matchAll(/<([a-z]+)\b([^>]*\bclass="[^"]*\bsr-only\b[^"]*"[^>]*)>/g)].map(
+        (m) => [m[1]!, m[2]!] as const,
+      )) {
+        if (!focusable.test(tag)) continue;
+        checked += 1;
+        assert.match(
+          attrs,
+          /tabindex="-1"/,
+          `${page} hides a ${tag} that a keyboard would still land on: ${attrs.trim().slice(0, 80)}`,
+        );
+      }
+    }
+    assert.ok(checked > 0, 'and it found something to check, rather than passing on an empty board');
   });
 });
 

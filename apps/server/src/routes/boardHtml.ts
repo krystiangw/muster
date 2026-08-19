@@ -889,7 +889,7 @@ ${field(
     // rather than absent, because the operator asked for no button to press
     // and every browser needs one to exist for Enter to mean apply.
     ''
-  }<button class="sr-only" type="submit">Apply the filter</button>
+  }<button class="sr-only" type="submit" tabindex="-1">Apply the filter</button>
 ${
     narrowed
       ? `  <a class="reset" href="${escapeHtml(action)}">Clear filters</a>`

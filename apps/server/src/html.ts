@@ -294,22 +294,18 @@ button.ghost, .btn.ghost { background:transparent; color:var(--accent); }
 .col .card .move button:hover { border-color:var(--accent); color:var(--accent); }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden;
   clip:rect(0 0 0 0); white-space:nowrap; border:0; }
-/* Off the page for somebody who is listening is not off the page for somebody
-   who is tabbing. The submit button of the filter form takes focus like any
-   other control, and the clip that hides it was taking the focus ring too: the
-   keyboard went quiet for one stop, with nothing on the screen moving and
-   nothing to say where you were. It comes back into view while it holds focus, still out of
-   flow, so nothing below it jumps. */
-/* Static and not absolute, which the first attempt got wrong and a screenshot
-   caught: an absolutely positioned child of a flex container with no offsets
-   is placed at the container's start corner, not at the spot its own place in
-   the markup suggests. The button is the last thing in the filter form and it
-   came back drawn over the first field, so focusing it hid the control next to
-   it. In flow it lands after the fields, where it is written. */
-.sr-only:focus-visible, .sr-only:focus {
-  position:static; width:auto; height:auto; margin:0; padding:4px 9px;
-  overflow:visible; clip:auto; background:var(--surface); color:var(--ink);
-  border:1px solid var(--accent); border-radius:2px; }
+/* Nothing wearing this ever takes focus, and the filter form's submit says so
+   with tabindex="-1". Two attempts at revealing it on focus each broke
+   something else: absolute, it landed at the flex container's start corner and
+   covered the first field; static, focusing it inserted a flex item that could
+   wrap the row and move "Clear filters" out from under whoever tabbed to it
+   next. The reveal was solving the wrong problem. The operator asked for no
+   button to press, and every browser needs one to exist for Enter to mean
+   apply, so this button's whole job is to exist: all four filters are text
+   inputs, Enter submits from any of them because of it, and a stop that shows
+   nothing and does nothing a keyboard cannot already do is worse than no stop.
+   The rule for anything else wearing this class: if it can be focused, it has
+   to be visible. */
 /* Anything holding one is positioned, and this is not tidiness.
    An absolutely positioned child whose ancestors are all static takes the page
    as its containing block, so it is laid out at its static position but
