@@ -125,7 +125,9 @@ export function codeOn(html: string): string {
  * so is a 404 that names `not_accepting`, which is a deployment declining
  * anonymous reports rather than a route that does not exist. Everything else
  * in 400, 404 and 405 means the document sent a reader somewhere this service
- * does not answer.
+ * does not answer, and 401 and 403 mean the same thing about the credential
+ * the page told them to use: a walkthrough that signed up and then could not
+ * authenticate with what it was handed would otherwise pass every step.
  */
 async function runAsPrinted(
   command: Command,
@@ -145,7 +147,7 @@ async function runAsPrinted(
   const refusal = answer.statusCode === 404 ? String(answer.json().error ?? '') : '';
   if (refusal !== 'not_accepting') {
     assert.ok(
-      ![400, 404, 405].includes(answer.statusCode),
+      ![400, 401, 403, 404, 405].includes(answer.statusCode),
       `${command.method} ${url} answered ${answer.statusCode}: ${answer.body.slice(0, 200)}`,
     );
   }
