@@ -1172,7 +1172,15 @@ describe('what taking a question back must not do', () => {
     // looks for both shapes; the MCP door used to trim the handle away before
     // the service could, which stranded exactly those rows.
     const project = await createProject(harness);
-    const id = await raise(project, 'errors-loop', 'stored the old way');
+    await post(project, '/items', { slug: 'ops:asked', title: 'the card it asked about', actor: 'errors-loop' });
+    const id = (
+      await post(project, '/escalations', {
+        agent: 'errors-loop',
+        question: 'stored the old way',
+        context: 'x',
+        item_slug: 'ops:asked',
+      })
+    ).json().escalation.id;
     await harness.store.escalations.updateOne({ _id: id }, { $set: { agent: '  errors-loop  ' } });
 
     const taken = await harness.server.inject({
@@ -1190,6 +1198,13 @@ describe('what taking a question back must not do', () => {
       },
     });
     assert.match(JSON.stringify(taken.json().result), /wont_do/, JSON.stringify(taken.json().result).slice(0, 200));
+
+    // The raw shape exists for the lookup and nowhere else. Letting it travel
+    // further would write a padded name onto the card and into the board's
+    // list of agents, which is one agent appearing as two.
+    const card = (await get(project, '/items/ops:asked')).json().item;
+    assert.equal(card.timeline.at(-1).by, 'errors-loop');
+    assert.equal(card.last_actor, 'errors-loop');
   });
 
   it('finds what it asked, under the handle it asked with', async () => {

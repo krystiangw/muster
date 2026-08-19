@@ -2992,11 +2992,16 @@ export async function withdrawEscalation(
   // not a question the cap should keep counting.
   await store.projects.updateOne({ _id: project._id }, spend('escalations'));
   if (updated.itemSlug) {
+    // The normalised handle, never the raw one. The raw shape exists here for
+    // exactly one purpose, matching a row written before handles were trimmed,
+    // and letting it travel any further writes a padded name into the card's
+    // timeline and onto `last_actor`, which is a second identity on the board
+    // for one agent and leaves the registered one untouched.
     await appendNote(
       store,
       project,
       updated.itemSlug,
-      input.agent,
+      who,
       `took back the question it asked: ${reason.slice(0, 160)}`,
     ).catch(() => undefined);
   }
