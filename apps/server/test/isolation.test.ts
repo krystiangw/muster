@@ -65,7 +65,16 @@ describe('a token from one project, at every door of another', () => {
           payload,
         });
       await write('/agents', { handle: `${prefix}-agent`, description: `${prefix} description` });
-      await write('/items', { slug: `${prefix}-card`, title: `${prefix} work`, actor: `${prefix}-agent` });
+      // With an owner and a label, because the sweep narrows lists by both and
+      // a filter that matches nothing on their board is a filter that would
+      // find nothing whether the project constraint were there or not.
+      await write('/items', {
+        slug: `${prefix}-card`,
+        title: `${prefix} work`,
+        actor: `${prefix}-agent`,
+        owner: `${prefix}-agent`,
+        labels: [`${prefix}-label`],
+      });
       await write(`/items/${prefix}-card/claim`, { agent: `${prefix}-agent` });
       const asked = await write('/escalations', { agent: `${prefix}-agent`, question: `${prefix} question` });
       const key = await write('/keys', { role: 'write', name: `${prefix} key` });
