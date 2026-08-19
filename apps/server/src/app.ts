@@ -171,6 +171,22 @@ export async function buildApp(
       // written, not a 404 to debug.
       ignoreTrailingSlash: true,
     },
+    ajv: {
+      customOptions: {
+        /**
+         * A field this service does not have is refused, not deleted.
+         *
+         * Fastify's default is `removeAdditional: true`, which strips unknown
+         * properties and answers 201, so `POST /keys` with `label` created a
+         * key called "unnamed" and said nothing, and an upsert with a
+         * misspelled field wrote the card without it and reported success.
+         * The published promise is the opposite of that, in those words: a
+         * parameter this service does not have comes back 400 naming it. The
+         * query string already behaved this way; the body did not.
+         */
+        removeAdditional: false,
+      },
+    },
   });
 
   setSiteVerification(config.siteVerification);

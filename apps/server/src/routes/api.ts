@@ -1016,6 +1016,16 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
             properties: {
               column: { type: 'string', maxLength: 32, description: 'The column key.' },
               actor: { type: 'string', maxLength: 48 },
+              // The other name for the same thing, accepted rather than
+              // refused: the lease calls here take `agent`, the MCP tool for
+              // this very move takes `agent`, and until unknown fields started
+              // being refused this one was silently dropped, so a move made by
+              // an agent was recorded as made by nobody.
+              agent: {
+                type: 'string',
+                maxLength: 48,
+                description: 'Accepted as another spelling of actor, which is the canonical name.',
+              },
               note: { type: 'string', maxLength: 2000 },
             },
             additionalProperties: false,
@@ -1025,11 +1035,16 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       async (request) => {
         const { project } = auth(request);
         const { slug } = request.params as { slug: string };
-        const body = request.body as { column: string; actor?: string; note?: string };
+        const body = request.body as {
+          column: string;
+          actor?: string;
+          agent?: string;
+          note?: string;
+        };
         const result = await moveItem(store, project, {
           slug,
           column: body.column,
-          actor: body.actor ?? 'unknown-agent',
+          actor: body.actor ?? body.agent ?? 'unknown-agent',
           ...(body.note === undefined ? {} : { note: body.note }),
         });
         return {

@@ -1936,3 +1936,52 @@ describe('a refusal that clears by waiting', () => {
     }
   });
 });
+
+describe('a field this service does not have', () => {
+  it('is refused rather than deleted, on the body as well as the query', async () => {
+    // The promise is published in those words, and the query string kept it
+    // while the body did not: the framework's default is to strip unknown
+    // properties, so `POST /keys` with `label` made a key called "unnamed" and
+    // answered 201, and an upsert with a misspelled field wrote the card
+    // without it and reported success.
+    const project = await createProject(harness);
+    const key = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/keys`,
+      headers: authed(project),
+      payload: { label: 'not a field here', role: 'write' },
+    });
+    assert.equal(key.statusCode, 400);
+    assert.match(key.json().message, /additional propert/i);
+
+    const item = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'typo', title: 't', blockedBy: ['something'] },
+    });
+    assert.equal(item.statusCode, 400, 'blockedBy is not the published spelling');
+    assert.equal(
+      await harness.store.items.countDocuments({ projectId: project.id, slug: 'typo' }),
+      0,
+      'and nothing was written',
+    );
+
+    // The move keeps taking `agent`, which is what the MCP tool for the same
+    // move takes and what everything holding a lease here takes.
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'real', title: 't', body: 'b', actor: 'a' },
+    });
+    const moved = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items/real/move`,
+      headers: authed(project),
+      payload: { column: 'done', agent: 'mover' },
+    });
+    assert.equal(moved.statusCode, 200);
+    assert.equal((await harness.store.items.findOne({ projectId: project.id, slug: 'real' }))!.lastActor, 'mover');
+  });
+});
