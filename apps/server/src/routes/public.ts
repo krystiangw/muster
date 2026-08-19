@@ -13,7 +13,7 @@ import {
   type BoardView,
 } from '../board.js';
 import type { Config } from '../config.js';
-import { READ_LINK_GRANTS } from '../content.js';
+import { READ_LINK_GRANTS, notReadyYet } from '../content.js';
 import type { Store } from '../db.js';
 import { redactAddress, type Mailer } from '../email.js';
 import { record, recordView } from '../events.js';
@@ -300,7 +300,7 @@ export function registerPublic(app: FastifyInstance, deps: PublicDeps): void {
       return reply.code(503).header('retry-after', '5').send({
         ok: false,
         error: 'store_unavailable',
-        message: `This deployment is not ready to serve a board yet: ${store.ready.why ?? 'the store is still starting'}.`,
+        message: notReadyYet(store.ready.why),
         retry_after: 5,
       });
     }

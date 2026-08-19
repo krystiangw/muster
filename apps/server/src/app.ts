@@ -5,6 +5,7 @@ import swagger from '@fastify/swagger';
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import { gzipSync } from 'node:zlib';
 import type { Config } from './config.js';
+import { STORE_UNAVAILABLE, notReadyYet } from './content.js';
 import { storeUnreachable, type Store } from './db.js';
 import { createMailer, type Mailer } from './email.js';
 import { escapeHtml, setContactEmail, setSiteVerification } from './html.js';
@@ -352,7 +353,7 @@ export async function buildApp(
       .header('retry-after', '5')
       .send({
         error: 'store_unavailable',
-        message: `This deployment is not ready to serve a board yet: ${store.ready.why ?? 'the store is still starting'}. Retry in a few seconds; nothing was written.`,
+        message: `${notReadyYet(store.ready.why)} Retry in a few seconds; nothing was written.`,
         retry_after: 5,
       });
   });
@@ -585,8 +586,7 @@ ${rows
         .header('retry-after', '5')
         .send({
           error: 'store_unavailable',
-          message:
-            'The database did not answer, so this is not something about your call. A write named by a slug cannot make a second card, and a claim you already hold stays yours, so those are safe to send again; each adds a line to the timeline. A call that mints an id, a new project, a new question, a note, may have landed before the answer was lost: read it back rather than sending it twice.',
+          message: STORE_UNAVAILABLE,
           retry_after: 5,
         });
     }

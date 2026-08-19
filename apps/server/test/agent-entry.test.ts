@@ -1138,7 +1138,11 @@ describe('the MCP surface', () => {
       assert.equal(result.isError, true);
       assert.equal(result.structuredContent.code, 'store_unavailable');
       assert.equal(result.structuredContent.status, 503);
-      assert.match(result.structuredContent.error, /slug/);
+      // The same sentence, not merely a similar one: two copies of it drifting
+      // is how a client branching on the code ends up reading one answer here
+      // and another over there.
+      const { STORE_UNAVAILABLE } = await import('../src/content.js');
+      assert.equal(result.structuredContent.error, STORE_UNAVAILABLE);
       // The delay too: a batch is many calls in one response, and the header
       // the HTTP door sets cannot say which of them should wait.
       assert.equal(result.structuredContent.retry_after, 5);

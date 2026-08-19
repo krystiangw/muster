@@ -3,6 +3,7 @@ import { record, recordFirstWrite } from '../events.js';
 import { clientIp } from './api.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
+import { STORE_UNAVAILABLE } from '../content.js';
 import { storeUnreachable, type Store } from '../db.js';
 import { maybeExpireClaims, maybeSweep } from '../hygiene.js';
 import type { Notifier } from '../notify.js';
@@ -825,7 +826,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
       const unreachable = storeUnreachable(error);
       const status = error instanceof ServiceError ? error.statusCode : unreachable ? 503 : 500;
       const text = unreachable
-        ? 'The database did not answer, so this is not something about your call. A write named by a slug cannot make a second card, and a claim you already hold stays yours, so those are safe to send again; each adds a line to the timeline. A call that mints an id, a new project, a new question, a note, may have landed before the answer was lost: read it back rather than sending it twice.'
+        ? STORE_UNAVAILABLE
         : error instanceof Error
           ? error.message
           : 'Unexpected error';

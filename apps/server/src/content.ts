@@ -24,6 +24,27 @@ import { RATE_LIMIT_SCOPES, type Config } from './config.js';
  * stale sentence, it is a security notice that undersells the thing it is
  * warning about.
  */
+/**
+ * What a caller is told when the database is not answering, in one place.
+ *
+ * Both doors say it and they have to say the same thing: a client branching on
+ * the code reads one answer here and another over there the moment two copies
+ * of a sentence drift, and this one is load bearing. It says what is safe to
+ * send again and what is not, which is the difference between a lost answer
+ * and two projects.
+ */
+export const STORE_UNAVAILABLE =
+  'The database did not answer, so this is not something about your call. A write named by a ' +
+  'slug cannot make a second card, and a claim you already hold stays yours, so those are safe ' +
+  'to send again; each adds a line to the timeline. A call that mints an id, a new project, a ' +
+  'new question, a note, may have landed before the answer was lost: read it back rather than ' +
+  'sending it twice.';
+
+/** The same question a moment earlier: not "cannot reach it" but "not ready yet". */
+export function notReadyYet(why: string | null): string {
+  return `This deployment is not ready to serve a board yet: ${why ?? 'the store is still starting'}.`;
+}
+
 export const READ_LINK_GRANTS =
   'reads the board, answers the questions your agents filed, files work of their own, ' +
   'writes notes onto the timeline the agents read, corrects the words on a card, sets ' +

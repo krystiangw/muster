@@ -2140,11 +2140,14 @@ describe('a database that does not answer', () => {
       // And not "retry", flatly, which is the advice that turns one lost
       // answer into two projects. A slug is an idempotency key; a minted id
       // is not, and the message has to say which is which.
-      assert.match(answer.json().message, /slug/);
-      assert.match(answer.json().message, /mints an id/);
-      // Nor is a slug called free: sending an upsert again cannot make a
-      // second card, and it does add a second line to the timeline.
-      assert.match(answer.json().message, /timeline/);
+      // One sentence, in one place, said by both doors: it names what is safe
+      // to send again and what is not, which is the difference between a lost
+      // answer and two projects, and two copies of it would drift.
+      const { STORE_UNAVAILABLE } = await import('../src/content.js');
+      assert.equal(answer.json().message, STORE_UNAVAILABLE);
+      assert.match(STORE_UNAVAILABLE, /slug/);
+      assert.match(STORE_UNAVAILABLE, /mints an id/);
+      assert.match(STORE_UNAVAILABLE, /timeline/);
     } finally {
       harness.store.items.find = real;
     }
