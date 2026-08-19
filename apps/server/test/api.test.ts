@@ -1471,6 +1471,25 @@ describe('the map every refusal points at', () => {
         code: 415,
       },
       { method: 'POST', url: '/p', path: '/p', payload: '<p/>', headers: { 'content-type': 'application/xml' }, code: 415 },
+      // A write that declares no body schema of its own, and a DELETE. Both
+      // answer 415 all the same, which is why the map derives it from the
+      // method rather than from whether a body is documented.
+      {
+        method: 'POST',
+        url: `${project.api}/sweep`,
+        path: '/v1/{project}/sweep',
+        payload: '<x/>',
+        headers: { ...reading, 'content-type': 'application/xml' },
+        code: 415,
+      },
+      {
+        method: 'DELETE',
+        url: `${project.api}/items/not-here`,
+        path: '/v1/{project}/items/{slug}',
+        payload: '<x/>',
+        headers: { ...reading, 'content-type': 'application/xml' },
+        code: 415,
+      },
     ];
 
     for (const one of cases) {

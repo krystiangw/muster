@@ -599,10 +599,13 @@ export async function buildApp(
           ];
           for (const code of codes) responses[code] ??= refusal(code);
 
-          // A body announced as something other than JSON is refused before
-          // any of this endpoint's own rules run, so every operation that
-          // takes a body can answer it and none that takes no body can.
-          if (operation.requestBody) responses['415'] ??= refusal('415');
+          // A body announced as something other than JSON is refused by the
+          // content-type parser, before routing reaches anything this endpoint
+          // declares. Derived from the method and not from having a documented
+          // body, which was tried and was wrong: three writes declare no body
+          // schema and answer 415 all the same, and so does every DELETE. A
+          // GET answers 200 and ignores the header, having nothing to parse.
+          if (['post', 'put', 'patch', 'delete'].includes(method)) responses['415'] ??= refusal('415');
 
           // The two OAuth endpoints, which are the same service in somebody
           // else's vocabulary. Registration refuses in this service's shape,
