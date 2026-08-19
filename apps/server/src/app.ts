@@ -184,14 +184,22 @@ export function acceptsGzip(header: string | undefined): boolean {
  * quiet the moment they were documented. Documenting a thing must not change
  * the thing.
  */
+// Always 201: these make something new or refuse.
 const CREATES = new Set([
   'post /p',
-  'post /feedback',
   'post /oauth/register',
-  'post /v1/{project}/agents',
-  'post /v1/{project}/items',
   'post /v1/{project}/escalations',
   'post /v1/{project}/keys',
+]);
+
+// Either, and which one it was is the answer's own point. An upsert says
+// `created`; a share of a board to the address that already owns it says
+// `already_owned` and 200, which a client told to expect only 201 would read
+// as a failure of the most ordinary thing a person can do twice.
+const CREATES_OR_UPDATES = new Set([
+  'post /feedback',
+  'post /v1/{project}/agents',
+  'post /v1/{project}/items',
   'post /v1/{project}/share',
 ]);
 
@@ -229,6 +237,7 @@ const REFUSAL_SAYS: Record<string, string> = {
   '404': 'No such thing under that name here.',
   '409': 'Somebody else got there first, or the state you said you expected is not the state that is stored.',
   '429': 'Over a published rate limit. The answer names which budget and carries retry-after.',
+  '415': 'The body announced a type this service does not read. Send application/json, or a form body on the HTML endpoints.',
   '503': 'The store is out of reach. This is not your request being wrong: come back, and the answer says when.',
 };
 
@@ -527,7 +536,10 @@ export async function buildApp(
       // one, and this deployment only ever produces the second.
       const doc = (given as { openapiObject: unknown }).openapiObject as {
         components?: { schemas?: Record<string, unknown> };
-        paths?: Record<string, Record<string, { responses?: Record<string, unknown>; operationId?: string }>>;
+        paths?: Record<
+          string,
+          Record<string, { responses?: Record<string, unknown>; operationId?: string; requestBody?: unknown }>
+        >;
       };
       doc.components = doc.components ?? {};
       doc.components.schemas = {
@@ -546,6 +558,21 @@ export async function buildApp(
         },
       };
 
+      // The token endpoint answers in the shape RFC 6749 defines, not in this
+      // service's: one word, no sentence. Documenting it with the house schema
+      // would put a `message` on the map that never arrives, which is the kind
+      // of thing this whole change exists to stop.
+      doc.components.schemas.OauthError = {
+        type: 'object',
+        description: 'The error shape RFC 6749 section 5.2 defines, which is what every OAuth client already reads.',
+        required: ['error'],
+        properties: {
+          error: { type: 'string', description: 'invalid_client, invalid_grant, unsupported_grant_type, invalid_request.' },
+          error_description: { type: 'string' },
+        },
+        additionalProperties: true,
+      };
+
       const refusal = (code: string) => ({
         description: REFUSAL_SAYS[code] ?? 'Refused.',
         content: { 'application/json': { schema: { $ref: '#/components/schemas/Refusal' } } },
@@ -556,23 +583,56 @@ export async function buildApp(
           if (!['get', 'post', 'put', 'patch', 'delete'].includes(method)) continue;
           operation.operationId ??= operationId(method, path);
           const responses = operation.responses ?? {};
-          if (CREATES.has(`${method} ${path}`)) {
+          const key = `${method} ${path}`;
+          if (CREATES.has(key) || CREATES_OR_UPDATES.has(key)) {
             responses['201'] = responses['200'] ?? { description: 'Created.' };
-            // An upsert answers either, and which one it was is the whole
-            // point of the `created` field it sends back.
-            if (!path.endsWith('/keys') && !path.endsWith('/share') && !path.endsWith('/escalations') && path !== '/p' && path !== '/oauth/register') {
-              responses['200'] = responses['200'] ?? { description: 'Already existed, and was updated.' };
+            if (CREATES_OR_UPDATES.has(key)) {
+              responses['200'] = responses['200'] ?? { description: 'Already there, and answered as such.' };
             } else {
               delete responses['200'];
             }
           }
-          const key = `${method} ${path}`;
           const codes = [
             ...(path.startsWith('/v1/') ? TOKEN_DOOR : path === '/p' || path === '/feedback' ? OPEN_DOOR : []),
             ...(NOT_FOUND.has(key) ? ['404'] : []),
             ...(CONFLICTS.has(key) ? ['409'] : []),
           ];
           for (const code of codes) responses[code] ??= refusal(code);
+
+          // A body announced as something other than JSON is refused before
+          // any of this endpoint's own rules run, so every operation that
+          // takes a body can answer it and none that takes no body can.
+          if (operation.requestBody) responses['415'] ??= refusal('415');
+
+          // The two OAuth endpoints, which are the same service in somebody
+          // else's vocabulary. Registration refuses in this service's shape,
+          // because what refuses it is this service's schema check. The token
+          // endpoint refuses a grant in the shape RFC 6749 defines, and its
+          // own schema check still refuses in the house shape, so a 400 there
+          // is honestly one or the other and is written that way.
+          if (path.startsWith('/oauth/')) {
+            for (const code of ['429', '503']) responses[code] ??= refusal(code);
+            if (path === '/oauth/register') responses['400'] ??= refusal('400');
+            if (path === '/oauth/token') {
+              responses['400'] ??= {
+                description: 'An unsupported grant, in the OAuth shape, or a malformed body, in this service\'s.',
+                content: {
+                  'application/json': {
+                    schema: {
+                      oneOf: [
+                        { $ref: '#/components/schemas/OauthError' },
+                        { $ref: '#/components/schemas/Refusal' },
+                      ],
+                    },
+                  },
+                },
+              };
+              responses['401'] ??= {
+                description: 'The client id and secret do not name a client here.',
+                content: { 'application/json': { schema: { $ref: '#/components/schemas/OauthError' } } },
+              };
+            }
+          }
           operation.responses = responses;
         }
       }

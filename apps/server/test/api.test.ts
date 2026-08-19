@@ -1446,6 +1446,31 @@ describe('the map every refusal points at', () => {
       { method: 'POST', url: `${project.api}/agents/not-here/rename`, path: '/v1/{project}/agents/{handle}/rename', payload: { to: 'other' }, headers: admin, code: 404 },
       { method: 'GET', url: `${project.api}/items`, path: '/v1/{project}/items', headers: { authorization: 'Bearer nope' }, code: 401 },
       { method: 'GET', url: `${project.api}/items?offset=1`, path: '/v1/{project}/items', headers: reading, code: 400 },
+      // In the shape RFC 6749 gives it, which is not this service's shape, so
+      // it is on the map under its own schema rather than the house one.
+      {
+        method: 'POST',
+        url: '/oauth/token',
+        path: '/oauth/token',
+        payload: { grant_type: 'client_credentials', client_id: 'nobody', client_secret: 'nothing' },
+        headers: { 'content-type': 'application/json' },
+        code: 401,
+      },
+      { method: 'POST', url: '/oauth/token', path: '/oauth/token', payload: {}, headers: { 'content-type': 'application/json' }, code: 400 },
+      { method: 'POST', url: '/oauth/register', path: '/oauth/register', payload: { redirect_uris: 'not-an-array' }, headers: { 'content-type': 'application/json' }, code: 400 },
+      // A body announced as something this service does not read, refused
+      // before any of the endpoint's own rules run. Every operation that takes
+      // a body can answer this, which is why the map derives it from having
+      // one rather than from a list somebody keeps.
+      {
+        method: 'POST',
+        url: `${project.api}/items`,
+        path: '/v1/{project}/items',
+        payload: '<item/>',
+        headers: { ...reading, 'content-type': 'application/xml' },
+        code: 415,
+      },
+      { method: 'POST', url: '/p', path: '/p', payload: '<p/>', headers: { 'content-type': 'application/xml' }, code: 415 },
     ];
 
     for (const one of cases) {
@@ -1469,6 +1494,24 @@ describe('the map every refusal points at', () => {
       content?: Record<string, { schema?: { $ref?: string } }>;
     };
     assert.equal(refusal?.content?.['application/json']?.schema?.$ref, '#/components/schemas/Refusal');
+
+    // A share to the address that already owns the board answers 200 with
+    // `already_owned`, which is the most ordinary thing a person can do twice.
+    // An earlier version of this transform deleted that 200 and would have had
+    // a generated client read it as a failure.
+    assert.ok(
+      Object.keys(paths['/v1/{project}/share']?.post?.responses ?? {}).includes('200'),
+      'share still documents the answer it gives an address that already owns the board',
+    );
+
+    const oauth = paths['/oauth/token']?.post?.responses?.['401'] as {
+      content?: Record<string, { schema?: { $ref?: string } }>;
+    };
+    assert.equal(
+      oauth?.content?.['application/json']?.schema?.$ref,
+      '#/components/schemas/OauthError',
+      'and the one endpoint that answers in somebody else\'s shape says which shape',
+    );
 
     // Documenting a response must not start serializing it. A refusal carries
     // fields naming what was wrong, and those are exactly what a serializer
