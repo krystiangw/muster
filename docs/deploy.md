@@ -132,6 +132,14 @@ after the link has been recognised and before anything is answered, so a 400
 means the whole path in front of the write is open and a 403 means the forms are
 dead again.
 
+Every one of these scripts keeps something in `~/.muster`: the board it made,
+the codes it minted, what it saw last time. `MUSTER_HOME` moves that somewhere
+else, and it is the whole reason the suite can run them: `watchdog.mjs`,
+`walkthrough.mjs` and the three `smoke-*.mjs` all read it, and a test pointing
+them at a temporary directory gets their real behaviour without writing into
+the operator's home. Nothing else changes. Unset, they use `~/.muster` as they
+always did, which is what the schedules rely on.
+
 It also watches the one thing the whole product is for: that a question reaches
 a person. Two dates in the project summary tell apart the two silences that look
 identical from a board. The mail is throttled to one message per project per
