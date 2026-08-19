@@ -2344,6 +2344,21 @@ export const SEARCH_BUDGET_MS = 500;
  * stopped search means: an empty page would say there is nothing to find, which
  * is precisely what nobody established.
  */
+/**
+ * The filters worth putting beside a search, and the only list of them.
+ *
+ * Each is a key an index can act on before a card is fetched, which is the
+ * whole reason they help: a substring over two fields cannot be answered from
+ * an index at all, so a search costs whatever the index has not already
+ * narrowed away. Measured on twenty thousand cards, documents fetched beside
+ * the same search: owner 500, source 800, status 1000, prefix 2500, and both
+ * `label=` and another search word 20000, which is all of them.
+ *
+ * A list rather than a sentence, because this was published as prose in four
+ * places and was wrong in all four. Add one here and every door says it.
+ */
+export const SEARCH_NARROWERS = ['status', 'owner', 'source', 'prefix'] as const;
+
 export function searchTooSlow(store: Store, error: unknown): ServiceError | null {
   const failure = error as { code?: unknown; codeName?: unknown } | null;
   if (failure?.code !== 50 && failure?.codeName !== 'MaxTimeMSExpired') return null;
@@ -2355,7 +2370,7 @@ export function searchTooSlow(store: Store, error: unknown): ServiceError | null
   return new ServiceError(
     503,
     'search_too_slow',
-    `That search read for longer than ${SEARCH_BUDGET_MS}ms without finishing, so it was stopped rather than answered with a page that might be missing rows. Narrow it with status=, owner=, source= or prefix= beside it, which are the ones that bound what gets read. Another word narrows the answer but not the read, and neither does label=. An empty answer would have said there is nothing to find, which is not what happened.`,
+    `That search read for longer than ${SEARCH_BUDGET_MS}ms without finishing, so it was stopped rather than answered with a page that might be missing rows. Narrow it with ${SEARCH_NARROWERS.map((name) => `${name}=`).join(', ')} beside it, which are the ones that bound what gets read. Another word narrows the answer but not the read, and neither does label=. An empty answer would have said there is nothing to find, which is not what happened.`,
   );
 }
 

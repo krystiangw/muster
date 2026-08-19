@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { authed, createProject, signIn, startHarness, type Harness, type Project } from './helper.js';
 import { flushEvents } from '../src/events.js';
-import { searchTooSlow } from '../src/service.js';
+import { SEARCH_NARROWERS, searchTooSlow } from '../src/service.js';
 
 /**
  * The promises that only an index keeps.
@@ -223,33 +223,80 @@ describe('the filters a slow search is told to use', () => {
     await harness?.stop();
   });
 
-  it('names only fields an index can narrow on, and keeps naming label as the one that cannot', async () => {
+  it('offers only filters that really cut what a search reads, and keeps label as the one that does not', async () => {
     const refusal = searchTooSlow(harness.store, { code: 50 });
     assert.ok(refusal, 'a MaxTimeMSExpired is what this turns into a refusal');
-    const advice = refusal.message;
 
-    const keys = new Set<string>();
-    for (const index of await harness.store.db.collection('items').indexes()) {
-      for (const field of Object.keys((index as { key: Record<string, unknown> }).key)) {
-        keys.add(field);
-      }
+    // Every filter the sentence offers comes from one list, so a fifth one
+    // cannot be added in prose without joining it and being measured here.
+    for (const name of SEARCH_NARROWERS) {
+      assert.ok(refusal.message.includes(`${name}=`), `the refusal offers ${name}=`);
     }
 
-    // What the caller types, and the field it lands on.
-    const recommended: Array<[string, string]> = [
-      ['status=', 'status'],
-      ['owner=', 'owner'],
-      ['source=', 'source'],
-      ['prefix=', 'slug'],
-    ];
-    for (const [typed, field] of recommended) {
-      assert.ok(advice.includes(typed), `the refusal offers ${typed}`);
-      assert.ok(keys.has(field), `${typed} lands on ${field}, which an index covers`);
+    // Measured, not inferred from the index definitions. A field can sit in an
+    // index and still not bound the scan, and it can fail to bound the scan and
+    // still cut the read, because the predicate runs against index keys before
+    // anything is fetched. Documents fetched is the number a caller feels, so
+    // that is the number this asserts.
+    const project = 'p_narrowing';
+    const areas = ['errors', 'trades', 'ops', 'docs'];
+    await harness.store.items.insertMany(
+      Array.from({ length: 400 }, (_, i) => ({
+        _id: `i_narrow_${i}`,
+        projectId: project,
+        slug: `${areas[i % areas.length]}:card-${i}`,
+        title: `withdraw stuck ${i}`,
+        status: i % 4 === 0 ? 'open' : 'done',
+        labels: [areas[i % areas.length]!],
+        owner: i % 8 === 0 ? 'alex' : null,
+        source: i % 10 === 0 ? 'makler' : null,
+        priority: 0,
+        touchedAt: new Date(),
+      })) as never,
+    );
+
+    const fetched = async (extra: Record<string, unknown>): Promise<number> => {
+      const search = {
+        $and: [
+          {
+            $or: [
+              { slug: { $regex: 'card', $options: 'i' } },
+              { title: { $regex: 'card', $options: 'i' } },
+            ],
+          },
+        ],
+      };
+      const plan = await harness.store.items
+        .find({ projectId: project, ...extra, ...search })
+        .explain('executionStats');
+      return (plan as { executionStats: { totalDocsExamined: number } }).executionStats
+        .totalDocsExamined;
+    };
+
+    const bare = await fetched({});
+    assert.ok(bare > 0, 'the fixture is there to be read');
+
+    const asked: Record<(typeof SEARCH_NARROWERS)[number], Record<string, unknown>> = {
+      status: { status: 'open' },
+      owner: { owner: 'alex' },
+      source: { source: 'makler' },
+      prefix: { slug: { $regex: '^errors:' } },
+    };
+    for (const name of SEARCH_NARROWERS) {
+      const narrowed = await fetched(asked[name]);
+      assert.ok(
+        narrowed < bare,
+        `${name}= is offered as a way to read less, and it read ${narrowed} of ${bare}`,
+      );
     }
 
-    // The counterexample, and the reason it is one. If a labels index ever
-    // appears, this fails and the advice is the thing to change.
-    assert.ok(!keys.has('labels'), 'labels carry no index, which is why label= is not offered');
-    assert.match(advice, /neither does label=/);
+    // The counterexample, measured the same way. If a labels index ever appears
+    // that a bare label= can use, this fails, and the sentence is what to change.
+    assert.equal(
+      await fetched({ labels: 'errors' }),
+      bare,
+      'label= reads exactly as much as no filter at all, which is why it is not offered',
+    );
+    assert.match(refusal.message, /neither does label=/);
   });
 });

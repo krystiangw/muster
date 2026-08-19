@@ -533,14 +533,18 @@ title, case insensitively. It is the same search the board offers a person, so
 the two doors answer alike. On a board with a long history a search can run
 longer than it is allowed, and then it is refused with 503 \`search_too_slow\`
 rather than answered with an empty page: an empty page would say there is
-nothing to find, which is not what happened. Narrow it with \`status=\`,
-\`owner=\`, \`source=\` or \`prefix=\`, which are the four that bound what gets
-read, and ask again. Another word narrows the answer and not the read, and
-neither does \`label=\`:
+nothing to find, which is not what happened.
 
 \`\`\`bash
 curl -s "$MUSTER/items?q=withdraw" -H "authorization: Bearer $TOKEN"
+curl -s "$MUSTER/items?q=withdraw&prefix=errors:" -H "authorization: Bearer $TOKEN"
 \`\`\`
+
+The second one is what to ask again with. Four filters bound what a search
+reads, because each is a key an index can act on before a card is fetched:
+\`status=\`, \`owner=\`, \`source=\` and \`prefix=\`. Another word does not, and
+neither does \`label=\`: both narrow the answer while the same cards still come
+off disk.
 
 Use \`order=id\` whenever you intend to read everything: the default order is
 by urgency, and priority and updatedAt both change while you page, so an item
