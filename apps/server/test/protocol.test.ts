@@ -105,6 +105,27 @@ export function commandsIn(text: string): Command[] {
   return found;
 }
 
+/**
+ * The shell values a page sets for itself.
+ *
+ * Two are deliberately ignored. `MUSTER` and `TOKEN` are the reader's own and
+ * cannot be on the page at all, so the walkthrough takes them from the signup
+ * it just ran. Everything else the page names, it names for a reason, and
+ * substituting a value of the test's own choosing there would be the test
+ * agreeing with itself.
+ */
+function assignmentsIn(markdown: string): Map<string, string> {
+  const found = new Map<string, string>();
+  const blocks = markdown.match(/```bash\n[\s\S]*?```/g) ?? [];
+  for (const block of blocks) {
+    for (const [, name, value] of block.matchAll(/^([A-Z_]+)=(\S+)/gm)) {
+      if (name === 'MUSTER' || name === 'TOKEN' || name === 'PROJECT') continue;
+      found.set(name!, value!);
+    }
+  }
+  return found;
+}
+
 /** The code a rendered page prints, as the plain text a reader would copy. */
 export function codeOn(html: string): string {
   const blocks = html.match(/<pre[^>]*>[\s\S]*?<\/pre>/g) ?? [];
@@ -274,12 +295,21 @@ describe('every curl these documents print', () => {
     const commands = commandsIn(doc.replaceAll('https://musterboard.dev', harness.config.baseUrl));
     assert.ok(commands.length >= 8, `the README has commands in it: found ${commands.length}`);
 
+    // The card the page assumes a reader already has, taken from the page: its
+    // board section moves one before its quickstart files one, so the slug is
+    // named in the block that moves it.
+    const slug = assignmentsIn(doc).get('SLUG') ?? '';
+    assert.ok(slug, 'the page names the card its board example moves');
+    // And names one it files itself. Seeding whatever the page says would
+    // otherwise make a typo here invisible: the test would create the misspelt
+    // card, move it, and report that the page works.
+    assert.ok(
+      commands.some((command) => command.body?.includes(`"slug":"${slug}"`)),
+      `the page files ${slug} somewhere, so the card it moves is a card it makes`,
+    );
+
     let project = '';
     let token = '';
-    // The card the page assumes a reader already has. Its own quickstart makes
-    // one further down and claims it there; this is the one the board section
-    // moves, which comes first on the page and cannot be made yet.
-    let slug = '';
     const fill = (text: string): string =>
       text
         .replace('$MUSTER', `/v1/${project}`)
@@ -293,12 +323,11 @@ describe('every curl these documents print', () => {
       if (!project && command.url.endsWith('/p') && answer.statusCode === 201) {
         project = answer.json().project;
         token = answer.json().token;
-        slug = 'ops:cutover';
         await harness.server.inject({
           method: 'POST',
           url: `/v1/${project}/items`,
           headers: { authorization: `Bearer ${token}` },
-          payload: { slug, title: 'Cut traffic over to the new venue' },
+          payload: { slug, title: 'Withdraw stuck on BASE' },
         });
       }
     }

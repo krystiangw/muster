@@ -98,6 +98,8 @@ A column also says what belongs in it, so nobody has to work out that
 "Monitoring" means a label:
 
 ```bash
+SLUG=errors:withdraw-stuck   # any card of yours; the quickstart below files this one
+
 curl -sX POST $MUSTER/items/$SLUG/move \
   -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
   -d '{"column":"investigating","actor":"errors-loop"}'
