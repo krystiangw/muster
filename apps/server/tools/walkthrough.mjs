@@ -402,6 +402,49 @@ const run = async () => {
     JSON.stringify(inbox.body).slice(0, 200),
   );
 
+  // Taking a question back, walked on the real thing. Its own question, asked
+  // and withdrawn in the same breath, because the one already answered above
+  // is exactly the case this has to refuse. The board this runs on has no
+  // owner, so nothing here mails anybody.
+  const regretted = await json(`${api}/escalations`, {
+    method: 'POST',
+    headers: authed,
+    body: JSON.stringify({
+      agent: AGENT,
+      question: 'A question this run asks only to take it back',
+      context: 'The walkthrough exercising withdraw against the real service.',
+    }),
+  });
+  const regretId = regretted.body?.escalation?.id;
+  if (typeof regretId === 'string') {
+    const taken = await json(`${api}/escalations/${regretId}/withdraw`, {
+      method: 'POST',
+      headers: authed,
+      body: JSON.stringify({ agent: AGENT, reason: 'asked on purpose, to walk this door' }),
+    });
+    check(
+      'a question can be taken back before anybody answers',
+      taken.status === 200
+        && taken.body?.escalation?.status === 'wont_do'
+        && taken.body?.escalation?.withdrawn_by === AGENT,
+      `${taken.status} ${JSON.stringify(taken.body).slice(0, 160)}`,
+    );
+    // And the answered one above cannot be, which is the guard that matters:
+    // withdrawing after somebody has answered would throw their attention away.
+    const late = await json(`${api}/escalations/${escalation.id}/withdraw`, {
+      method: 'POST',
+      headers: authed,
+      body: JSON.stringify({ agent: AGENT, reason: 'this one should be refused' }),
+    });
+    check(
+      'and cannot be, once somebody has answered it',
+      late.status === 409,
+      `${late.status} ${JSON.stringify(late.body).slice(0, 120)}`,
+    );
+  } else {
+    check('a question can be taken back before anybody answers', false, JSON.stringify(regretted.body).slice(0, 200));
+  }
+
   const noted = await html(`${board}/note`, {
     method: 'POST',
     headers: {
