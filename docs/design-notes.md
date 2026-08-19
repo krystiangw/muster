@@ -1409,3 +1409,36 @@ The five tools name themselves in a user agent. The published client
 deliberately does not: somebody else's agent using our SDK is a stranger, and a
 header inside the client would have broken the count this was built to keep
 honest.
+
+## Which refusal words get published, 2026-08-19
+
+Counted while comparing what the doors offer each other: the service emits
+fifty eight `error` words and six of them appear in anything it publishes. The
+schema for a refusal says, in the document an agent reads, "the stable word,
+branch on this, not on the sentence". Fifty two words a loop is told to branch
+on, and no list of them anywhere. That reads like a gap and is not one, which
+is worth writing down before somebody else spends an hour finding out.
+
+Two things are published instead, and between them they cover what a loop
+actually decides.
+
+Every operation names what each status means and what to do about it: 400 is
+the request, and the message says which part; 401 is the token; 403 is a real
+token for something else; 415 is the body's type; 429 carries `retry-after`;
+503 is us, come back. That is the disposition, which is the branch that
+matters, and it is per operation rather than global because the same status
+means different things on different calls.
+
+And the six words that are published are exactly the six that change what a
+loop does beyond its status: `blocked_by` names other cards and means wait for
+them, `held` names the holder, `changed_underneath` means read again and
+decide again, `store_unavailable` and `search_too_slow` mean come back,
+`internal` means it was us. Everything else is a 400 whose message says what to
+fix, and a word that only needs to be stable enough to log and group by.
+
+So the rule, said out loud: a refusal word is published when knowing it changes
+what an agent does. Publishing all fifty eight would put fifty two names in
+front of a reader to no purpose, and an enumeration in the schema would turn
+every new word into a breaking change for generated clients that validate it.
+If a new refusal ever wants different handling rather than a different
+sentence, that is the moment its word joins the six.
