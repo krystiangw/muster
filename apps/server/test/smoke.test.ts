@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createServer } from 'node:net';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -136,12 +136,55 @@ describe('the scripts that check production, run against a harness', () => {
     }
   });
 
+  it('walks the whole journey an agent takes, end to end', async () => {
+    // The daily check, run here as well. It signs up, registers, writes,
+    // claims, lets a lease lapse, escalates, answers from the board the way a
+    // browser posts it, and does the same board again over MCP: forty odd
+    // steps of real product behaviour that nothing else in this suite strings
+    // together in one go. It runs against production every morning through
+    // launchd, which means a change that breaks it is found tomorrow at seven
+    // by a log nobody is reading, or now.
+    const out = (
+      await run(process.execPath, ['tools/walkthrough.mjs', '--url', base], {
+        cwd: join(HERE, 'apps/server'),
+        encoding: 'utf8',
+        env: { ...process.env, MUSTER_HOME: home },
+        maxBuffer: 4 * 1024 * 1024,
+      })
+    ).stdout;
+    assert.match(out, /all clear/, out);
+    assert.doesNotMatch(out, /^ *FAIL/m, out);
+    // Counted as well as read, because "all clear" is also what a walkthrough
+    // that stopped after four steps would say if the four passed. Forty five
+    // is what it does today; the assertion is a floor, so adding steps is not
+    // a failing test and quietly losing half of them is.
+    const passed = (out.match(/^ {2}ok/gm) ?? []).length;
+    assert.ok(passed >= 40, `it walked the whole way, not part of it: ${passed} steps`);
+    for (const section of ['what an agent finds before it signs up', 'the same board over MCP']) {
+      assert.match(out, new RegExp(section), `it reached "${section}"`);
+    }
+  });
+
   it('reuses what it kept, rather than signing up twice', async () => {
     // The reason these scripts remember anything: a tool that signs up on
     // every run writes a signup event on every run, and that number is the
     // denominator of every rate in the report.
+    //
+    // Asserted on what is stored rather than on what is printed. The first
+    // version of this looked for the absence of a word the script never says,
+    // so it passed whatever happened, which is worse than not testing it.
+    const boardsBefore = await harness.store.projects.countDocuments({});
+    const kept = JSON.parse(readFileSync(join(home, 'smoke.json'), 'utf8'));
+
     const again = await smoke('smoke-mcp.mjs');
     assert.match(again, /all good/, again);
-    assert.doesNotMatch(again, /create_project/, 'the second run reused the board it kept');
+
+    const after = JSON.parse(readFileSync(join(home, 'smoke.json'), 'utf8'));
+    assert.deepEqual(after, kept, 'it went back to the board it had');
+    assert.equal(
+      await harness.store.projects.countDocuments({}),
+      boardsBefore,
+      'and made no new one',
+    );
   });
 });

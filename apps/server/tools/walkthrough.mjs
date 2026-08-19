@@ -39,7 +39,10 @@ const flag = (name) => {
 const BASE = (flag('--url') || 'https://musterboard.dev').replace(/\/$/, '');
 const FRESH = args.includes('--fresh');
 const MAIL = args.includes('--mail');
-const HOME = join(homedir(), '.muster');
+// The operator's, unless a caller says otherwise. This walks the whole journey
+// and remembers the board it made, so pointing it at a server a test controls
+// took exactly one line, the same one the watchdog and the smoke tests needed.
+const HOME = process.env.MUSTER_HOME || join(homedir(), '.muster');
 const STATE = join(HOME, 'walkthrough.json');
 const ALERT_TO = process.env.MUSTER_ALERT_TO || 'gwizdala.kr@gmail.com';
 const AGENT = 'probe-loop';
@@ -177,7 +180,10 @@ const run = async () => {
   // cheap to ask for.
   for (const [path, marker, type] of [
     ['/skill.md', '# Muster', 'text/markdown'],
-    ['/llms.txt', 'musterboard', 'text/plain'],
+    // The marker is a phrase from the document rather than this deployment's
+    // own domain: the check is that the file is the right file, and a domain
+    // is the one thing about it that changes between deployments.
+    ['/llms.txt', '/skill.md', 'text/plain'],
     ['/.well-known/agent-access.json', 'signup', 'application/json'],
     // The document those two send an agent to for the signup itself.
     ['/agent-signup.md', 'POST', 'text/markdown'],
