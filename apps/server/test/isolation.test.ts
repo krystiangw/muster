@@ -64,7 +64,7 @@ describe('a token from one project, at every door of another', () => {
           headers: authed(project),
           payload,
         });
-      await write('/agents', { handle: `${prefix}-agent`, description: 'someone' });
+      await write('/agents', { handle: `${prefix}-agent`, description: `${prefix} description` });
       await write('/items', { slug: `${prefix}-card`, title: `${prefix} work`, actor: `${prefix}-agent` });
       await write(`/items/${prefix}-card/claim`, { agent: `${prefix}-agent` });
       const asked = await write('/escalations', { agent: `${prefix}-agent`, question: `${prefix} question` });
@@ -339,6 +339,55 @@ describe('a token from one project, at every door of another', () => {
       }
     }
     assert.deepEqual(reached, [], `a reference reached across boards:\n${reached.join('\n')}`);
+  });
+
+  it('filters by a name from another board and finds nothing of theirs', async () => {
+    // A reference does not have to be in the path. Every list here narrows by
+    // an owner, an agent, a label or a word, and those arrive in the query
+    // string, where the sweep above never looks. The answer is a different
+    // shape too: this is a legitimate request that should succeed and come
+    // back empty, not one that should be refused, so a check written as "is it
+    // turned away" would have been wrong about all eight of them.
+    const openapi = (await harness.server.inject({ method: 'GET', url: '/openapi.json' })).json();
+    const theirValue: Record<string, string> = {
+      owner: 'their-agent',
+      agent: 'their-agent',
+      label: 'their-label',
+      q: 'their work',
+    };
+
+    const asked: string[] = [];
+    const leaked: string[] = [];
+    for (const [route, methods] of Object.entries(
+      openapi.paths as Record<string, Record<string, any>>,
+    )) {
+      if (!route.startsWith('/v1/{project}')) continue;
+      const operation = methods.get;
+      if (!operation) continue;
+      for (const parameter of (operation.parameters ?? []) as Array<Record<string, any>>) {
+        if (parameter.in !== 'query') continue;
+        const value = theirValue[parameter.name];
+        if (value === undefined) continue;
+        const url = `${route.replace('/v1/{project}', mine.api)}?${parameter.name}=${encodeURIComponent(value)}`;
+        asked.push(url);
+        const answer = await harness.server.inject({ method: 'GET', url, headers: authed(mine) });
+        if (answer.statusCode >= 400) {
+          leaked.push(`${url} answered ${answer.statusCode}, which is not this door working`);
+          continue;
+        }
+        // Their content, not the word I sent. A service that echoes the
+        // filter it applied, or names a handle nobody registered here in a
+        // warning, is answering correctly: finding my own parameter in the
+        // reply says nothing, and the first version of this counted three of
+        // those as leaks. What only their board holds is their card's title,
+        // their agent's description and the answer their own board wrote.
+        for (const trace of ['their work', 'their description', 'answered by the board it belongs to']) {
+          if (answer.body.includes(trace)) leaked.push(`${url} carried "${trace}"`);
+        }
+      }
+    }
+    assert.ok(asked.length >= 8, `the lists that narrow by a name: ${asked.length}`);
+    assert.deepEqual(leaked, [], `a filter reached across boards:\n${leaked.join('\n')}`);
   });
 
   it('shows nothing of theirs on the lists my board draws', async () => {
