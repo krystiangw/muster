@@ -256,8 +256,10 @@ declaring \`errors:\` is declaring an area rather than a list of cards;
 \`GET $MUSTER/items?prefix=errors:\` is that area and nothing else, and it bounds
 the read to its own stretch of the slug index, which \`q=\` cannot do: a substring
 over two fields is not answerable from an index, so a search costs whatever the
-filters beside it have not already narrowed away. Put one beside it. And a board
-can lane by the namespace or give it a column. It is the one grouping you get
+index has not already narrowed away. Put \`status=\` or \`prefix=\` beside it and
+it reads less; \`label=\` narrows the answer and not the read, because labels are
+deliberately unindexed here. And a board can lane by the namespace or give it a
+column. It is the one grouping you get
 without anybody agreeing on a vocabulary first, because you were going to name
 the card anyway.
 

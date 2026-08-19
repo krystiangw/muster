@@ -1515,6 +1515,7 @@ indexes present.
 | `prefix=ops:` | 2501 | 2500 | `{projectId, slug}` |
 | `q=ops` alone | 20000 | 20000 | `{projectId, status, priority, touchedAt}` |
 | `q=ops` with `status=open` | 1000 | 1000 | the same status index |
+| `q=ops` with `label=ops` | 20000 | 20000 | the same status index |
 | `q=card` with `prefix=ops:` | 2501 | 2500 | `{projectId, slug}` |
 
 Two things this corrects, both of which were published as guesses first. The
@@ -1523,6 +1524,11 @@ reads the project, and adding `prefix=` is what moves the plan onto the slug
 index. And `q` does not always fetch everything: it fetches whatever the filters
 beside it have not already narrowed away, which is the whole project only when
 it stands alone.
+
+Not every filter beside a search helps, either. `label=` narrows the answer and
+not the read: labels carry no index on purpose, so the same twenty thousand
+documents come off disk and the label is checked on each one. Only a filter the
+index can act on, `status=` or `prefix=`, makes the search cheaper.
 
 So the difference is not indexed against unindexed. A substring over two fields
 cannot be answered from an index at all, and `prefix=` can, which is why one of
