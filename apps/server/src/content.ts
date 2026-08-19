@@ -961,6 +961,14 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
         request: { agent: 'errors-loop', question: '...', context: '...', priority: 'high' },
       },
       {
+        name: 'acknowledge',
+        method: 'POST',
+        url: `${base}/v1/{project}/escalations/{id}/ack`,
+        request: { agent: 'errors-loop', note: 'what you did about it' },
+        notes:
+          'Clears an answered question out of the inbox. Until it is acknowledged the inbox keeps offering it, and the second agent to act on one is refused by name.',
+      },
+      {
         name: 'inbox',
         method: 'GET',
         url: `${base}/v1/{project}/inbox?agent={handle}`,

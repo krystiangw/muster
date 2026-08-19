@@ -13,6 +13,7 @@ import {
   ServiceError,
   looksLikeEmail,
   authenticate,
+  acknowledgeEscalation,
   claimItem,
   heartbeatClaim,
   createEscalation,
@@ -114,6 +115,17 @@ interface ToolDefinition {
   description: string;
   inputSchema: Record<string, unknown>;
   requiresProject: boolean;
+  /**
+   * Which of the two published budgets a call spends.
+   *
+   * Not derivable from `readOnlyHint`, which answers a different question: a
+   * tool that writes on one branch is annotated for the branch that writes, so
+   * a client never auto-approves it, while the budget should follow the branch
+   * actually taken. Required rather than defaulted, because the list this
+   * replaced was a set of names kept by hand next to the tools, and a tool
+   * added without a line there was charged as a read for ever.
+   */
+  charges: 'read' | 'write';
   annotations: ToolAnnotations;
 }
 
@@ -178,6 +190,7 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: false,
+    charges: 'write',
     // A second call with the same name is a second project: nothing about the name
     // addresses anything. Open world because owner_email mails a person.
     annotations: {
@@ -202,6 +215,7 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    charges: 'write',
     // The handle is the key, but registering again writes a new lastSeenAt and
     // replaces the scope somebody else may have declared under that handle.
     annotations: {
@@ -270,6 +284,7 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    charges: 'write',
     // Idempotent on the card, not on the call: a note or a status change writes a
     // timeline entry every time. Destructive because an existing slug can have its
     // title, body, owner and labels replaced, or be closed outright.
@@ -295,6 +310,7 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    charges: 'write',
     // Claiming again extends the lease, which is a different expiry and so a different state.
     annotations: {
       readOnlyHint: false,
@@ -318,6 +334,7 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    charges: 'write',
     // A later expiry is a different state, so calling it again does something.
     annotations: {
       readOnlyHint: false,
@@ -341,6 +358,7 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    charges: 'write',
     // Not destructive: it gives up the caller's own lease and takes nothing
     // away from the record. Idempotent for the same reason the HTTP call is,
     // which is deliberate: releasing what nobody holds is what the caller
@@ -368,6 +386,7 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    charges: 'write',
     // Appending is the point.
     annotations: {
       readOnlyHint: false,
@@ -394,6 +413,7 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    charges: 'read',
     // Annotated for the branch that writes: with claim it takes a lease, and a client cannot tell which branch it gets before it calls.
     annotations: {
       readOnlyHint: false,
@@ -445,6 +465,7 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    charges: 'read',
     // Not read-only, and the reason is worth stating rather than hiding: a read
     // clears leases that have already lapsed, because a lapsed lease is free work
     // and nothing else would tell a poller so. It cannot close, drop or mark
@@ -470,6 +491,7 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    charges: 'write',
     // Closes items whose signal has been absent long enough, which is somebody else's work being ended.
     annotations: {
       readOnlyHint: false,
@@ -495,12 +517,38 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    charges: 'write',
     // Files a question and mails the operator, so a retry is a second question in a human's queue and a second mail.
     annotations: {
       readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: false,
       openWorldHint: true,
+    },
+  },
+  {
+    name: 'acknowledge',
+    title: 'Say you have acted on an answer',
+    description:
+      'Clear an answered question out of your inbox once you have done what it says. Until you do, inbox keeps handing it back, and a second agent has no way of telling that somebody already acted on it.',
+    inputSchema: {
+      type: 'object',
+      required: ['id', 'agent'],
+      properties: {
+        id: { type: 'string' },
+        agent: { type: 'string' },
+        note: { type: 'string' },
+      },
+    },
+    requiresProject: true,
+    charges: 'write',
+    // Once. The second caller is refused by name, which is the point: two
+    // agents acting on one answer is the thing this stops.
+    annotations: {
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
     },
   },
   {
@@ -524,6 +572,7 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    charges: 'read',
     // Not read-only, and the reason is worth stating rather than hiding: a read
     // clears leases that have already lapsed, because a lapsed lease is free work
     // and nothing else would tell a poller so. It cannot close, drop or mark
@@ -551,6 +600,7 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    charges: 'write',
     // A column can carry a terminal status, release somebody's claim or replace an
     // owner, and the note lands on the timeline each time.
     annotations: {
@@ -575,6 +625,7 @@ const TOOLS: ToolDefinition[] = [
       },
     },
     requiresProject: true,
+    charges: 'write',
     // Ownership has no way back, and it mails an address you name.
     annotations: {
       readOnlyHint: false,
@@ -593,6 +644,7 @@ const TOOLS: ToolDefinition[] = [
       properties: { agent: { type: 'string' } },
     },
     requiresProject: true,
+    charges: 'read',
     annotations: {
       readOnlyHint: true,
       destructiveHint: false,
@@ -896,21 +948,15 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
     // two doors publish the same limit and enforce different things. Charged
     // before the lookup, so an invalid token cannot spend a database query per
     // batch member either.
-    const writes = new Set([
-      'register_agent',
-      'upsert_item',
-      'claim_item',
-      'append_note',
-      'observe',
-      'escalate',
-      'move',
-      'share_project',
-    ]);
     // Asking what is next is a read; asking for it and taking it writes a
     // lease and a timeline entry, and charging that against the read budget
-    // published five times the writes an agent is allowed.
+    // published five times the writes an agent is allowed. Every other tool
+    // says which budget it spends on its own definition, because the list that
+    // used to live here was a set of names beside the tools rather than on
+    // them, and a tool added without a line in it was charged as a read for
+    // ever. Two of them were, the day they were added.
     const kind =
-      writes.has(tool.name) || (tool.name === 'next_item' && args.claim === true) ? 'w' : 'r';
+      tool.charges === 'write' || (tool.name === 'next_item' && args.claim === true) ? 'w' : 'r';
     const verdict = limiter.check(
       `tok:${hashToken(token).slice(0, 16)}:${kind}`,
       kind === 'w' ? config.rateLimits.write : config.rateLimits.read,
@@ -1111,6 +1157,13 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
             ? 'Keep working on something else and read the inbox on your next iteration.'
             : 'Nobody has claimed this board, so no message was sent to anybody. Hand it to a person with share_project, or send them the read link yourself, then read the inbox on your next iteration.',
         };
+      }
+      case 'acknowledge': {
+        const doc = await acknowledgeEscalation(store, project, str(args.id), {
+          agent: text(args.agent, 'agent') || actor,
+          ...(text(args.note, 'note') ? { note: str(args.note) } : {}),
+        });
+        return { escalation: escalationJson(doc) };
       }
       case 'board': {
         void maybeExpireClaims(store, project).catch(() => undefined);

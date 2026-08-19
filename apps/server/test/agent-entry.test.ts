@@ -1019,6 +1019,89 @@ describe('the MCP surface', () => {
     const offered = await call('next_item', { agent: 'other-loop' }, token);
     assert.equal(offered.structuredContent.item.slug, 'ops:cutover');
   });
+
+  it('drains the inbox it hands out, rather than repeating it for ever', async () => {
+    // inbox returns answers nobody has acted on. Without acknowledge on this
+    // door there was no way to say you had, so the same answer came back every
+    // iteration and two agents could act on one decision without either
+    // knowing.
+    let id = 200;
+    const call = async (name: string, args: Record<string, unknown>, token?: string) => {
+      const answer = await harness.server.inject({
+        method: 'POST',
+        url: '/mcp',
+        ...(token ? { headers: { authorization: `Bearer ${token}` } } : {}),
+        payload: { jsonrpc: '2.0', id: (id += 1), method: 'tools/call', params: { name, arguments: args } },
+      });
+      return answer.json().result;
+    };
+
+    const project = (await call('create_project', { name: 'inbox-drain' })).structuredContent;
+    const token = project.token as string;
+    const asked = await call('escalate', { question: 'Bridge it or wait?', agent: 'mcp-agent' }, token);
+    const question = asked.structuredContent.escalation.id as string;
+
+    // The operator's half, which has no tool on this door and should not.
+    const { answerEscalation } = await import('../src/service.js');
+    await answerEscalation(harness.store, project.project, question, 'answered', 'bridge it', 'http');
+
+    const waiting = await call('inbox', { agent: 'mcp-agent' }, token);
+    assert.equal(waiting.structuredContent.answers.length, 1);
+
+    const acked = await call(
+      'acknowledge',
+      { id: question, agent: 'mcp-agent', note: 'bridged it' },
+      token,
+    );
+    assert.equal(acked.structuredContent.escalation.acted_by, 'mcp-agent');
+
+    const drained = await call('inbox', { agent: 'mcp-agent' }, token);
+    assert.equal(drained.structuredContent.answers.length, 0);
+
+    // Two agents acting on one decision is the case this refuses by name.
+    const second = await call('acknowledge', { id: question, agent: 'other-loop' }, token);
+    assert.equal(second.isError, true);
+  });
+
+  it('charges a tool that writes against the write budget', async () => {
+    // The two budgets are published apart and a batch is many calls in one
+    // request, so this door counts per call. Which bucket was a set of names
+    // kept beside the tools: heartbeat, release and acknowledge all write, and
+    // all three were charged as reads on the day they were added, at five
+    // times the writes an agent is allowed.
+    const strict = await startHarness({ LIMIT_WRITES_PER_MINUTE: '1', LIMIT_READS_PER_MINUTE: '500' });
+    try {
+      const project = await createProject(strict, 'budgets');
+      const call = async (name: string, args: Record<string, unknown>) =>
+        strict.server.inject({
+          method: 'POST',
+          url: '/mcp',
+          headers: { authorization: `Bearer ${project.token}` },
+          payload: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } },
+        });
+
+      // One write is allowed, and it is the claim's own setup.
+      await call('upsert_item', { slug: 'ops:cutover', title: 'Cut traffic over', actor: 'a' });
+      for (const [name, args] of [
+        ['heartbeat', { slug: 'ops:cutover', agent: 'a' }],
+        ['release', { slug: 'ops:cutover', agent: 'a' }],
+        ['acknowledge', { id: 'e_nothing', agent: 'a' }],
+      ] as Array<[string, Record<string, unknown>]>) {
+        const answer = await call(name, args);
+        assert.match(
+          JSON.stringify(answer.json()),
+          /rate_limited/,
+          `${name} was not charged as a write: ${answer.body.slice(0, 200)}`,
+        );
+      }
+
+      // And a read still goes through on its own budget.
+      const read = await call('board', {});
+      assert.doesNotMatch(JSON.stringify(read.json()), /rate_limited/);
+    } finally {
+      await strict.stop();
+    }
+  });
 });
 
 describe('the human read view', () => {
