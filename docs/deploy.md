@@ -110,7 +110,7 @@ rather than from a list somebody has to remember to extend, so a collection
 added tomorrow is in tomorrow's archive without anybody touching this file.
 
 Seeing what the watchdog does on a bad night is the one thing you cannot try,
-because trying it is the thing it does: `node tools/watchdog.mjs --dry-run` runs
+because trying it is the thing it does: `node apps/server/tools/watchdog.mjs --dry-run` runs
 every check against the real deployment and prints what it would have filed and
 mailed, writing nothing and sending nothing, not even its own state file. It
 rehearses from wherever the counters already are, since a run that wrote them

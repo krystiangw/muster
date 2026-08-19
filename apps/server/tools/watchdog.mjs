@@ -286,7 +286,7 @@ const now = new Date().toISOString();
 const alertKey = process.env.MUSTER_RESEND_KEY || read(join(HOME, 'resend.key'));
 
 async function mail(subject, lines) {
-  if (dryRun) return `dry run, would have mailed "${subject}"`;
+  if (dryRun) return `would have mailed "${subject}"`;
   const key = alertKey;
   if (!key) return 'no key';
   const response = await fetch('https://api.resend.com/emails', {
@@ -308,7 +308,11 @@ async function mail(subject, lines) {
 
 /** Best effort, and never allowed to break the round. */
 async function fileOnTheBoard(question, context) {
-  if (dryRun) return `dry run, would have filed "${question.slice(0, 60)}"`;
+  // 'filed', not a sentence saying so: every caller mails only when this did
+  // not work, so a rehearsal that returned anything else would walk down the
+  // fallback branch and claim it would send mail that a real round never sends.
+  // The marker on every line is what says this did not happen.
+  if (dryRun) return 'filed';
   try {
     const response = await fetch(`${base}/v1/${projectId}/escalations`, {
       method: 'POST',
@@ -353,7 +357,7 @@ let backupsStale = false;
 let said = false;
 const say = (line) => {
   said = true;
-  console.log(line);
+  console.log(dryRun ? `[rehearsal, nothing sent] ${line}` : line);
 };
 
 if (broken.length === 0) {

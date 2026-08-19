@@ -267,8 +267,14 @@ describe('the watchdog, watched', () => {
     writeFileSync(join(home, 'watchdog.state.json'), before);
 
     const out = await rehearsal();
-    assert.match(out, /dry run, would have mailed/);
-    assert.match(out, /dry run, would have filed/);
+    // Every line marked, and the control flow the same as a real round: the
+    // outage branch mails unconditionally, so that one shows; the branches that
+    // file first do not, because a real round would not have mailed either.
+    for (const line of out.trim().split('\n')) {
+      assert.match(line, /^\[rehearsal, nothing sent\] /, line);
+    }
+    assert.match(out, /would have mailed/);
+    assert.doesNotMatch(out, /Muster stopped backing up/);
     // Unchanged to the byte. The counters decide whether the next real round
     // alerts, so a rehearsal that moved them would change the thing it was
     // rehearsing.
