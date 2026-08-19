@@ -1434,7 +1434,11 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           store,
           project,
           str(args.id),
-          { agent: who, reason: str(args.reason) },
+          // The raw handle, not the trimmed one this door checked for
+          // emptiness. Rows written before handles were normalised hold
+          // whatever arrived, and the service looks for both shapes: trimming
+          // here collapsed the two and stranded exactly those rows.
+          { agent: str(args.agent), reason: str(args.reason) },
           'mcp',
         );
         return { escalation: escalationJson(doc) };

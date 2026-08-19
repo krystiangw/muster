@@ -1150,6 +1150,48 @@ describe('what taking a question back must not do', () => {
     );
   });
 
+  it('measures a handle the way the door beside it measures one', async () => {
+    // The HTTP schema publishes the same limit and JSON Schema counts
+    // characters. Counting UTF-16 units instead would refuse a handle of
+    // twenty five emoji that the schema had just let through, and the caller
+    // would read two different limits from two places that claim one.
+    const project = await createProject(harness);
+    const emoji = '\u{1F9ED}'.repeat(25);
+    assert.ok(emoji.length > 48 && Array.from(emoji).length <= 48, 'the fixture is the disagreement');
+    const asked = await post(project, '/escalations', {
+      agent: emoji,
+      question: 'asked under a handle of emoji',
+      context: 'x',
+    });
+    assert.equal(asked.statusCode, 201, asked.body);
+    assert.equal(asked.json().escalation.agent, emoji);
+  });
+
+  it('lets a handle written before any of this still take its question back', async () => {
+    // Rows from before handles were trimmed hold whatever arrived. The service
+    // looks for both shapes; the MCP door used to trim the handle away before
+    // the service could, which stranded exactly those rows.
+    const project = await createProject(harness);
+    const id = await raise(project, 'errors-loop', 'stored the old way');
+    await harness.store.escalations.updateOne({ _id: id }, { $set: { agent: '  errors-loop  ' } });
+
+    const taken = await harness.server.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: { ...authed(project), 'content-type': 'application/json' },
+      payload: {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'withdraw',
+          arguments: { id, agent: '  errors-loop  ', reason: 'the shape it was stored in' },
+        },
+      },
+    });
+    assert.match(JSON.stringify(taken.json().result), /wont_do/, JSON.stringify(taken.json().result).slice(0, 200));
+  });
+
   it('finds what it asked, under the handle it asked with', async () => {
     // Every handle ingress normalises the same way, or a padded handle asks
     // successfully and then reads back an empty inbox, which looks exactly

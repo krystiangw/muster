@@ -3026,7 +3026,11 @@ function askingHandle(agent: string): string {
   if (!handle) {
     throw new ServiceError(400, 'bad_agent', 'A question is asked by somebody, so "agent" cannot be blank.');
   }
-  if (handle.length > HANDLE_MAX) {
+  // Code points, not UTF-16 units, because the HTTP schema publishes this same
+  // limit and JSON Schema counts characters the way a person does. Counting
+  // units here would refuse a handle of twenty five emoji that the door beside
+  // this one had just accepted.
+  if (Array.from(handle).length > HANDLE_MAX) {
     throw new ServiceError(
       400,
       'bad_agent',
