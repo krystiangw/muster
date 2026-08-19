@@ -1372,6 +1372,67 @@ describe('asking what changed', () => {
   });
 });
 
+describe('a lease that has run out', () => {
+  it('is not described as held, on any door, before a sweep runs', async () => {
+    // The board asks `expiresAt > now` and so does the query behind `claimed`,
+    // so everything that decides has always treated a lapsed lease as free.
+    // The serializer did not, so one answer could filter a card out as free and
+    // describe it as held in the same breath, and reading that card on its own
+    // said held until hygiene happened to run. Sweeping before the read does
+    // not fix that: the sweep is fire and forget and throttled.
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'lapsing', title: 'a card with a short lease' });
+    await post(project, '/items/lapsing/claim', { agent: 'gone-away', ttl_minutes: 1 });
+
+    // Push the lease into the past without touching anything else, which is
+    // what a crashed agent leaves behind.
+    await harness.store.items.updateOne(
+      { projectId: project.id, slug: 'lapsing' },
+      { $set: { 'claim.expiresAt': new Date(Date.now() - 60_000) } },
+    );
+
+    const read = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/items/lapsing`,
+      headers: authed(project),
+    });
+    assert.equal(read.json().item.claim, null, 'reading the card on its own');
+
+    const listed = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/items`,
+      headers: authed(project),
+    });
+    const inList = (listed.json().items as { slug: string; claim: unknown }[]).find(
+      (item) => item.slug === 'lapsing',
+    );
+    assert.equal(inList?.claim, null, 'and in the list beside it');
+
+    // And the same card over MCP, which is where this started.
+    const overMcp = await harness.server.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: { authorization: `Bearer ${project.token}` },
+      payload: {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'read_item', arguments: { slug: 'lapsing' } },
+      },
+    });
+    assert.equal(overMcp.json().result.structuredContent.item.claim, null);
+
+    // A lease that has not run out is still a lease.
+    await post(project, '/items/lapsing/claim', { agent: 'still-here', ttl_minutes: 60 });
+    const held = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/items/lapsing`,
+      headers: authed(project),
+    });
+    assert.equal(held.json().item.claim?.agent, 'still-here');
+  });
+});
+
 describe('the map every refusal points at', () => {
   /**
    * Each refusal carries `"docs": ".../openapi.json"`, so a caller that reads

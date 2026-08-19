@@ -38,13 +38,23 @@ export function itemJson(item: ItemDoc, includeTimeline = false): Record<string,
     // Who touched it last. On a board with six agents this is the difference
     // between a queue of work and a queue of anonymous work.
     last_actor: item.lastActor ?? null,
-    claim: item.claim
-      ? {
-          agent: item.claim.agent,
-          expires_at: item.claim.expiresAt,
-          heartbeat_at: item.claim.heartbeatAt,
-        }
-      : null,
+    // A lease that has run out is not a lease, and the answer says so the
+    // moment it is true rather than the moment hygiene gets round to it.
+    // Everything that decides works this way already: the board asks
+    // `expiresAt > now`, and so does the query behind `claimed`. Only the
+    // serializer did not, so one answer could filter a card out as free and
+    // describe it as held in the same breath, and reading that card on its own
+    // said held until a sweep happened to run. Sweeping first does not fix it:
+    // the sweep is fire and forget and throttled, so the read it precedes can
+    // still be the one that lands early.
+    claim:
+      item.claim && item.claim.expiresAt > new Date()
+        ? {
+            agent: item.claim.agent,
+            expires_at: item.claim.expiresAt,
+            heartbeat_at: item.claim.heartbeatAt,
+          }
+        : null,
     absence: item.absence?.count ? { count: item.absence.count, since: item.absence.since } : null,
     created_at: item.createdAt,
     updated_at: item.updatedAt,
