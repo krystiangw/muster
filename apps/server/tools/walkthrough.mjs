@@ -430,15 +430,22 @@ const run = async () => {
   // nothing that would say what.
   const history = await lease('read_item', { slug: `${SLUG}-mcp` });
   const card = history.result?.structuredContent?.item;
+  // Normalised once, because the shape this is here to catch is the shape that
+  // breaks a check written against the shape it expects. A timeline that came
+  // back as an object, or an array with a hole in it, would throw inside
+  // `.some` and the run would end on "could not finish" instead of naming the
+  // contract that failed, which is the one thing a nightly check must not do.
+  const entries = Array.isArray(card?.timeline) ? card.timeline : [];
   check(
     'a card hands over its history and not just a count of it',
-    Array.isArray(card?.timeline) && card.timeline.length > 0,
-    JSON.stringify(Object.keys(card ?? {})),
+    entries.length > 0,
+    JSON.stringify({ keys: Object.keys(card ?? {}), timeline: typeof card?.timeline }),
   );
+  const notes = entries.map((entry) => String(entry?.message ?? ''));
   check(
     'and the notes it carries are the words somebody wrote',
-    (card?.timeline ?? []).some((entry) => String(entry.message ?? '').includes('walkthrough')),
-    JSON.stringify((card?.timeline ?? []).map((entry) => entry.message)).slice(0, 160),
+    notes.some((message) => message.includes('walkthrough')),
+    JSON.stringify(notes).slice(0, 160),
   );
 
   // Not the lapse. A lease is over the moment it runs out rather than the
