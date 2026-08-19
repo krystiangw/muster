@@ -1429,6 +1429,85 @@ describe('a parameter this door does not have', () => {
     assert.ok(!elsewhere.json().message.includes('The ordering is order'));
   });
 
+  it('says where the name belongs when it is the body it belongs in', async () => {
+    // Found by using the thing: `POST /next?agent=claude-code` was answered
+    // "this endpoint has no agent parameter (...) this one takes none at all",
+    // and `agent` is the single field its body requires. GET on that same URL
+    // takes it in the query string exactly as sent, so the two verbs disagree
+    // about where the word lives and only one of them was saying so.
+    const project = await createProject(harness);
+
+    const misplaced = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/next?agent=claude-code`,
+      headers: authed(project),
+      payload: { agent: 'claude-code' },
+    });
+    assert.equal(misplaced.statusCode, 400);
+    assert.equal(misplaced.json().error, 'unknown_parameter');
+    assert.match(misplaced.json().message, /"agent" is a field of this endpoint's JSON body/);
+    assert.match(misplaced.json().message, /send it in the body/);
+    assert.deepEqual(misplaced.json().belongs_in_body, ['agent']);
+    assert.deepEqual(misplaced.json().accepted_in_body, ['agent', 'ttl_minutes']);
+    assert.ok(
+      !misplaced.json().message.includes('takes none at all'),
+      'and no longer says the endpoint takes nothing, while requiring exactly this',
+    );
+
+    // Following the sentence works, which is the whole point of printing it.
+    const followed = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/next`,
+      headers: authed(project),
+      payload: { agent: 'claude-code' },
+    });
+    assert.equal(followed.statusCode, 200);
+
+    // A name that is in neither place is still nowhere, and is told so.
+    const nowhere = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/next?zupelnie_wymyslony=tak`,
+      headers: authed(project),
+      payload: { agent: 'claude-code' },
+    });
+    assert.equal(nowhere.statusCode, 400);
+    assert.equal(nowhere.json().belongs_in_body, undefined);
+    assert.match(
+      nowhere.json().message,
+      /reads no query string at all; what it takes goes in the body: agent, ttl_minutes/,
+    );
+  });
+
+  it('guards the signup door too, where the silence cost most', async () => {
+    // `POST /p?owner_email=me@example.com` answered 200 and dropped the field
+    // on the floor: a project nobody owns, no mail on its escalations, and no
+    // way for a person to claim it. Signup is the first door an agent touches
+    // and it was the last one outside the guard.
+    const before = await harness.store.projects.countDocuments({});
+
+    const dropped = await harness.server.inject({
+      method: 'POST',
+      url: '/p?owner_email=nobody@example.com',
+      payload: { name: 'a project with an owner it would never have had' },
+    });
+    assert.equal(dropped.statusCode, 400);
+    assert.equal(dropped.json().error, 'unknown_parameter');
+    assert.match(dropped.json().message, /"owner_email" is a field of this endpoint's JSON body/);
+    assert.equal(
+      await harness.store.projects.countDocuments({}),
+      before,
+      'and nothing was created while the caller thought it had been',
+    );
+
+    // The same door, used correctly, is untouched.
+    const proper = await harness.server.inject({
+      method: 'POST',
+      url: '/p',
+      payload: { name: 'a project with an owner', owner_email: 'somebody@example.com' },
+    });
+    assert.equal(proper.statusCode, 201);
+  });
+
   it('leaves the pages a browser reads alone', async () => {
     // A board link somebody pasted with a tracking parameter on the end is not
     // a request to explain ourselves.

@@ -157,6 +157,94 @@ const INSTEAD: Record<string, { use: string; say: string }> = {
   updated_since: { use: 'since', say: 'The change window is since, and it takes the as_of from your previous read.' },
 };
 
+/**
+ * A parameter this door does not have is a question, not a comment.
+ *
+ * The framework drops what a route did not declare, so `?offset=999` came
+ * back 200 with the first page and no offset, while `?cursor=nonsense` came
+ * back 400 saying exactly what was wrong. A broken known parameter was
+ * treated better than an invented one, and the invented one people reach
+ * for first is `offset`: two agents have now guessed it, and one of them
+ * had lost hours to the same silence on another service.
+ *
+ * Every door an agent writes through is checked, signup included, and none of
+ * the pages a browser reads: a board link somebody pasted with a tracking
+ * parameter on the end is not a request to explain ourselves. Signup was
+ * outside for longer than the rest, and it is the one door where the silence
+ * costs most: `POST /p?owner_email=me@example.com` answered 200 with a project
+ * nobody owns, no mail on its escalations and no way for a person to claim it,
+ * because the field the whole thing turns on had been dropped on the floor.
+ */
+async function refuseUnknownQuery(request: FastifyRequest): Promise<void> {
+  const schema = (
+    request.routeOptions as {
+      schema?: {
+        querystring?: { properties?: Record<string, unknown> };
+        body?: { properties?: Record<string, unknown> };
+      };
+    }
+  ).schema;
+  // A route that declares no querystring accepts none, and says so, rather
+  // than being the one door left where a parameter disappears quietly.
+  const known = schema?.querystring?.properties
+    ? Object.keys(schema.querystring.properties)
+    : [];
+  const unknown = Object.keys((request.query ?? {}) as Record<string, unknown>).filter(
+    (name) => !known.includes(name),
+  );
+  if (unknown.length === 0) return;
+  // Only what this endpoint could actually take. Telling somebody to use
+  // `order` on a door that has no `order` is a second 400 dressed up as
+  // help.
+  const hints = [
+    ...new Set(
+      unknown
+        .map((name) => INSTEAD[name])
+        .filter((hint): hint is { use: string; say: string } => !!hint && known.includes(hint.use))
+        .map((hint) => hint.say),
+    ),
+  ];
+  // The right name, one layer out. `POST /next?agent=me` was answered "this
+  // endpoint has no agent parameter, this one takes none at all", while
+  // `agent` is the one field its body requires, and `GET` on that same URL
+  // takes it in the query string exactly as sent. Every write here declares
+  // a body and no querystring, so the closing sentence was true of the query
+  // string and false of the endpoint, and it sent an agent holding the right
+  // word away to look for it. The route declares where the word goes; the
+  // refusal is standing next to that declaration and can read it.
+  const fields = schema?.body?.properties ? Object.keys(schema.body.properties) : [];
+  const misplaced = unknown.filter((name) => fields.includes(name));
+  throw new ServiceError(
+    400,
+    'unknown_parameter',
+    `This endpoint has no ${unknown.map((name) => `"${name}"`).join(', ')}${
+      unknown.length === 1 ? ' parameter' : ' parameters'
+    }, and ignoring what you sent would answer 200 to a question nobody asked.${
+      hints.length > 0 ? ` ${hints.join(' ')}` : ''
+    }${
+      misplaced.length > 0
+        ? ` ${misplaced.map((name) => `"${name}"`).join(', ')} ${
+            misplaced.length === 1 ? 'is a field of this' : 'are fields of this'
+          } endpoint's JSON body, not of its query string: send ${
+            misplaced.length === 1 ? 'it' : 'them'
+          } in the body.`
+        : ''
+    } ${
+      known.length > 0
+        ? `What this one takes: ${known.join(', ')}.`
+        : fields.length > 0
+          ? `This one reads no query string at all; what it takes goes in the body: ${fields.join(', ')}.`
+          : 'This one takes none at all.'
+    }`,
+    {
+      unknown,
+      accepted: known,
+      ...(fields.length > 0 ? { accepted_in_body: fields } : {}),
+      ...(misplaced.length > 0 ? { belongs_in_body: misplaced } : {}),
+    },
+  );
+}
+
 export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
   const { store, config, limiter, mailer, notifier } = deps;
 
@@ -165,6 +253,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
   app.post(
     '/p',
     {
+      preValidation: refuseUnknownQuery,
       schema: {
         summary: 'Create a project',
         description:
@@ -310,6 +399,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
   app.post(
     '/feedback',
     {
+      preValidation: refuseUnknownQuery,
       schema: {
         tags: ['projects'],
         summary: 'Report something about this service, without an account',
@@ -414,56 +504,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
   // ------------------------------------------------------- authenticated v1
 
   app.register(async (scoped) => {
-    /**
-     * A parameter this door does not have is a question, not a comment.
-     *
-     * The framework drops what a route did not declare, so `?offset=999` came
-     * back 200 with the first page and no offset, while `?cursor=nonsense` came
-     * back 400 saying exactly what was wrong. A broken known parameter was
-     * treated better than an invented one, and the invented one people reach
-     * for first is `offset`: two agents have now guessed it, and one of them
-     * had lost hours to the same silence on another service.
-     *
-     * Only routes that declare their querystring are checked, which is every
-     * route here that takes one and nothing on the pages a browser reads: a
-     * board link somebody pasted with a tracking parameter on the end is not a
-     * request to explain ourselves.
-     */
-    scoped.addHook('preValidation', async (request) => {
-      const declared = (
-        request.routeOptions as {
-          schema?: { querystring?: { properties?: Record<string, unknown> } };
-        }
-      ).schema?.querystring?.properties;
-      // A route that declares no querystring accepts none, and says so, rather
-      // than being the one door left where a parameter disappears quietly.
-      const known = declared ? Object.keys(declared) : [];
-      const unknown = Object.keys((request.query ?? {}) as Record<string, unknown>).filter(
-        (name) => !known.includes(name),
-      );
-      if (unknown.length === 0) return;
-      // Only what this endpoint could actually take. Telling somebody to use
-      // `order` on a door that has no `order` is a second 400 dressed up as
-      // help.
-      const hints = [
-        ...new Set(
-          unknown
-            .map((name) => INSTEAD[name])
-            .filter((hint): hint is { use: string; say: string } => !!hint && known.includes(hint.use))
-            .map((hint) => hint.say),
-        ),
-      ];
-      throw new ServiceError(
-        400,
-        'unknown_parameter',
-        `This endpoint has no ${unknown.map((name) => `"${name}"`).join(', ')}${
-          unknown.length === 1 ? ' parameter' : ' parameters'
-        }, and ignoring what you sent would answer 200 to a question nobody asked.${
-          hints.length > 0 ? ` ${hints.join(' ')}` : ''
-        } ${known.length > 0 ? `What this one takes: ${known.join(', ')}.` : 'This one takes none at all.'}`,
-        { unknown, accepted: known },
-      );
-    });
+    scoped.addHook('preValidation', refuseUnknownQuery);
 
     scoped.addHook('preHandler', async (request, reply) => {
       const header = request.headers.authorization;
