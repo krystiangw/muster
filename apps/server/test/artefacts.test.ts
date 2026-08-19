@@ -76,20 +76,34 @@ describe('what we publish about ourselves', () => {
     assert.deepEqual(nowhere, [], `the map names addresses this service does not answer:\n${nowhere.join('\n')}`);
   });
 
-  it('offers through the published client everything the document offers', () => {
-    // The client is released separately from the service, so a call added
-    // after its last version is a call its users cannot make. Seven methods
-    // were added by hand in one sitting for exactly this reason.
+  it('has a client method for every operation the document names', () => {
+    // What this guards, exactly: the client's source keeps up with the
+    // routes. It does not guard that the version on npm does, because that
+    // needs the registry and the suite does not reach the network; the check
+    // which installs `musterboard` and drives production through it is
+    // `tools/smoke-sdk.mjs`, run by hand. Saying which of the two this is
+    // matters, because the drift they catch is not the same drift.
+    //
+    // By method and path, not by path. Adding a verb to a route the client
+    // already touches for another verb is the ordinary way a call becomes
+    // unreachable through it, and comparing paths alone cannot see that: the
+    // first version of this compared paths and skipped the project root
+    // outright, which hid two operations.
     const sdk = readFileSync(`${ROOT}/packages/sdk/src/index.ts`, 'utf8');
-    const built = new Set(
-      [...sdk.matchAll(/['"`](\/[A-Za-z0-9/_${}().-]*)['"`]/g)].map((m) => shape(m[1]!)),
+    const reachable = new Set(
+      [...sdk.matchAll(/this\.request(?:<[^>]*>)?\(\s*'([A-Z]+)',\s*[`']([^`']*)[`']/g)].map(
+        (m) => `${m[1]} ${shape(m[2]!)}`,
+      ),
     );
+    assert.ok(reachable.size >= 20, `the client's calls were read: ${reachable.size}`);
+
     const missing: string[] = [];
-    for (const path of Object.keys(openapi.paths as object)) {
+    for (const [path, methods] of Object.entries(openapi.paths as Record<string, object>)) {
       if (!path.startsWith('/v1/{project}')) continue;
       const tail = shape(path.slice('/v1/{project}'.length));
-      if (tail === '/') continue;
-      if (![...built].some((one) => one === tail || one.endsWith(tail))) missing.push(path);
+      for (const method of Object.keys(methods)) {
+        if (!reachable.has(`${method.toUpperCase()} ${tail}`)) missing.push(`${method.toUpperCase()} ${path}`);
+      }
     }
     assert.deepEqual(missing, [], `the client cannot reach:\n${missing.join('\n')}`);
   });
