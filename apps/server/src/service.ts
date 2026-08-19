@@ -426,7 +426,11 @@ export async function shareProject(
     createdAt: now,
     // An offer nobody accepted is not worth keeping around for ever.
     expiresAt: new Date(now.getTime() + 30 * 86_400_000),
-    // Filled in by the notifier if the message lands, and only then.
+    // Filled in by the notifier if the message lands, and only then. Never
+    // cleared afterwards: it records that this address has been told about
+    // this board, which is the fact the inbox needs, and not which attempt
+    // did the telling. Clearing it on a repeat made the two questions one and
+    // put a race between overlapping sends in the middle of it.
     notifiedAt: null,
   };
 
@@ -447,10 +451,7 @@ export async function shareProject(
         email: share.email,
         createdAt: share.createdAt,
       },
-      // Cleared on every offer, including a repeat: the question this answers
-      // is whether the message that just went out arrived, not whether one
-      // ever did.
-      $unset: { notifiedAt: '' },
+
     },
     { upsert: true, returnDocument: 'after' },
   );

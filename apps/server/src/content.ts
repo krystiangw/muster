@@ -93,8 +93,9 @@ export function nobodyIsListening(waiting: number, shareWith: string, offered = 
   if (offered) {
     return (
       `${subject} waiting on a board that has been offered to somebody and not accepted yet, so ` +
-      'nothing has been sent about them. Do not offer it again: wait for the address it went to, ' +
-      'or send them the read link yourself.'
+      'nothing has been sent about them. Offering it to the same address again only sends another ' +
+      'copy of what they already have; if you meant somebody else, offer it to them, and otherwise ' +
+      'wait or send the read link yourself.'
     );
   }
   return (

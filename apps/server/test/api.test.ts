@@ -1944,8 +1944,21 @@ describe('a question filed on a board nobody owns', () => {
     );
     const offered = await inboxNow();
     assert.match(offered, /not accepted yet/);
-    assert.match(offered, /Do not offer it again/);
+    assert.match(offered, /another copy of what they already have/);
     assert.doesNotMatch(offered, /nobody is coming/);
+
+    // And an address that was told stays told. The stamp says this address
+    // has heard about this board, not which attempt did the telling: a repeat
+    // offer that the provider drops does not un-tell the person who already
+    // has the mail, and reading it the other way put a race between two
+    // overlapping sends in the middle of a sentence about somebody's inbox.
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/share`,
+      headers: authed(project),
+      payload: { email: 'human@example.com' },
+    });
+    assert.match(await inboxNow(), /not accepted yet/);
 
     // Claimed, and neither hint applies: somebody will be told.
     await harness.store.projects.updateOne(
