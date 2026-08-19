@@ -2155,6 +2155,8 @@ export interface ListItemsQuery {
   owner?: string;
   label?: string;
   source?: string;
+  /** Slug starts with this, anchored, so the unique index on the slug does the work. */
+  prefix?: string;
   stale?: boolean;
   claimed?: boolean;
   limit?: number;
@@ -2244,6 +2246,10 @@ async function listItems(
   if (query.owner) filter.owner = query.owner;
   if (query.label) filter.labels = query.label;
   if (query.source) filter.source = query.source;
+  // Anchored, unlike `q`, which is a substring and scans. `^ops:` walks the
+  // unique index on {projectId, slug} instead, so narrowing to one area of a
+  // large board costs about what reading one card costs.
+  if (query.prefix) filter.slug = { $regex: `^${escapeRegex(query.prefix)}` };
   if (query.stale !== undefined) filter.stale = query.stale;
   // An expired claim is not a claim, the same reading the board takes: an item
   // whose lease lapsed is free work, and hygiene clearing the field is a tidy-up
@@ -2411,6 +2417,7 @@ export interface ReadItemsInput {
   owner?: string | undefined;
   label?: string | undefined;
   source?: string | undefined;
+  prefix?: string | undefined;
   stale?: boolean | undefined;
   claimed?: boolean | undefined;
   q?: string | undefined;
@@ -2496,6 +2503,7 @@ export async function readItems(
     ['owner', input.owner],
     ['label', input.label],
     ['source', input.source],
+    ['prefix', input.prefix],
     ['q', input.q],
   ] as const) {
     if (value !== undefined && typeof value !== 'string') {
@@ -2511,6 +2519,7 @@ export async function readItems(
     ...(input.owner === undefined ? {} : { owner: input.owner }),
     ...(input.label === undefined ? {} : { label: input.label }),
     ...(input.source === undefined ? {} : { source: input.source }),
+    ...(input.prefix === undefined ? {} : { prefix: input.prefix }),
     ...(input.stale === undefined ? {} : { stale: input.stale }),
     ...(input.claimed === undefined ? {} : { claimed: input.claimed }),
     ...(input.q ? { q: input.q } : {}),

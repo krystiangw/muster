@@ -1,6 +1,6 @@
 import type { Store } from './db.js';
 import { TIMELINE_KEEP } from './hygiene.js';
-import { normalizeSlug } from './ids.js';
+import { SLUG_MAX, normalizeSlug, slugNamespace } from './ids.js';
 import {
   SEARCH_BUDGET_MS,
   ServiceError,
@@ -115,6 +115,7 @@ export function itemMatches(item: ItemDoc, match: BoardMatch, now: Date): boolea
   if (match.source && match.source.length > 0) {
     if (item.source === null || !match.source.includes(item.source)) return false;
   }
+  if (match.slugPrefix !== undefined && !item.slug.startsWith(match.slugPrefix)) return false;
   if (match.priorityMin !== undefined && (item.priority ?? 0) < match.priorityMin) return false;
   if (match.withinDays !== undefined) {
     const since = now.getTime() - match.withinDays * 86_400_000;
@@ -141,6 +142,12 @@ function rowKeyFor(item: ItemDoc, rows: BoardConfig['rows']): { key: string; tit
   if (rows === 'label') {
     const label = (item.labels ?? [])[0];
     return label ? { key: label, title: label } : { key: '', title: 'no label' };
+  }
+  if (rows === 'prefix') {
+    const namespace = slugNamespace(item.slug);
+    return namespace
+      ? { key: namespace, title: namespace }
+      : { key: '', title: 'no namespace' };
   }
   return { key: '', title: '' };
 }
@@ -399,13 +406,19 @@ export interface BoardFacets {
   /** Every label on the work this board shows, so no filter comes back empty. */
   labels: string[];
   /**
+   * The namespaces already present in the slugs, which is the grouping agents
+   * produce on their own. Read it to find out what this board is divided into
+   * before narrowing to one part of it.
+   */
+  prefixes: string[];
+  /**
    * The slugs this board shows, for the one field where a person has to name
    * another card. Typing one from memory is how a board ends up waiting on a
    * slug that does not exist.
    */
   slugs: string[];
   /** Names left out for length. Zero on every project anybody actually has. */
-  omitted: { owners: number; agents: number; labels: number };
+  omitted: { owners: number; agents: number; labels: number; prefixes: number };
 }
 
 /**
@@ -453,9 +466,20 @@ export async function boardFacets(store: Store, project: ProjectDoc): Promise<Bo
     ...boardScope(boardConfigOf(project), new Date()),
   };
 
-  const [owners, labels, slugs, actors, holders, registered] = await Promise.all([
+  const [owners, labels, prefixes, slugs, actors, holders, registered] = await Promise.all([
     store.items.distinct('owner', scope),
     store.items.distinct('labels', scope),
+    // One group per namespace rather than one row per card: a board with two
+    // hundred slugs has a couple of dozen areas, and the answer this list gives
+    // is which areas exist, not which cards do.
+    store.items
+      .aggregate<{ _id: string }>([
+        { $match: { ...scope, slug: { $regex: ':' } } },
+        { $group: { _id: { $arrayElemAt: [{ $split: ['$slug', ':'] }, 0] } } },
+        { $sort: { _id: 1 } },
+        { $limit: FACET_LIMIT + 1 },
+      ])
+      .toArray(),
     // Open work only. A list to pick a prerequisite from is a list of things
     // that can still be finished, and offering a card that closed last March
     // as something to wait on is offering a card nobody will ever unblock.
@@ -500,15 +524,18 @@ export async function boardFacets(store: Store, project: ProjectDoc): Promise<Bo
     registered: false,
   }))];
 
+  const prefixNames = names(prefixes.map((row) => row._id));
   return {
     owners: ownerNames.slice(0, FACET_LIMIT),
     labels: names(labels).slice(0, FACET_LIMIT),
+    prefixes: prefixNames.slice(0, FACET_LIMIT),
     slugs: names(slugs.map((row) => row.slug)),
     agents: agents.slice(0, FACET_LIMIT),
     omitted: {
       owners: Math.max(0, ownerNames.length - FACET_LIMIT),
       agents: Math.max(0, agents.length - FACET_LIMIT),
       labels: Math.max(0, names(labels).length - FACET_LIMIT),
+      prefixes: Math.max(0, prefixNames.length - FACET_LIMIT),
     },
   };
 }
@@ -536,11 +563,14 @@ export async function boardFacets(store: Store, project: ProjectDoc): Promise<Bo
  * alphabetically first one and not the one that was added.
  */
 export function landingLane(
-  item: Pick<ItemDoc, 'owner' | 'labels'>,
+  item: Pick<ItemDoc, 'owner' | 'labels' | 'slug'>,
   column: BoardColumn,
   rows: BoardConfig['rows'],
 ): string {
   const apply = applyForColumn(column);
+  // No `apply` rewrites a slug, so a card moved across columns stays in the
+  // lane it was already in.
+  if (rows === 'prefix') return slugNamespace(item.slug) ?? '';
   if (rows === 'owner') {
     return apply.owner === undefined ? (item.owner ?? '') : (apply.owner ?? '');
   }
@@ -997,6 +1027,13 @@ function parseMatch(raw: unknown, columnKey: string): BoardMatch {
   if (owner) match.owner = owner;
   const sources = stringArray(source.source, 'source');
   if (sources) match.source = sources;
+  const slugPrefix = source.slug_prefix ?? source.slugPrefix;
+  if (slugPrefix !== undefined) {
+    if (typeof slugPrefix !== 'string' || slugPrefix.trim() === '') {
+      throw bad(`Column "${columnKey}" needs slug_prefix to be the start of a slug, as text.`);
+    }
+    match.slugPrefix = slugPrefix.trim().slice(0, SLUG_MAX);
+  }
 
   if (source.claimed !== undefined) {
     if (typeof source.claimed !== 'boolean') throw bad('claimed must be true or false.');
@@ -1177,8 +1214,8 @@ export function parseBoardConfig(raw: unknown): BoardConfig {
   });
 
   const rows = source.rows === undefined ? 'none' : source.rows;
-  if (rows !== 'none' && rows !== 'owner' && rows !== 'label') {
-    throw bad('rows is "none", "owner" or "label".');
+  if (rows !== 'none' && rows !== 'owner' && rows !== 'label' && rows !== 'prefix') {
+    throw bad('rows is "none", "owner", "label" or "prefix".');
   }
 
   return { columns, rows };

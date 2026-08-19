@@ -1356,6 +1356,31 @@ describe('the MCP surface', () => {
     await call('upsert_item', { slug: 'ops:why', title: 'a card with a history', actor: 'first' });
     await call('append_note', { slug: 'ops:why', message: 'the venue answered on the second try', actor: 'first' });
 
+    await call('upsert_item', { slug: 'build:pager', title: 'a card in another area', actor: 'first' });
+
+    // Both doors answer alike, which is the whole reason this read lives in the
+    // service: the namespace filter arrived on the HTTP door first, and the
+    // pair before it had already drifted apart twice.
+    const narrowed = await call('list_items', { prefix: 'ops:' });
+    assert.deepEqual(
+      narrowed.structuredContent.items.map((item: { slug: string }) => item.slug),
+      ['ops:why'],
+    );
+    const viaHttp = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/items?prefix=ops:`,
+      headers: { authorization: `Bearer ${project.token}` },
+    });
+    assert.deepEqual(
+      viaHttp.json().items.map((item: { slug: string }) => item.slug),
+      narrowed.structuredContent.items.map((item: { slug: string }) => item.slug),
+    );
+
+    // And this door can find out what the namespaces are, which until now it
+    // could not: the facets were on the HTTP door only.
+    const facets = await call('board_facets', {});
+    assert.deepEqual(facets.structuredContent.prefixes, ['build', 'ops']);
+
     const listed = await call('list_items', { q: 'ops:why' });
     const fromList = listed.structuredContent.items[0];
     assert.ok(fromList.timeline_count >= 2, 'the list counts them');

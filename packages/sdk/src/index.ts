@@ -172,13 +172,16 @@ export interface BoardColumn {
     claimed?: boolean;
     stale?: boolean;
     source?: string[];
+    /** Slug starts with this: the column for one area of a board that names its cards `area:thing`. */
+    slug_prefix?: string;
     priority_min?: number;
     fields?: Record<string, Array<string | number | boolean>>;
   };
 }
 
 export interface BoardConfig {
-  rows: 'none' | 'owner' | 'label';
+  /** `prefix` lanes by the namespace already in the slug. */
+  rows: 'none' | 'owner' | 'label' | 'prefix';
   columns: BoardColumn[];
 }
 
@@ -494,6 +497,12 @@ export class Muster {
       owner?: string;
       label?: string;
       source?: string;
+      /**
+       * Slug starts with this. Anchored and indexed, unlike `q`, which is a
+       * substring and scans, so this is the cheap way to read one area of a
+       * board that names its cards `area:thing`.
+       */
+      prefix?: string;
       stale?: boolean;
       /** True for items somebody holds right now. An expired claim counts as free. */
       claimed?: boolean;
@@ -522,6 +531,7 @@ export class Muster {
       owner: query.owner,
       label: query.label,
       source: query.source,
+      prefix: query.prefix,
       stale: query.stale === undefined ? undefined : String(query.stale),
       claimed: query.claimed === undefined ? undefined : String(query.claimed),
       q: query.q,
@@ -537,7 +547,7 @@ export class Muster {
    * for checking an import against its source, which is the only thing that can
    * tell you a migration worked.
    */
-  async *allItems(query: { status?: ItemStatus; label?: string; source?: string } = {}) {
+  async *allItems(query: { status?: ItemStatus; label?: string; source?: string; prefix?: string } = {}) {
     let cursor: string | undefined;
     do {
       const page = await this.items({ ...query, limit: 200, order: 'id', cursor });

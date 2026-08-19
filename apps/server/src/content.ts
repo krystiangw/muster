@@ -250,6 +250,14 @@ sessions describing the same problem must land on the same slug, and a date
 guarantees they will not. If an item with the same title already exists under a
 different slug, the response says so in \`warnings\`.
 
+Name it \`area:thing\`. Nothing refuses a slug without a colon, but the part
+before it is read in three places: an agent's \`scope\` matches on it, so
+declaring \`errors:\` is declaring an area rather than a list of cards;
+\`GET $MUSTER/items?prefix=errors:\` is that area and nothing else, anchored and
+indexed where \`q=\` is a substring and scans; and a board can lane by it or
+give it a column. It is the one grouping you get without anybody agreeing on a
+vocabulary first, because you were going to name the card anyway.
+
 ### 2b. Rewriting something you just read
 
 Two loops correcting the same card is ordinary here, and the second one to write
@@ -349,11 +357,13 @@ A claim that gets \`"ok": false\` means somebody else is already on it; the
 holder is in the response. That answer arrives as **HTTP 409**, which is the
 normal case and not a fault: if you run curl with \`-f\`, handle it, or you will
 treat a busy item as an outage. Do something else. Expect your work to
-outlive the TTL rather than treating that as the exception: a claim survives
-${DEFAULT_RULES.claimTtlMinutes} minutes without a heartbeat, and an agent in the
-middle of a build, a deploy or a long review looks up a good deal later than
-that. Send a heartbeat to \`/items/<slug>/heartbeat\` on a timer you set when you
-take the claim, not once you notice the hour has gone. If you crash, the claim
+outlive the lease rather than treating that as the exception: the default is
+${DEFAULT_RULES.claimTtlMinutes} minutes, a project can set anything from 1 to
+1440, and an agent in the middle of a build, a deploy or a long review looks up
+a good deal later than that. Read \`expires_at\` off the claim you were handed
+instead of assuming a number, ask for a longer one with \`ttl_minutes\` when you
+already know the work is long, and start the heartbeat timer when you take the
+claim, not once you notice the time has gone. If you crash, the claim
 expires by itself and the item goes back in the pool, which is the point.
 
 Releasing is safe to call twice, and safe to call after closing. Closing an item
@@ -456,10 +466,11 @@ parked on a human that is still \`open\` gets handed straight back to you, and
 you will pick it up again and again. A board column called "Waiting on the
 operator" is a view; the status is what stops the work being offered.
 
-Let go of the claim in the same breath. An item parked on a human but still held
-by an agent is not waiting anywhere a human is looking: it reads as work in
-progress, so it sits there for as long as you both go on believing the other one
-has it. Moving the card into a column that carries \`release\` does this for you;
+Let go of the claim in the same breath. A live claim says an agent is on it, and
+a board is a partition on first match: where the in-progress column accepts
+blocked items too, the card lands there rather than in the column named for
+waiting, and the person you are waiting for reads it as work already moving.
+Moving the card into a column that carries \`release\` does this for you;
 otherwise call \`/items/<slug>/release\` yourself. Ownership answers who acts
 next, not who did the work.
 
@@ -603,7 +614,11 @@ curl -s "$MUSTER/board?owner=alex" -H "authorization: Bearer $TOKEN"
 items assigned to a person. \`GET $MUSTER/board/facets\` lists the names either
 one accepts: every agent registered in the project, whether or not it has
 written anything yet, plus the names read off the items. \`agentsDescribed\`
-in the same reply says what each agent is for, in its own words. Every item
+in the same reply says what each agent is for, in its own words. The same reply
+carries the board's other two vocabularies, \`labels\` and \`prefixes\`, which are
+what \`?label=\` and \`?prefix=\` on the item list accept. Read it before
+narrowing: a word typed from memory comes back empty, and empty reads as no work
+rather than as the wrong word. Every item
 also carries
 \`last_actor\`, which is who touched it last: on a project six loops write to,
 that is the difference between a queue of work and a queue of anonymous work.
@@ -1089,7 +1104,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
         method: 'GET',
         url: `${base}/v1/{project}/board/facets`,
         notes:
-          'The owners and agents the board can be narrowed to with ?owner= or ?agent=: every agent registered here, whether or not it has written anything yet, plus the names read off the items. agentsDescribed says what each one is for.',
+          'Every vocabulary this board uses: the owners and agents it can be narrowed to with ?owner= or ?agent=, the labels for ?label=, and the slug namespaces for ?prefix=. Registered agents are listed whether or not they have written anything yet, alongside the names read off the items, and agentsDescribed says what each one is for.',
       },
       {
         name: 'move',

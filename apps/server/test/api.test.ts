@@ -68,6 +68,39 @@ describe('signup', () => {
 });
 
 describe('items', () => {
+  // The cheap way to read one area of a large board, and the reason it is cheap
+  // is that it is anchored: `q=` is a substring and scans, this walks the unique
+  // index on the slug. A filter that also matched the middle of a slug would be
+  // the expensive one wearing the cheap one's name.
+  it('narrows to one namespace, by the start of the slug and not the middle of it', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'ops:sweep', title: 'sweep', actor: 'a' });
+    await post(project, '/items', { slug: 'ops:cutover', title: 'cutover', actor: 'a' });
+    // Carries the prefix, does not start with it. This is the fixture the whole
+    // test turns on: an unanchored filter finds it, an anchored one does not.
+    await post(project, '/items', { slug: 'docs:ops:runbook', title: 'runbook', actor: 'a' });
+
+    const page = (await get(project, '/items?prefix=ops:')).json();
+    assert.deepEqual(
+      page.items.map((item: { slug: string }) => item.slug).sort(),
+      ['ops:cutover', 'ops:sweep'],
+    );
+
+    // The same words through the search box, which is the filter this one is
+    // not: three cards mention ops, and that is the answer q= is for.
+    const searched = (await get(project, '/items?q=ops:')).json();
+    assert.equal(searched.items.length, 3);
+
+    // A pattern is not a prefix. A caller sending one gets the cards whose
+    // slug starts with those characters, which is none, rather than a regex
+    // this door then runs.
+    const literal = (await get(project, '/items?prefix=.*')).json();
+    assert.deepEqual(literal.items, []);
+
+    const refused = await get(project, '/items?prefix[$ne]=x');
+    assert.ok(refused.statusCode >= 400, 'a query in a field that takes a word is refused');
+  });
+
   it('is idempotent on slug: two writes converge on one item', async () => {
     const project = await createProject(harness);
     const first = await post(project, '/items', {

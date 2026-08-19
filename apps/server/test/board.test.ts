@@ -172,6 +172,56 @@ describe('a project’s own layout', () => {
     assert.equal(cell(view, 'open', '').items[0].slug, 'c1');
   });
 
+  // The one grouping every board in this product already has, because it is in
+  // the name of the card rather than in a field somebody remembered to set.
+  it('lays out swimlanes by the namespace already in the slug', async () => {
+    const project = await createProject(harness);
+    await put(project, '/board', {
+      rows: 'prefix',
+      columns: [{ title: 'Open', match: { status: ['open'] } }],
+    });
+    await post(project, '/items', { slug: 'ops:sweep', title: 'sweep', actor: 'a' });
+    await post(project, '/items', { slug: 'ops:cutover', title: 'cutover', actor: 'a' });
+    await post(project, '/items', { slug: 'build:pager', title: 'pager', actor: 'a' });
+    await post(project, '/items', { slug: 'loose-end', title: 'loose end', actor: 'a' });
+
+    const view = await board(project);
+    assert.deepEqual(
+      view.rows.map((row: { key: string }) => row.key),
+      ['build', 'ops', ''],
+    );
+    assert.equal(cell(view, 'open', 'ops').count, 2);
+    // A slug with no colon has no namespace, rather than a namespace named
+    // after the whole slug, which would give every such card a lane of its own.
+    assert.equal(cell(view, 'open', '').items[0].slug, 'loose-end');
+  });
+
+  it('gives one namespace a column, without anybody adding a label for it', async () => {
+    const project = await createProject(harness);
+    await put(project, '/board', {
+      columns: [
+        { title: 'Ops', key: 'ops', match: { slug_prefix: 'ops:' } },
+        { title: 'Rest', key: 'rest', match: {} },
+      ],
+    });
+    await post(project, '/items', { slug: 'ops:sweep', title: 'sweep', actor: 'a' });
+    // Carries the prefix, does not start with it. A column that took this would
+    // be a search box pretending to be a boundary.
+    await post(project, '/items', { slug: 'docs:ops:runbook', title: 'runbook', actor: 'a' });
+
+    const view = await board(project);
+    assert.deepEqual(
+      cell(view, 'ops', '').items.map((item: { slug: string }) => item.slug),
+      ['ops:sweep'],
+    );
+    assert.equal(cell(view, 'rest', '').count, 1);
+
+    const refused = await put(project, '/board', {
+      columns: [{ title: 'Ops', match: { slug_prefix: '  ' } }],
+    });
+    assert.equal(refused.statusCode, 400);
+  });
+
   it('filters on fields carried over from another system', async () => {
     const project = await createProject(harness);
     await put(project, '/board', {
@@ -1976,6 +2026,49 @@ describe('a board many agents write to', () => {
     assert.deepEqual(facets.owners, ['alex']);
     assert.ok(facets.agents.includes('errors-loop'));
     assert.ok(facets.agents.includes('idle-loop'), 'a registered agent counts even before it writes');
+  });
+
+  // It was counting both of these and returning neither, while reporting in
+  // `omitted` how many names it had left off a list it never sent.
+  it('hands back the labels and namespaces it was already counting', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', {
+      slug: 'ops:sweep',
+      title: 'sweep',
+      labels: ['ops'],
+      actor: 'a',
+    });
+    await post(project, '/items', {
+      slug: 'build:pager',
+      title: 'pager',
+      labels: ['build', 'urgent'],
+      actor: 'a',
+    });
+    await post(project, '/items', { slug: 'loose-end', title: 'loose end', actor: 'a' });
+
+    const facets = (
+      await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/board/facets`,
+        headers: authed(project),
+      })
+    ).json();
+    assert.deepEqual(facets.labels, ['build', 'ops', 'urgent']);
+    assert.deepEqual(facets.prefixes, ['build', 'ops']);
+    assert.equal(facets.omitted.prefixes, 0);
+
+    // Every name it offers has to answer with something, or the list is a set
+    // of filters that read as an empty board.
+    for (const prefix of facets.prefixes) {
+      const page = (
+        await harness.server.inject({
+          method: 'GET',
+          url: `${project.api}/items?prefix=${encodeURIComponent(prefix)}:`,
+          headers: authed(project),
+        })
+      ).json();
+      assert.ok(page.items.length > 0, `prefix ${prefix} came back empty`);
+    }
   });
 
   it('offers nothing that only closed work carries, when the board hides it', async () => {

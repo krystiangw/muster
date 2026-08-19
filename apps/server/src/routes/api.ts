@@ -852,6 +852,11 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
               owner: { type: 'string' },
               label: { type: 'string' },
               source: { type: 'string' },
+              prefix: {
+                type: 'string',
+                description:
+                  'Slug starts with this. Boards name their cards `area:thing`, so `prefix=ops:` is everything in one area. Anchored and indexed, unlike q=, which is a substring and scans: this is the cheap way to read one part of a large board.',
+              },
               stale: { type: 'boolean' },
               claimed: {
                 type: 'boolean',
@@ -898,6 +903,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           owner: query.owner as string | undefined,
           label: query.label as string | undefined,
           source: query.source as string | undefined,
+          prefix: query.prefix as string | undefined,
           stale: query.stale as boolean | undefined,
           claimed: query.claimed as boolean | undefined,
           q: query.q as string | undefined,
@@ -1175,9 +1181,9 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
       {
         schema: {
           tags: ['board'],
-          summary: 'The owners and agents this board can be narrowed to',
+          summary: 'The names, labels and namespaces this board can be narrowed to',
           description:
-            'Every agent registered in the project, plus the names read off the items themselves. Pass one to GET /board as owner= or agent=. `agentsDescribed` says what each agent is for, in its own words.',
+            'Every agent registered in the project, plus the names read off the items themselves. Pass one to GET /board as owner= or agent=. `agentsDescribed` says what each agent is for, in its own words. `labels` and `prefixes` are the other two vocabularies this board actually uses: pass a label to GET /items as label=, and a namespace as prefix=. `omitted` counts what was left out of each list for length.',
         },
       },
       async (request) => {
@@ -1190,6 +1196,11 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           owners: facets.owners,
           agents: facets.agents.map((agent) => agent.handle),
           agentsDescribed: facets.agents.filter((agent) => agent.description !== ''),
+          // Both were already being counted, and `omitted` was already
+          // reporting how many of each had been left off a list that was never
+          // sent. A count of what is missing from nothing is not an answer.
+          labels: facets.labels,
+          prefixes: facets.prefixes,
           omitted: facets.omitted,
         };
       },
@@ -1207,7 +1218,12 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
             type: 'object',
             required: ['columns'],
             properties: {
-              rows: { type: 'string', enum: ['none', 'owner', 'label'] },
+              rows: {
+                type: 'string',
+                enum: ['none', 'owner', 'label', 'prefix'],
+                description:
+                  'Swimlanes. `prefix` lanes by the namespace already in the slug, which on most boards is the grouping the agents wrote themselves.',
+              },
               columns: {
                 type: 'array',
                 minItems: 1,

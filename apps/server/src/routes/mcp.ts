@@ -14,7 +14,7 @@ import { storeUnreachable, type Store } from '../db.js';
 import { maybeExpireClaims, maybeSweep } from '../hygiene.js';
 import type { Notifier } from '../notify.js';
 import type { RateLimiter } from '../rateLimit.js';
-import { loadBoard, moveItem } from '../board.js';
+import { boardFacets, loadBoard, moveItem } from '../board.js';
 import { boardApplyJson, boardJson, escalationJson, itemJson } from '../serialize.js';
 import {
   ServiceError,
@@ -565,7 +565,7 @@ const TOOLS: ToolDefinition[] = [
     name: 'list_items',
     title: 'List items',
     description:
-      'Filter by status, owner, label, source, staleness or claim state. Pages with next_cursor, and as_of is what to pass back as since to read only what changed.',
+      'Filter by status, owner, label, source, namespace, staleness or claim state. Pages with next_cursor, and as_of is what to pass back as since to read only what changed.',
     inputSchema: {
       type: 'object',
       additionalProperties: false,
@@ -574,6 +574,11 @@ const TOOLS: ToolDefinition[] = [
         owner: { type: 'string' },
         label: { type: 'string' },
         source: { type: 'string' },
+        prefix: {
+          type: 'string',
+          description:
+            'Slug starts with this. Boards name their cards `area:thing`, so prefix "ops:" is everything in one area. Anchored and indexed, unlike q, which is a substring and scans. board_facets lists the namespaces this board has.',
+        },
         stale: { type: 'boolean' },
         claimed: {
           type: 'boolean',
@@ -723,6 +728,21 @@ const TOOLS: ToolDefinition[] = [
     // anything, which is the whole point of hygiene's read path being one rule.
     annotations: {
       readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: true,
+      openWorldHint: false,
+    },
+  },
+  {
+    name: 'board_facets',
+    title: 'The vocabularies this board uses',
+    description:
+      'The owners, agents, labels and slug namespaces that actually occur on this board. Read it before narrowing: a filter typed from memory comes back empty, and empty reads as no work rather than as a wrong word. The prefixes it lists are the namespaces in the slugs, which is the grouping the agents wrote themselves, and each one goes back to list_items as its prefix argument. Every list says how many names it left off for length.',
+    inputSchema: { type: 'object', additionalProperties: false, properties: {} },
+    requiresProject: true,
+    charges: 'read',
+    annotations: {
+      readOnlyHint: true,
       destructiveHint: false,
       idempotentHint: true,
       openWorldHint: false,
@@ -1299,6 +1319,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           owner: text(args.owner, 'owner'),
           label: text(args.label, 'label'),
           source: text(args.source, 'source'),
+          prefix: text(args.prefix, 'prefix'),
           stale: typeof args.stale === 'boolean' ? args.stale : undefined,
           claimed: typeof args.claimed === 'boolean' ? args.claimed : undefined,
           q: text(args.q, 'q'),
@@ -1376,6 +1397,17 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           ...(text(args.agent, 'agent') ? { agent: text(args.agent, 'agent')! } : {}),
         });
         return boardJson(view, args.items !== false);
+      }
+      case 'board_facets': {
+        const facets = await boardFacets(store, project);
+        return {
+          owners: facets.owners,
+          agents: facets.agents.map((agent) => agent.handle),
+          agentsDescribed: facets.agents.filter((agent) => agent.description !== ''),
+          labels: facets.labels,
+          prefixes: facets.prefixes,
+          omitted: facets.omitted,
+        };
       }
       case 'move': {
         const result = await moveItem(store, project, {

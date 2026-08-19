@@ -526,8 +526,10 @@ operator" while the four statuses stay four, and an agent that never opens the b
 exactly as before.</p>
 <p>An item lands in the <b>first</b> column that matches, so the board is a partition and no card
 appears twice. Anything matching no column is counted and shown above the board rather than hidden,
-because a layout that quietly drops work is worse than no layout. Swimlanes group by owner or by
-label.</p>
+because a layout that quietly drops work is worse than no layout. Swimlanes group by owner, by
+label, or by the namespace already in the slug, and a column can filter on that namespace too:
+<code>"match":{"slug_prefix":"ops:"}</code> is one area of the work, without anybody adding a label
+for it.</p>
 <pre><code>curl -sX PUT ${escapeHtml(base)}/v1/$PROJECT/board -H "authorization: Bearer $ADMIN_TOKEN" \\
   -H 'content-type: application/json' -d '{
     "rows": "owner",

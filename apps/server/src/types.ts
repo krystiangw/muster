@@ -286,6 +286,11 @@ export interface BoardMatch {
   claimed?: boolean;
   stale?: boolean;
   source?: string[];
+  /**
+   * Slug starts with this. The same shape `scope` matches on, so a column and
+   * an agent's declared area are written the same way and mean the same thing.
+   */
+  slugPrefix?: string;
   priorityMin?: number;
   /**
    * Only work touched in the last N days.
@@ -347,8 +352,11 @@ export interface BoardColumn {
 
 export interface BoardConfig {
   columns: BoardColumn[];
-  /** Swimlanes. `none` is one lane; `owner` groups by owner; `label` by the labels present. */
-  rows: 'none' | 'owner' | 'label';
+  /**
+   * Swimlanes. `none` is one lane; `owner` groups by owner; `label` by the
+   * labels present; `prefix` by the namespace already in the slug.
+   */
+  rows: 'none' | 'owner' | 'label' | 'prefix';
 }
 
 export const MAX_BOARD_COLUMNS = 12;
