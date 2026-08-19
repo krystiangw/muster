@@ -183,16 +183,17 @@ export function buildBoard(
       title,
       columns: config.columns.map((column) => {
         const apply = applyForColumn(column);
-        // Null is a lane too: a column that unassigns lands the card in the
-        // one `rowKeyFor` gives work nobody owns, which is the empty key.
+        // Owner only. A lane keyed by label is the card's *first* label and a
+        // move unions what it adds with what is already there, so adding one
+        // moves nothing unless the card had none, and removing one can change
+        // the first label while looking like it changes nothing. Neither
+        // direction can be promised from the column alone, so a label board
+        // says nothing and falls back to "the lane you dropped it in".
+        //
+        // Null is a lane too: a column that unassigns lands the card in the one
+        // `rowKeyFor` gives work nobody owns, which is the empty key.
         const lands =
-          config.rows === 'owner'
-            ? apply.owner === undefined
-              ? undefined
-              : (apply.owner ?? '')
-            : config.rows === 'label'
-              ? apply.addLabels?.[0]
-              : undefined;
+          config.rows === 'owner' && apply.owner !== undefined ? (apply.owner ?? '') : undefined;
         return {
           key: column.key,
           title: column.title,
@@ -224,6 +225,19 @@ export function buildBoard(
     if (cell.items.length < COLUMN_ITEM_LIMIT) cell.items.push(item);
     else cell.truncated = true;
     totals[index]!.count += 1;
+  }
+
+  // A column can only land a card in a lane this board is drawing. Until
+  // somebody owns work, that person has no lane, and a column naming them
+  // would have been a drop target with nowhere to land: every copy of it
+  // refused, and the column unreachable by drag for as long as the owner had
+  // nothing. Where the lane is not on the board the column says nothing, which
+  // makes it an ordinary column again, droppable in the lane it is drawn in.
+  const drawn = new Set(lanes.keys());
+  for (const lane of lanes.values()) {
+    for (const cell of lane.columns) {
+      if (cell.lands !== undefined && !drawn.has(cell.lands)) delete cell.lands;
+    }
   }
 
   const rows = [...lanes.values()].sort((a, b) => {

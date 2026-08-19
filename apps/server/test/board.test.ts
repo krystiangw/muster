@@ -405,13 +405,67 @@ describe('the board in the browser', () => {
     assert.match(page.body, /data-column="bobs" data-lands="bob"/);
     assert.ok(!/data-column="open" data-lands=/.test(page.body), 'a status column decides no lane');
 
-    // Every column that names a lane names one the board actually draws.
+    // Every column that names a lane names one the board actually draws. A
+    // column for somebody who owns nothing yet has no lane to land in, and
+    // saying it did would have made it a target every copy of which refuses:
+    // the column unreachable by drag for as long as that person had no work.
     const lanes = new Set(
       [...page.body.matchAll(/<div class="lane" data-lane="([^"]*)"/g)].map((match) => match[1]!),
     );
     for (const [, lands] of page.body.matchAll(/data-lands="([^"]*)"/g)) {
       assert.ok(lanes.has(lands!), `a column lands in "${lands}", which is not a lane on this board`);
     }
+
+    // A column for somebody with nothing on the board yet says nothing, and is
+    // an ordinary column: droppable in the lane it is drawn in.
+    await harness.server.inject({
+      method: 'PUT',
+      url: `${project.api}/board`,
+      headers: authed(project),
+      payload: {
+        rows: 'owner',
+        columns: [
+          { key: 'open', title: 'Open', match: { status: ['open'] } },
+          { key: 'carols', title: "Carol's", match: { status: ['open'], owner: ['carol'] } },
+        ],
+      },
+    });
+    const before = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.ok(!before.body.includes('data-lands="carol"'), 'carol owns nothing, so carol has no lane');
+    assert.ok(!before.body.includes('data-lane="carol"'));
+
+    // Give her something and the lane appears, and with it the promise.
+    await post(project, '/items', { slug: 'carol-work', title: 'hers', owner: 'carol', actor: 'a' });
+    const after = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(after.body, /data-lane="carol"/);
+    assert.match(after.body, /data-column="carols" data-lands="carol"/);
+  });
+
+  it('promises no lane on a board grouped by label', async () => {
+    // A lane keyed by label is the card's first label, and a move unions what
+    // it adds with what is already there: adding one moves nothing unless the
+    // card had none, and removing one can change the first label while looking
+    // like it changes nothing. Neither direction can be promised from the
+    // column alone, so a label board says nothing and falls back to the lane
+    // the card was dropped in.
+    const project = await createProject(harness, 'labels as lanes');
+    await post(project, '/items', { slug: 'both', title: 'two labels', labels: ['old'], actor: 'a' });
+    await harness.server.inject({
+      method: 'PUT',
+      url: `${project.api}/board`,
+      headers: authed(project),
+      payload: {
+        rows: 'label',
+        columns: [
+          { key: 'open', title: 'Open', match: { status: ['open'] } },
+          { key: 'news', title: 'New', match: { status: ['open'], labels: ['new'] } },
+        ],
+      },
+    });
+    const readToken = (await harness.store.projects.findOne({ _id: project.id }))!.readToken;
+    const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    assert.match(page.body, /<div class="lane" data-lane="old"/, 'the board is grouped by label');
+    assert.ok(!page.body.includes('data-lands='), 'and no column claims to decide a lane');
   });
 
   it('gives every field on a card one box with its own name in it', async () => {
