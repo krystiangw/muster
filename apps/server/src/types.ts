@@ -549,6 +549,16 @@ export interface ShareDoc {
   note: string;
   createdAt: Date;
   expiresAt: Date;
+  /**
+   * When the offer actually reached the address, if it ever did.
+   *
+   * Recorded because "we wrote it down" and "somebody was told" are different
+   * facts, and an agent deciding whether to offer the board again needs the
+   * second one. A provider having a bad minute, or a deployment with no mail
+   * configured at all, leaves a stored offer nobody has seen, and reading that
+   * as "an offer is out" tells the agents to stop trying.
+   */
+  notifiedAt: Date | null;
 }
 
 /**

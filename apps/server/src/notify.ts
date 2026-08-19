@@ -216,7 +216,17 @@ export function createNotifier(deps: {
           readUrl: `${config.baseUrl}/r/${project.readToken}`,
           expiresInDays: config.demoTtlDays,
         });
-        if (delivery !== 'sent') {
+        if (delivery === 'sent') {
+          // Best effort, like everything else here: the offer stands whether or
+          // not this write lands, and the only thing it changes is whether the
+          // agents are told to offer it again.
+          await store.shares
+            .updateOne(
+              { projectId: project._id, email: offer.email.trim().toLowerCase() },
+              { $set: { notifiedAt: new Date() } },
+            )
+            .catch(() => undefined);
+        } else {
           log(`board offer for ${project._id} was ${delivery}, not sent`);
         }
       } catch (error) {

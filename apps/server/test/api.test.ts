@@ -1923,14 +1923,29 @@ describe('a question filed on a board nobody owns', () => {
       headers: authed(project),
       payload: { email: 'human@example.com' },
     });
-    const offered = await harness.server.inject({
-      method: 'GET',
-      url: `${project.api}/inbox?agent=a`,
-      headers: authed(project),
-    });
-    assert.match(offered.json().hint, /not accepted yet/);
-    assert.match(offered.json().hint, /Do not offer it again/);
-    assert.doesNotMatch(offered.json().hint, /nobody is coming/);
+    const inboxNow = async (): Promise<string> =>
+      (
+        await harness.server.inject({
+          method: 'GET',
+          url: `${project.api}/inbox?agent=a`,
+          headers: authed(project),
+        })
+      ).json().hint;
+
+    // Stored but never delivered, which is what this harness produces because
+    // it has no mailer: an agent told to stop offering would leave the person
+    // it was meant for waiting on a message that does not exist.
+    assert.match(await inboxNow(), /nobody is coming/);
+
+    // Delivered, and only now is offering it again the wrong thing to do.
+    await harness.store.shares.updateMany(
+      { projectId: project.id },
+      { $set: { notifiedAt: new Date() } },
+    );
+    const offered = await inboxNow();
+    assert.match(offered, /not accepted yet/);
+    assert.match(offered, /Do not offer it again/);
+    assert.doesNotMatch(offered, /nobody is coming/);
 
     // Claimed, and neither hint applies: somebody will be told.
     await harness.store.projects.updateOne(

@@ -231,6 +231,7 @@ describe('handing a project to its operator', () => {
       note: '',
       createdAt: new Date(),
       expiresAt: new Date(Date.now() + 86_400_000),
+      notifiedAt: null,
     });
 
     const attempt = await harness.server.inject({
@@ -332,6 +333,7 @@ describe('handing a project to its operator', () => {
       note: '',
       createdAt: new Date(),
       expiresAt: new Date(Date.now() + 86_400_000),
+      notifiedAt: null,
     });
     const offerOne = await harness.store.shares.findOne({
       projectId: contested.id,

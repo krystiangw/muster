@@ -402,6 +402,7 @@ export async function shareProject(
         note: (input.note ?? '').slice(0, 500),
         createdAt: now,
         expiresAt: now,
+        notifiedAt: null,
       },
       alreadyOwned: true,
     };
@@ -425,6 +426,8 @@ export async function shareProject(
     createdAt: now,
     // An offer nobody accepted is not worth keeping around for ever.
     expiresAt: new Date(now.getTime() + 30 * 86_400_000),
+    // Filled in by the notifier if the message lands, and only then.
+    notifiedAt: null,
   };
 
   // Offering the same board twice refreshes the note rather than failing: the
@@ -444,6 +447,10 @@ export async function shareProject(
         email: share.email,
         createdAt: share.createdAt,
       },
+      // Cleared on every offer, including a repeat: the question this answers
+      // is whether the message that just went out arrived, not whether one
+      // ever did.
+      $unset: { notifiedAt: '' },
     },
     { upsert: true, returnDocument: 'after' },
   );
@@ -589,7 +596,16 @@ export async function readInbox(
     // this counts the live ones the way everything else here does.
     project.claimedBy
       ? Promise.resolve(0)
-      : store.shares.countDocuments({ projectId: project._id, expiresAt: { $gt: new Date() } }),
+      : store.shares.countDocuments({
+          projectId: project._id,
+          expiresAt: { $gt: new Date() },
+          // Sent, not merely stored. An offer the provider discarded, or one
+          // written on a deployment that cannot send at all, is an offer
+          // nobody has seen, and telling the agents to stop offering it would
+          // leave the person it was meant for waiting on a message that does
+          // not exist.
+          notifiedAt: { $ne: null },
+        }),
   ]);
   return {
     answers: answers as EscalationDoc[],
