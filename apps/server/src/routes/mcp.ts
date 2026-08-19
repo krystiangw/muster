@@ -179,6 +179,23 @@ function required(value: unknown, name: string): string {
   return given;
 }
 
+/**
+ * An object, or a refusal. Same reason as the two above.
+ *
+ * A model writing arguments gets this one wrong in a particular way: it sends
+ * the thing it wanted to record as a string, or wraps it in an array. Turning
+ * that into `undefined` and answering 200 would tell the caller its notes were
+ * kept when nothing was, which is the one thing this door does not do
+ * anywhere else.
+ */
+function object(value: unknown, name: string): Record<string, unknown> | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new ServiceError(400, 'bad_argument', `"${name}" is an object here, and this one is not.`);
+  }
+  return value as Record<string, unknown>;
+}
+
 /** Every element a string, or a refusal. Same reason, including the null. */
 function texts(value: unknown, name: string): string[] | undefined {
   if (value === undefined) return undefined;
@@ -1139,10 +1156,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           handle: str(args.handle),
           scope: Array.isArray(args.scope) ? (args.scope as string[]) : undefined,
           description: str(args.description),
-          meta:
-            typeof args.meta === 'object' && args.meta !== null && !Array.isArray(args.meta)
-              ? (args.meta as Record<string, unknown>)
-              : undefined,
+          meta: object(args.meta, 'meta'),
         });
         if (created) record(store, 'register', { door: 'mcp', projectId: project._id });
         return { handle: agent.handle, scope: agent.scope, created };

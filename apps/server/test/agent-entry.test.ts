@@ -1290,6 +1290,28 @@ describe('the MCP surface', () => {
     });
     const agent = read.json().agents.find((one: { handle: string }) => one.handle === 'through-mcp');
     assert.deepEqual(agent?.meta, { runs: 'on the night shift' }, 'what one door wrote, the other reads');
+
+    // And a model that sends the wrong shape is told, rather than answered
+    // 200 over an empty field. This door refuses what it cannot keep
+    // everywhere else; the first version of this one quietly dropped it.
+    const wrong = await harness.server.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: { ...authed(project), 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
+      payload: {
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/call',
+        params: { name: 'register_agent', arguments: { handle: 'shapes', meta: 'on the night shift' } },
+      },
+    });
+    assert.equal(wrong.json().result?.isError, true, wrong.body);
+    assert.match(JSON.stringify(wrong.json().result.content), /is an object here/);
+    assert.equal(
+      await harness.store.agents.countDocuments({ projectId: project.id, handle: 'shapes' }),
+      0,
+      'and nothing was registered under a refusal',
+    );
   });
 
   it('says where the one call named on only one door lives on the other', async () => {
