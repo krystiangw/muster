@@ -119,11 +119,16 @@ function card(
     .join(' ');
   // The title is the one thing a column is too narrow for, so it is clamped to
   // two lines here and shown whole in the preview the card links to.
-  // Draggable only where there is a form to submit, because the drop does not
-  // move anything itself: it sets the column on this card's own move form and
-  // sends it. A board rendered without one is a board a reader cannot move
-  // cards on, and offering the gesture there would be a lie the mouse tells.
-  return `<article class="${classes}"${move ? ` draggable="true" data-slug="${escapeHtml(item.slug)}"` : ''}>
+  // The slug, and not the attribute that makes it draggable: that one is put on
+  // by the script, and only where a drag can happen. A card marked draggable in
+  // the markup is marked on a phone too, and a phone cannot drag: HTML5 drag
+  // and drop has no touch equivalent, so the grab cursor and the gesture would
+  // be a promise nothing on that device can keep.
+  //
+  // Only where there is a form to submit, because the drop does not move
+  // anything itself: it sets the column on this card's own move form and sends
+  // it. A board rendered without one is a board a reader cannot move cards on.
+  return `<article class="${classes}"${move ? ` data-slug="${escapeHtml(item.slug)}"` : ''}>
   <a class="peek" href="${escapeHtml(open)}">
     <span class="slug">${escapeHtml(item.slug)}</span>
     <span class="t">${escapeHtml(item.title || '(no title)')}</span>

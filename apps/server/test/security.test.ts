@@ -1220,24 +1220,47 @@ describe('the colours these pages are read in', () => {
 
     const themes = themesIn(sheet);
 
-    const rules = [
-      ...sheet.matchAll(
-        /\.chip\.([a-z]+) \{ color:var\(--([a-z0-9-]+)\); background:color-mix\(in srgb,var\(--([a-z0-9-]+)\) (\d+)%,transparent\); \}/g,
-      ),
-    ];
-    assert.ok(rules.length >= 3, `found ${rules.length} tinted chips to check`);
+    // Every one of them, in whichever of the three ways it is written. The
+    // first version of this read only the chips tinted with `color-mix` and
+    // silently skipped four written with a plain background and, later, the
+    // highlighted row in the list a field opens. They were all fine, which is
+    // luck rather than a rule: a check that covers the easy spellings is a
+    // check somebody can walk past without noticing.
+    const coloured: { what: string; ink: string; behind: string; share: number }[] = [];
+    // The whole block, then the two declarations out of it: which order they
+    // are written in is the author's business and not something a check should
+    // quietly depend on.
+    for (const [, what, block] of sheet.matchAll(
+      /(\.chip\.[a-z]+|\.field \.choices li\[aria-selected='true'\]) \{([^}]*)\}/g,
+    )) {
+      const ink = /(?:^|[;{ ])color:var\(--([a-z0-9-]+)\)/.exec(block!)?.[1];
+      const background = /background:([^;}]+)/.exec(block!)?.[1]?.trim();
+      if (!ink || !background) continue;
+      const mixed = /color-mix\(in srgb,var\(--([a-z0-9-]+)\) (\d+)%/.exec(background);
+      const plain = /^var\(--([a-z0-9-]+)\)$/.exec(background);
+      // `transparent` means whatever the card is, which is the surface.
+      if (mixed) coloured.push({ what: what!, ink, behind: mixed[1]!, share: Number(mixed[2]) / 100 });
+      else if (plain) coloured.push({ what: what!, ink, behind: plain[1]!, share: 1 });
+      else if (background === 'transparent') coloured.push({ what: what!, ink, behind: 'surface', share: 1 });
+      else assert.fail(`${what} paints its background a way this check cannot read: ${background}`);
+    }
+    assert.ok(coloured.length >= 7, `found ${coloured.length} coloured things to check`);
+    assert.ok(
+      coloured.some((one) => one.what.includes('choices')),
+      'including the row a field highlights, which is the newest of them',
+    );
 
     for (const [which, vars] of themes.entries()) {
       const surface = vars.get('surface');
       assert.ok(surface, 'the theme names a surface');
-      for (const [, chip, ink, tint, share] of rules) {
-        const text = vars.get(ink!);
-        const behind = vars.get(tint!);
-        assert.ok(text && behind, `${chip} names colours this theme has`);
-        const ratio = contrast(text, over(behind, surface, Number(share) / 100));
+      for (const { what, ink, behind, share } of coloured) {
+        const text = vars.get(ink);
+        const under = vars.get(behind);
+        assert.ok(text && under, `${what} names colours this theme has`);
+        const ratio = contrast(text, share === 1 ? under! : over(under!, surface, share));
         assert.ok(
           ratio >= 4.5,
-          `.chip.${chip} reads at ${ratio.toFixed(2)}:1 in the ${which === 0 ? 'light' : 'dark'} theme, under 4.5:1`,
+          `${what} reads at ${ratio.toFixed(2)}:1 in the ${which === 0 ? 'light' : 'dark'} theme, under 4.5:1`,
         );
       }
     }

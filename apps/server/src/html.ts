@@ -518,6 +518,14 @@ const SCRIPT = `(() => {
   const board = document.querySelector('.board');
   if (!board || !('draggable' in document.createElement('div'))) return;
 
+  // A drag needs a pointer that can hold something down and move it. HTML5
+  // drag and drop has no touch equivalent, so on a phone the gesture does
+  // nothing at all: marking the cards there would put a grab cursor and an
+  // affordance on a board that cannot answer either. The move button is what
+  // that device has, and it always was.
+  if (!matchMedia('(pointer: fine)').matches) return;
+  for (const card of board.querySelectorAll('.card[data-slug]')) card.draggable = true;
+
   let dragging = null;
 
   const formFor = (card) => card && card.querySelector('form.move');

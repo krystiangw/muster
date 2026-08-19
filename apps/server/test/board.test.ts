@@ -344,7 +344,12 @@ describe('the board in the browser', () => {
     const readToken = (await harness.store.projects.findOne({ _id: project.id }))!.readToken;
     const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
 
-    assert.match(page.body, /<article class="card"[^>]*draggable="true"[^>]*data-slug="draggable"/);
+    // The slug, and not the attribute that makes it draggable. That one is put
+    // on by the script and only where a drag can happen: HTML5 drag and drop
+    // has no touch equivalent, so a card marked in the markup would carry a
+    // grab cursor and an affordance on a phone that cannot answer either.
+    assert.match(page.body, /<article class="card"[^>]*data-slug="draggable"/);
+    assert.ok(!page.body.includes('draggable="true"'), 'the markup promises no gesture');
     assert.match(page.body, /<section class="col" data-column="[a-z-]+"/);
 
     // Every column the markup offers as a target is a column some card's form
@@ -360,14 +365,16 @@ describe('the board in the browser', () => {
       columns.some((column) => offered.has(column)),
       'the drop targets and the form options are the same words',
     );
+    // Every card the script could mark has a form for the drop to submit.
     const cards = [...page.body.matchAll(/<article class="card[^"]*"([^>]*)>/g)].map((m) => m[1]!);
-    for (const attributes of cards.filter((one) => one.includes('draggable'))) {
-      assert.match(attributes, /data-slug="/, 'a draggable card says which card it is');
-    }
+    assert.ok(cards.some((one) => one.includes('data-slug=')), 'some card is a candidate');
 
-    // A board nobody can move cards on does not offer the gesture.
+    // A board nobody can move cards on offers no candidates at all.
     const readOnly = await harness.server.inject({ method: 'GET', url: '/' });
-    assert.ok(!readOnly.body.includes('draggable="true"'), 'no drag where there is no move form');
+    assert.ok(
+      !/<article class="card[^"]*"[^>]*data-slug=/.test(readOnly.body),
+      'no drag where there is no move form',
+    );
   });
 
   it('says where each card lands, on that card\u2019s own options', async () => {
