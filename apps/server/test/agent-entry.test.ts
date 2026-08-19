@@ -1063,6 +1063,39 @@ describe('the MCP surface', () => {
     assert.equal(second.isError, true);
   });
 
+  it('will not acknowledge on behalf of nobody', async () => {
+    // Every other tool falls back to the session's handle when the argument is
+    // missing, and every other tool either fails or no-ops if that handle is
+    // wrong. This one consumes the answer for everybody: acknowledged as
+    // "unknown-agent" it is gone from the intended agent's inbox for good, and
+    // the refusal that exists to stop two agents acting on one decision then
+    // fires on the agent that should have had it.
+    let id = 300;
+    const call = async (name: string, args: Record<string, unknown>, token?: string) => {
+      const answer = await harness.server.inject({
+        method: 'POST',
+        url: '/mcp',
+        ...(token ? { headers: { authorization: `Bearer ${token}` } } : {}),
+        payload: { jsonrpc: '2.0', id: (id += 1), method: 'tools/call', params: { name, arguments: args } },
+      });
+      return answer.json().result;
+    };
+    const project = (await call('create_project', { name: 'no-handle' })).structuredContent;
+    const token = project.token as string;
+    const asked = await call('escalate', { question: 'Bridge it?', agent: 'mcp-agent' }, token);
+    const question = asked.structuredContent.escalation.id as string;
+    const { answerEscalation } = await import('../src/service.js');
+    await answerEscalation(harness.store, project.project, question, 'answered', 'bridge it', 'http');
+
+    const nameless = await call('acknowledge', { id: question }, token);
+    assert.equal(nameless.isError, true);
+    assert.match(JSON.stringify(nameless), /agent/);
+
+    // And the answer is still there for whoever was meant to act on it.
+    const still = await call('inbox', { agent: 'mcp-agent' }, token);
+    assert.equal(still.structuredContent.answers.length, 1);
+  });
+
   it('charges a tool that writes against the write budget', async () => {
     // The two budgets are published apart and a batch is many calls in one
     // request, so this door counts per call. Which bucket was a set of names

@@ -1159,8 +1159,22 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         };
       }
       case 'acknowledge': {
+        // The one tool that will not fall back to the session's handle. Every
+        // other one either fails or no-ops when the handle is wrong; this one
+        // consumes the answer for everybody, and the refusal that stops two
+        // agents acting on one decision is by name. Acknowledged as
+        // "unknown-agent" it leaves the intended agent's inbox for good and
+        // tells the next caller somebody already did it.
+        const who = (text(args.agent, 'agent') ?? '').trim();
+        if (!who) {
+          throw new ServiceError(
+            400,
+            'bad_argument',
+            'Acknowledging is somebody saying they acted, so "agent" is required here and has to be your handle.',
+          );
+        }
         const doc = await acknowledgeEscalation(store, project, str(args.id), {
-          agent: text(args.agent, 'agent') || actor,
+          agent: who,
           ...(text(args.note, 'note') ? { note: str(args.note) } : {}),
         });
         return { escalation: escalationJson(doc) };

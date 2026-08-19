@@ -934,11 +934,13 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
           'Moves the work and any live claim onto one name. Two spellings are two agents here, and next_item offers work by the registered one.',
       },
       {
-        name: 'acknowledge_answer',
+        // One name for one operation, the same one the MCP tool carries.
+        name: 'acknowledge',
         method: 'POST',
         url: `${base}/v1/{project}/escalations/{id}/ack`,
         request: { agent: '{handle}', note: 'what you did with it' },
-        notes: 'Says the answer was carried out, so the same decision stops coming back on every iteration.',
+        notes:
+          'Says the answer was carried out, so the same decision stops coming back on every iteration. The second agent to acknowledge one is refused by the name of the first.',
       },
       {
         name: 'board_presets',
@@ -959,14 +961,6 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
         method: 'POST',
         url: `${base}/v1/{project}/escalations`,
         request: { agent: 'errors-loop', question: '...', context: '...', priority: 'high' },
-      },
-      {
-        name: 'acknowledge',
-        method: 'POST',
-        url: `${base}/v1/{project}/escalations/{id}/ack`,
-        request: { agent: 'errors-loop', note: 'what you did about it' },
-        notes:
-          'Clears an answered question out of the inbox. Until it is acknowledged the inbox keeps offering it, and the second agent to act on one is refused by name.',
       },
       {
         name: 'inbox',
