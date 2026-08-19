@@ -213,6 +213,23 @@ export interface BoardFacets {
   omitted: { owners: number; agents: number; labels: number };
 }
 
+export interface HygieneRules {
+  /** Hours before untouched work is flagged stale. Null stops flagging it. */
+  stale_after_hours?: number | null;
+  /**
+   * How an item stops being mentioned by the signal that files it. Both halves
+   * are required together: consecutive absences and hours of wall clock, so a
+   * single failed poll cannot close live work. Null stops closing anything.
+   */
+  absence_resolve?: { observations: number; min_hours: number } | null;
+  /** Hours before a card with a title and no body is flagged. Null stops it. */
+  require_body_after_hours?: number | null;
+  /** Default lease length for a claim that does not name one. */
+  claim_ttl_minutes?: number;
+  /** Whether writing outside a registered handle's scope is warned about. */
+  scope_warnings?: boolean;
+}
+
 export interface ApiKey {
   id: string;
   name: string;
@@ -901,14 +918,17 @@ export class Muster {
     return this.request('POST', `/agents/${encodeURIComponent(from)}/rename`, { to });
   }
 
-  /** The hygiene rules this project runs itself by. */
-  async setRules(input: {
-    stale_after_hours?: number;
-    absence_resolve?: number;
-    require_body_after_hours?: number;
-    claim_ttl_minutes?: number;
-    scope_warnings?: boolean;
-  }): Promise<Record<string, unknown>> {
+  /**
+   * The hygiene rules this project runs itself by.
+   *
+   * Read out of the published schema and not from the field names, which is
+   * how the first version of this got `absence_resolve` wrong: it is two
+   * numbers and not one, because closing work an external signal stopped
+   * mentioning needs both a count of consecutive absences and hours of wall
+   * clock, and one failed poll must not close live work. Null turns a rule
+   * off, which is why three of these take it.
+   */
+  async setRules(input: HygieneRules): Promise<Record<string, unknown>> {
     return this.request('PATCH', '/rules', input);
   }
 

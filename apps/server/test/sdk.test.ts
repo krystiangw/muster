@@ -490,6 +490,36 @@ describe('the typed SDK', () => {
     assert.equal(await client.withNext(async () => 'ran'), null);
   });
 
+  it('sets the hygiene rules in the shape the service takes', async () => {
+    // The first version of this type was guessed from the field names and got
+    // `absence_resolve` wrong: it is two numbers and not one, because closing
+    // work a signal stopped mentioning needs both a count of consecutive
+    // absences and hours of wall clock, so one failed poll cannot close live
+    // work. A caller writing the valid value would have failed type-checking,
+    // and the value the type advertised would have been refused 400.
+    const { client } = await Muster.start({ name: 'rules', actor: 'a', baseUrl });
+
+    const set = await client.setRules({
+      absence_resolve: { observations: 3, min_hours: 6 },
+      stale_after_hours: null,
+      claim_ttl_minutes: 45,
+    });
+    const rules = (set as { rules?: Record<string, unknown> }).rules ?? set;
+    assert.deepEqual(rules.absence_resolve, { observations: 3, min_hours: 6 });
+    assert.equal(rules.stale_after_hours, null, 'null turns a rule off');
+    assert.equal(rules.claim_ttl_minutes, 45);
+
+    // And the shape the old type advertised is refused, which is what makes
+    // getting the type right worth doing rather than merely tidy.
+    await assert.rejects(
+      client.setRules({ absence_resolve: 3 as unknown as { observations: number; min_hours: number } }),
+      (error: unknown) => {
+        assert.equal((error as { status?: number }).status, 400);
+        return true;
+      },
+    );
+  });
+
   it('can list and revoke a key it made, and rotate a read link', async () => {
     // Minting a credential from code and having to open a browser to take it
     // back is the asymmetry that leaves keys alive forever.
