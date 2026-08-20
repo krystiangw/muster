@@ -2087,3 +2087,49 @@ priority or the labels that were asked for, and the answer said it was filed.
 the same word are refused for being the same: a card whose `slug` and whose
 `then.slug` are both `x` files itself, and that refusal arrives first and says
 so. Every generated value now carries its own number.
+
+## A rule enforced at one door and not at the other, 2026-08-20
+
+Hygiene on production reported one project with an expired lease that a sweep
+had already run past: `p_8r0jc7gzxe`, card `audit:door`, `status: done`, holding
+a claim that had run out thirty-two hours earlier. The close path was not the
+suspect, because it already clears the lease and carries a comment saying why:
+finished work is not work in progress, and a claim outliving the card puts a
+done card in the in-progress column of every board whose column asks for
+claimed items. Four doors were measured and all four cleared it: the item
+upsert, the board move, and both of their MCP equivalents.
+
+The path was the other verb. `POST /items/{slug}/claim` never looked at the
+status, so a lease could be taken on a card that was already finished, and the
+answer was 200. For the length of a lease the card then reports a live holder to
+every reader that asks who holds what, and a column defined by `claimed: true`
+alone shows finished work as moving. `match.status` is optional, so that column
+is a configuration somebody can write, not a hypothetical.
+
+**The published document had already promised the rule.** The protocol says
+closing an item releases whatever claim it carried, *whoever closed it*. What it
+did not say, because nothing enforced it, was that the rule holds from the other
+side as well. A promise kept at one door and not at the one beside it is the
+shape this repository has hit before: patch the cause at the door, not the row
+in the database.
+
+**Three guards, because one of them is a race.** The refusal is 409 and not 404:
+the card is there and readable, it is the verb that does not apply, and the
+status is named in the message and carried in the details so a caller knows
+which write comes first. It is raised before the blockers check, because telling
+somebody to go and finish a prerequisite of work that is already over is the
+wrong instruction. The status is stated again in the filter of the write, so a
+close landing between the read and the lease takes the lease off the table
+rather than losing to it. And the losing path has to speak: a card closed in
+that gap has no holder to name and nothing left waiting, so without a third
+branch the answer is a conflict with a holder called `unknown`.
+
+Each of the three was removed in turn and exactly one test failed each time.
+The reopen route is a real way through rather than a sentence in a message, and
+the test walks it.
+
+**The production row was not the defect and needed no repair.** The sweep does
+not filter on status and clears any expired lease it finds; it is throttled per
+project and only runs when somebody touches the project. That project is an
+abandoned probe, untouched since the row was written, which is why the lease is
+still sitting there and why it will be gone the moment anything reads it.

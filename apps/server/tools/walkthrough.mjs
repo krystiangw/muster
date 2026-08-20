@@ -323,6 +323,21 @@ const run = async () => {
     finished.body?.chained?.slug === `${SLUG}-chained`,
     JSON.stringify(finished.body?.chained ?? finished.body?.warnings),
   );
+  // The card above is genuinely finished at this point, which makes it the one
+  // place in the walk where the rule can be read on a real deployment: a lease
+  // is not handed out over work that is over. Costs no card of its own, and
+  // the cleanup below carries it away either way.
+  const late = await json(`${api}/items/${encodeURIComponent(`${SLUG}-chain`)}/claim`, {
+    method: 'POST',
+    headers: authed,
+    body: JSON.stringify({ agent: AGENT }),
+  });
+  check(
+    'a finished card refuses the lease instead of handing one out',
+    late.status === 409 && late.body?.error === 'already_finished',
+    `${late.status} ${JSON.stringify(late.body).slice(0, 160)}`,
+  );
+
   for (const slug of [`${SLUG}-chain`, `${SLUG}-chained`]) {
     // The token and nothing else: `authed` carries a JSON content type, and a
     // DELETE with that header and no body is refused as an empty JSON body, so

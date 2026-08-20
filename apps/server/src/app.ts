@@ -756,16 +756,18 @@ export async function buildApp(
             };
           }
           if (CONFLICTS.has(key)) {
-            // Two shapes, because there are two ways to lose a lease and they
-            // are not the same news. Somebody holding it is described: the
-            // holder is named and the card comes back. Something unfinished in
-            // front of it is refused: it names what to finish first. anyOf and
+            // Three reasons in two shapes, because they are not the same
+            // news. Somebody holding it is described: the holder is named and
+            // the card comes back. Something unfinished in front of it is
+            // refused: it names what to finish first. A card that is already
+            // finished is refused too, in the same shape, naming the status:
+            // there is no holder to name and nothing left waiting. anyOf and
             // not oneOf, for the same reason as the OAuth pair: the shapes are
             // open, and a keyword meaning "exactly one" turns any future
             // overlap into a validator rejecting a body this service sends.
             responses['409'] ??= {
               description:
-                'Somebody else holds the lease, and the answer names them and returns the card; or something the card waits on is unfinished, and the answer names that.',
+                'Somebody else holds the lease, and the answer names them and returns the card; or something the card waits on is unfinished, and the answer names that; or the card is finished, and the answer names the status it is in.',
               content: {
                 'application/json': {
                   schema: {

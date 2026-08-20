@@ -1845,6 +1845,22 @@ export async function unmetBlockers(
 }
 
 /** The refusal, in the words the agent has to act on. */
+/**
+ * A lease asked for on work that is over. 409 rather than 404, because the
+ * card is there and readable; it is the verb that does not apply. The status
+ * is named in the message and carried in the details, so a caller that wants
+ * the work redone knows which write comes first rather than retrying a claim
+ * that will keep answering the same way.
+ */
+function finishedAlready(slug: string, status: ItemStatus): ServiceError {
+  return new ServiceError(
+    409,
+    'already_finished',
+    `${slug} is ${status}, and finished work is not claimed. Reopen it with a status write if it needs doing again, then take the lease.`,
+    { status },
+  );
+}
+
 function blockedMessage(
   slug: string,
   unmet: Array<{ slug: string; title: string | null; status: ItemStatus | null }>,
@@ -1964,8 +1980,18 @@ export async function claimItem(
   // query, and only on this path: reading the board never pays for it.
   const before = await store.items.findOne(
     { projectId: project._id, slug: normalized },
-    { projection: { blockedBy: 1 } },
+    { projection: { blockedBy: 1, status: 1 } },
   );
+  // Finished work is not work in progress, and that has to hold from both
+  // sides. Closing a card clears the lease it carried; this is the other
+  // door, where a lease is taken on a card that is already closed. Without
+  // it a done card reports a live holder for the length of a lease, and a
+  // column that asks only for claimed items shows it as moving. Refused
+  // before the blockers below, because what a finished card waits on is not
+  // news anybody can act on.
+  if (before && TERMINAL_STATUSES.includes(before.status)) {
+    throw finishedAlready(normalized, before.status);
+  }
   if (before) {
     const unmet = await unmetBlockers(store, project._id, before as Pick<ItemDoc, 'blockedBy'>);
     if (unmet.length > 0) {
@@ -1984,6 +2010,10 @@ export async function claimItem(
     {
       projectId: project._id,
       slug: normalized,
+      // The read above is a moment old, and closing a card is one write away.
+      // Stated again in the filter so a close landing in that gap takes the
+      // lease off the table rather than losing to it.
+      status: { $nin: [...TERMINAL_STATUSES] },
       $and: [
         {
           $or: [
@@ -2033,6 +2063,12 @@ export async function claimItem(
 
   const current = await store.items.findOne({ projectId: project._id, slug: normalized });
   if (!current) throw notFound(slug);
+  // The half of the fence above that has to speak. A card closed while this
+  // call was in flight has no holder to name and nothing left waiting, so
+  // both answers below would describe a card that no longer exists.
+  if (TERMINAL_STATUSES.includes(current.status)) {
+    throw finishedAlready(normalized, current.status);
+  }
   // The lease may have been refused by the guard rather than by another
   // holder, and the two need different answers. Asked again against the row as
   // it is now: still waiting on something means the refusal is about that, and

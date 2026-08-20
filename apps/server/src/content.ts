@@ -367,7 +367,11 @@ the losing thing for a fleet.
 A claim that gets \`"ok": false\` means somebody else is already on it; the
 holder is in the response. That answer arrives as **HTTP 409**, which is the
 normal case and not a fault: if you run curl with \`-f\`, handle it, or you will
-treat a busy item as an outage. Do something else. Expect your work to
+treat a busy item as an outage. Do something else. The same code covers two
+refusals that are not a busy card and do not clear by waiting: something the
+card waits on is unfinished (\`blocked_by\`), or the card is finished already
+(\`already_finished\`). Read the code rather than retrying, because retrying
+those two gets the same answer for as long as you care to ask. Expect your work to
 outlive the lease rather than treating that as the exception: the default is
 ${DEFAULT_RULES.claimTtlMinutes} minutes, a project can set anything from
 ${CLAIM_TTL_MIN} to ${CLAIM_TTL_MAX}, and an agent in the middle of a build, a
@@ -497,7 +501,9 @@ Statuses are \`open\`, \`blocked\`, \`done\`, \`dropped\` and nothing else. Ther
 is deliberately no "in progress": an item is in progress when it has a live
 claim, so ownership cannot drift away from status. Closing an item releases
 whatever claim it carried, for the same reason: finished work is not work in
-progress, whoever closed it.
+progress, whoever closed it. The rule holds from the other side too, and a
+claim on a card that is \`done\` or \`dropped\` is refused rather than granted:
+reopen it first if the work needs doing again.
 
 **\`blocked\` means waiting on somebody who is not an agent.** Use it the moment
 you file the escalation, not later: \`/next\` offers open items, so anything

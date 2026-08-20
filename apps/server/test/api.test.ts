@@ -871,6 +871,81 @@ describe('claims', () => {
     assert.equal(second.json().held_by, 'agent-a');
   });
 
+  it('refuses a lease on work that is already finished, and says what comes first', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'work', title: 'work', actor: 'a' });
+    await post(project, '/items', { slug: 'work', status: 'done', actor: 'a' });
+
+    const late = await post(project, '/items/work/claim', { agent: 'agent-b' });
+    assert.equal(late.statusCode, 409);
+    assert.equal(late.json().error, 'already_finished');
+    assert.equal(late.json().status, 'done');
+    assert.match(late.json().message, /done/);
+    assert.match(late.json().message, /[Rr]eopen/);
+
+    // The point of the refusal, and the reason it is not cosmetic: a done card
+    // holding a live lease describes an agent as working on finished work, to
+    // every reader that asks who holds what.
+    const held = await harness.store.items.findOne({ projectId: project.id, slug: 'work' });
+    assert.equal(held?.claim, null);
+
+    // Dropped is the other end of the same rule.
+    await post(project, '/items', { slug: 'gone', title: 'gone', actor: 'a' });
+    await post(project, '/items', { slug: 'gone', status: 'dropped', actor: 'a' });
+    const dropped = await post(project, '/items/gone/claim', { agent: 'agent-b' });
+    assert.equal(dropped.statusCode, 409);
+    assert.equal(dropped.json().status, 'dropped');
+
+    // A finished card can still carry a list of things it waited on, and one of
+    // them can still be open. The answer has to be about the finish: telling
+    // somebody to go and finish a prerequisite of work that is already over is
+    // the wrong instruction, and it is the one they get if this is read in the
+    // other order.
+    await post(project, '/items', { slug: 'other', title: 'other', actor: 'a' });
+    await post(project, '/items', { slug: 'shut', title: 'shut', blocked_by: ['other'], actor: 'a' });
+    await post(project, '/items', { slug: 'shut', status: 'done', actor: 'a' });
+    const both = await post(project, '/items/shut/claim', { agent: 'agent-b' });
+    assert.equal(both.statusCode, 409);
+    assert.equal(both.json().error, 'already_finished');
+
+    // And reopening is a real way through, not a sentence in a message.
+    await post(project, '/items', { slug: 'work', status: 'open', actor: 'a' });
+    const again = await post(project, '/items/work/claim', { agent: 'agent-b' });
+    assert.equal(again.json().ok, true);
+  });
+
+  it('refuses one closed while the claim was in flight, without naming a holder', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'work', title: 'work', actor: 'a' });
+
+    // The gap the filter exists for: the claim reads the card, and the card is
+    // closed before the lease is written. Staged by closing it inside the read
+    // itself, which is the one moment a test can be sure it lands in.
+    const items = harness.store.items as unknown as { findOne: (...args: unknown[]) => Promise<unknown> };
+    const real = items.findOne.bind(items);
+    let armed = true;
+    items.findOne = async (...args: unknown[]) => {
+      const row = await real(...args);
+      if (armed) {
+        armed = false;
+        await post(project, '/items', { slug: 'work', status: 'done', actor: 'a' });
+      }
+      return row;
+    };
+    let raced;
+    try {
+      raced = await post(project, '/items/work/claim', { agent: 'agent-b' });
+    } finally {
+      items.findOne = real;
+    }
+    assert.equal(armed, false, 'the close never landed, so this proves nothing');
+    assert.equal(raced.statusCode, 409);
+    assert.equal(raced.json().error, 'already_finished');
+    assert.equal(raced.json().held_by, undefined);
+    const after = await harness.store.items.findOne({ projectId: project.id, slug: 'work' });
+    assert.equal(after?.claim, null);
+  });
+
   it('lets the holder extend and release, and the next agent take over', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'work', title: 'work', actor: 'a' });
