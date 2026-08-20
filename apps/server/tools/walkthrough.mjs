@@ -338,6 +338,23 @@ const run = async () => {
     `${late.status} ${JSON.stringify(late.body).slice(0, 160)}`,
   );
 
+  // And the one caller that goes through it, because the refusal above broke
+  // this the first time it shipped: dragging a finished card into the column
+  // for work in progress is a reopen and a claim in one call, and the board
+  // offers that control to a person.
+  const dragged = await json(`${api}/items/${encodeURIComponent(`${SLUG}-chain`)}/move`, {
+    method: 'POST',
+    headers: authed,
+    body: JSON.stringify({ column: 'doing', actor: AGENT }),
+  });
+  check(
+    'while dragging it back into progress reopens it and hands over the lease',
+    dragged.status === 200 &&
+      dragged.body?.item?.status === 'open' &&
+      dragged.body?.item?.claim?.agent === AGENT,
+    `${dragged.status} ${JSON.stringify(dragged.body?.item ?? dragged.body).slice(0, 160)}`,
+  );
+
   for (const slug of [`${SLUG}-chain`, `${SLUG}-chained`]) {
     // The token and nothing else: `authed` carries a JSON content type, and a
     // DELETE with that header and no body is refused as an empty JSON body, so
