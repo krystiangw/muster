@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import type { Config } from '../config.js';
 import type { Store } from '../db.js';
-import type { Mailer } from '../email.js';
+import { redactAddress, type Mailer } from '../email.js';
 import { chip, count, escapeHtml, when } from '../html.js';
 import { page } from '../page.js';
 import { who } from '../identity.js';
@@ -483,6 +483,22 @@ function sharing(
 
   async function renderView(session: OperatorSession): Promise<string> {
     const projects = await store.projects.find({ claimedBy: session.email }).toArray();
+    /**
+     * Boards somebody else owns and let this address read.
+     *
+     * Listed, and listed apart. Sharing a board is not handing over the work
+     * on it: the questions on this page are the ones waiting on the person
+     * reading it, and an escalation on a colleague's board is waiting on the
+     * colleague. So these appear as a way in and nothing else, and everything
+     * above them still counts only what this address owns.
+     *
+     * Without this the person a board was shared with has to keep the read
+     * link somewhere, which is the thing the link being a password makes a bad
+     * idea, and the whole reason for sharing by address.
+     */
+    const sharedWithMe = await store.projects
+      .find({ sharedWith: session.email, claimedBy: { $ne: session.email } })
+      .toArray();
     const ids = projects.map((project) => project._id);
     const names = new Map(projects.map((project) => [project._id, project.name]));
     // The board each item lives on, so a row on this page is a way in rather
@@ -877,6 +893,35 @@ ${projects
 </tbody></table></div>
 
 ${
+      sharedWithMe.length === 0
+        ? ''
+        : `<h2>Shared with you</h2>
+<p style="color:var(--ink-2)">Somebody else owns these and let this address read them. The
+questions above are the ones waiting on you, so nothing from here is counted in them.</p>
+<div class="scroll cards"><table class="cards">
+<thead><tr><th scope="col">Project</th><th scope="col" class="mono">open</th><th scope="col">Owner</th><th scope="col"></th></tr></thead>
+<tbody>
+${sharedWithMe
+  .map(
+    (project) =>
+      `<tr><td data-label="Project"><strong>${escapeHtml(project.name)}</strong>
+       <span class="mono" style="color:var(--muted);font-size:13px">${escapeHtml(project._id)}</span>${
+         project.description
+           ? `<span class="one-line" title="${escapeHtml(project.description)}">${escapeHtml(project.description)}</span>`
+           : ''
+       }</td>
+       <td class="mono" data-label="Open items">${project.counts.items}</td>
+       <td data-label="Owner">${escapeHtml(redactAddress(project.claimedBy ?? ''))}</td>
+       <td data-label="Go to"><div class="doing">
+           <a href="/r/${escapeHtml(project.readToken)}/board">board</a>
+           <a href="/r/${escapeHtml(project.readToken)}">questions</a>
+       </div></td></tr>`,
+  )
+  .join('\n')}
+</tbody></table></div>`
+    }
+
+${
       staleItems.length > 0
         ? `<h2>Going stale</h2>
 <p style="color:var(--ink-2)">Nobody has touched these, and no agent has claimed them. Hygiene
@@ -1051,26 +1096,48 @@ curl -sX DELETE ${escapeHtml(config.baseUrl)}/v1/${escapeHtml(project._id)}/keys
     const project = await store.projects.findOne({ _id: id, claimedBy: session.email });
     if (!project) throw new ServiceError(404, 'not_found', 'No project of yours with that id.');
 
-    const shared = new Set(project.sharedWith ?? []);
+    // One operator with two tabs is enough for this to matter, and what it
+    // costs is the wrong direction: reading the list, changing it here and
+    // writing the whole thing back lets an addition that started earlier land
+    // after a removal and put back the address that was just revoked. So the
+    // database does the arithmetic on the array it holds.
     if (form.remove !== undefined) {
-      shared.delete(form.remove.trim().toLowerCase());
-    } else {
-      const email = (form.add ?? '').trim().toLowerCase();
-      if (!looksLikeEmail(email)) {
-        throw new ServiceError(400, 'bad_email', 'That does not look like an email address.');
-      }
-      // The owner is already in, and listing them twice would offer a remove
-      // button that takes nothing away.
-      if (email !== project.claimedBy) shared.add(email);
-      if (shared.size > SHARED_WITH_MAX) {
-        throw new ServiceError(
-          400,
-          'too_many_shares',
-          `A board can be shared with ${SHARED_WITH_MAX} addresses. Hand it over with the API if it needs more than that.`,
-        );
-      }
+      await store.projects.updateOne(
+        { _id: project._id, claimedBy: session.email },
+        { $pull: { sharedWith: form.remove.trim().toLowerCase() } },
+      );
+      return reply.redirect('/operator', 303);
     }
-    await updateProject(store, project._id, { sharedWith: [...shared].sort() });
+
+    const email = (form.add ?? '').trim().toLowerCase();
+    if (!looksLikeEmail(email)) {
+      throw new ServiceError(400, 'bad_email', 'That does not look like an email address.');
+    }
+    // The owner is already in, and listing them twice would offer a remove
+    // button that takes nothing away.
+    if (email === project.claimedBy) return reply.redirect('/operator', 303);
+
+    // The cap is part of the same write, or it is a read of a number that
+    // another tab is already changing. An address that is on the list passes
+    // whatever the size is, because adding it again changes nothing.
+    const grew = await store.projects.updateOne(
+      {
+        _id: project._id,
+        claimedBy: session.email,
+        $or: [
+          { sharedWith: email },
+          { $expr: { $lt: [{ $size: { $ifNull: ['$sharedWith', []] } }, SHARED_WITH_MAX] } },
+        ],
+      },
+      { $addToSet: { sharedWith: email } },
+    );
+    if (grew.matchedCount === 0) {
+      throw new ServiceError(
+        400,
+        'too_many_shares',
+        `A board can be shared with ${SHARED_WITH_MAX} addresses. Hand it over with the API if it needs more than that.`,
+      );
+    }
     return reply.redirect('/operator', 303);
   });
 

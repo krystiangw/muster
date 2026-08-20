@@ -256,6 +256,63 @@ describe('the operator view', () => {
     );
   });
 
+  it('keeps a revocation and an addition that arrive together, both of them', async () => {
+    // What this pins is the outcome, not the mechanism. Read the list, change
+    // it here, write the whole thing back, and a removal landing between
+    // another request's read and its write disappears: the address the owner
+    // just revoked comes back and nothing says so. The arithmetic happens in
+    // the database now, on the array it holds.
+    //
+    // The ordering that would break it cannot be forced from out here, so this
+    // passes either way and the mutation that puts the old code back does not
+    // fail it. Said rather than dressed up: what makes the revocation safe is
+    // `$pull` and a filtered `$addToSet`, and this test is only evidence that
+    // both writes land at all.
+    const project = await createProject(harness, 'raced sharing');
+    await claimFor(project, 'owner@example.com');
+    const owner = await signIn(harness, 'owner@example.com');
+    const share = (form: Record<string, string>) =>
+      harness.server.inject({
+        method: 'POST',
+        url: `/operator/projects/${project.id}/shared`,
+        payload: owner.form(form),
+        headers: owner.headers,
+      });
+
+    await share({ add: 'first@example.com' });
+    await Promise.all([share({ remove: 'first@example.com' }), share({ add: 'second@example.com' })]);
+    const after = (await harness.store.projects.findOne({ _id: project.id }))?.sharedWith ?? [];
+    assert.ok(!after.includes('first@example.com'), 'the revoked address stays revoked');
+    assert.ok(after.includes('second@example.com'), 'and the other one still landed');
+  });
+
+  it('shows a board somebody shared with you, apart from the ones you own', async () => {
+    // Without this the person a board was shared with has to keep the read
+    // link somewhere, which is the thing that makes a link a password and the
+    // whole reason for sharing by address instead.
+    const project = await createProject(harness, 'theirs');
+    await claimFor(project, 'owner@example.com');
+    const owner = await signIn(harness, 'owner@example.com');
+    await harness.server.inject({
+      method: 'POST',
+      url: `/operator/projects/${project.id}/shared`,
+      payload: owner.form({ add: 'colleague@example.com' }),
+      headers: owner.headers,
+    });
+
+    const colleague = await signIn(harness, 'colleague@example.com');
+    const view = await harness.server.inject({ method: 'GET', url: '/operator', headers: colleague.headers });
+    assert.equal(view.statusCode, 200);
+    assert.match(view.body, /Shared with you/);
+    assert.match(view.body, /theirs/);
+    // And it is a way in, not a board of theirs: no token button, no privacy
+    // switch, and nothing from it counted as waiting on them.
+    assert.doesNotMatch(view.body.split('Shared with you')[1] ?? '', /new token|make private|open it up/);
+
+    const ownerView = await harness.server.inject({ method: 'GET', url: '/operator', headers: owner.headers });
+    assert.doesNotMatch(ownerView.body, /Shared with you/, 'their own board is not shared with them');
+  });
+
   it('refuses to share a board with something that is not an address, or with somebody else\u2019s board', async () => {
     const project = await createProject(harness, 'guarded');
     await claimFor(project, 'owner@example.com');

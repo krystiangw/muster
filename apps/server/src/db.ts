@@ -535,6 +535,11 @@ export async function ensureIndexes(store: Store): Promise<void> {
       { key: { readToken: 1 }, unique: true, name: 'readToken' },
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
       { key: { claimedBy: 1 }, name: 'claimedBy', sparse: true },
+      // Read on every signed in visit to /operator, to find the boards
+      // somebody else shared with this address. Multikey and sparse: most
+      // boards are shared with nobody, and without it that page reads every
+      // project in the deployment to answer a question about one person.
+      { key: { sharedWith: 1 }, name: 'sharedWith', sparse: true },
     ]),
     ensure(store.agents, [
       { key: { projectId: 1, handle: 1 }, unique: true, name: 'handle' },
