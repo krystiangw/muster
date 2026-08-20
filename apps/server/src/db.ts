@@ -447,18 +447,24 @@ async function ensure(collection: IndexedCollection, specs: IndexDescription[]):
       await collection.createIndexes([spec]);
     } catch (error) {
       if (!INDEX_CONFLICT.has((error as { code?: number }).code ?? 0) || !spec.name) throw error;
-      // By the name it is actually under, not the name we are asking for.
-      // MongoDB raises the same conflict when an index with this key exists
-      // under a different name, and dropping the name in the spec then finds
-      // nothing, swallows the miss and retries into the same refusal, so the
-      // process never finishes booting. That is the failure this whole
-      // function exists to prevent, one rename away.
+      // Everything standing in the way, by the name it is actually under.
+      //
+      // There are two ways to be in the way and they can both be true at once:
+      // something else holds the name being asked for, and the key being asked
+      // for sits under some other name. Dropping only the name leaves the key
+      // conflict; dropping only the key holder leaves the name taken, and the
+      // retry meets the same refusal after having thrown away a live index.
+      // Either way the process never finishes booting, which is the failure
+      // this whole function exists to prevent.
       const live = await collection.indexes().catch(() => []);
-      const same = JSON.stringify(spec.key);
-      const holder = live.find(
-        (one) => one.name !== '_id_' && JSON.stringify(one.key) === same,
-      ) as { name?: string } | undefined;
-      await collection.dropIndex(holder?.name ?? spec.name).catch(() => undefined);
+      const wanted = JSON.stringify(spec.key);
+      const blocking = new Set<string>();
+      for (const one of live) {
+        const name = typeof one.name === 'string' ? one.name : '';
+        if (!name || name === '_id_') continue;
+        if (name === spec.name || JSON.stringify(one.key) === wanted) blocking.add(name);
+      }
+      for (const name of blocking) await collection.dropIndex(name).catch(() => undefined);
       await collection.createIndexes([spec]);
     }
   }

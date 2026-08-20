@@ -253,6 +253,34 @@ describe('starting against a database that has run another version', () => {
     assert.equal(byKey.length, 1, 'one index on that key, not two');
     assert.equal((byKey[0] as { unique?: boolean }).unique, true, 'and it is still the unique one');
   });
+
+  it('starts when the name and the key are blocked by different indexes at once', async () => {
+    // The harder half. Something else holds the name being asked for, and the
+    // key being asked for sits under another name. Resolving only one of them
+    // leaves the other, and the retry meets the same refusal having already
+    // thrown away a live index.
+    const { createStore } = await import('../src/db.js');
+    const items = harness.store.items;
+    const declared = (await items.indexes()).find(
+      (one) => JSON.stringify(one.key) === '{"projectId":1,"slug":1}',
+    ) as { name: string };
+
+    await items.dropIndex(declared.name);
+    // The declared key, under somebody else's name.
+    await items.createIndex({ projectId: 1, slug: 1 }, { name: 'wearing_another_name', unique: true });
+    // And the declared name, over a key that has nothing to do with it.
+    await items.createIndex({ title: 1 }, { name: declared.name });
+
+    const second = await createStore(harness.config.mongoUri, harness.config.mongoDb);
+    assert.ok(second, 'it starts');
+    await second.client.close();
+
+    const after = await items.indexes();
+    const byKey = after.filter((one) => JSON.stringify(one.key) === '{"projectId":1,"slug":1}');
+    assert.equal(byKey.length, 1, 'one index on that key');
+    assert.equal((byKey[0] as { name?: string }).name, declared.name, 'under the declared name');
+    assert.equal((byKey[0] as { unique?: boolean }).unique, true, 'and unique, as declared');
+  });
 });
 
 describe('the filters a slow search is told to use', () => {
