@@ -419,10 +419,13 @@ export async function runMigrations(store: Store): Promise<void> {
 /** The two ways MongoDB says "that name is taken by a different index". */
 const INDEX_CONFLICT = new Set([85, 86]);
 
-async function ensure(
-  collection: { createIndexes: (specs: IndexDescription[]) => Promise<unknown>; dropIndex: (name: string) => Promise<unknown> },
-  specs: IndexDescription[],
-): Promise<void> {
+interface IndexedCollection {
+  createIndexes: (specs: IndexDescription[]) => Promise<unknown>;
+  dropIndex: (name: string) => Promise<unknown>;
+  indexes: () => Promise<Array<Record<string, unknown>>>;
+}
+
+async function ensure(collection: IndexedCollection, specs: IndexDescription[]): Promise<void> {
   try {
     await collection.createIndexes(specs);
     return;
@@ -444,7 +447,18 @@ async function ensure(
       await collection.createIndexes([spec]);
     } catch (error) {
       if (!INDEX_CONFLICT.has((error as { code?: number }).code ?? 0) || !spec.name) throw error;
-      await collection.dropIndex(spec.name).catch(() => undefined);
+      // By the name it is actually under, not the name we are asking for.
+      // MongoDB raises the same conflict when an index with this key exists
+      // under a different name, and dropping the name in the spec then finds
+      // nothing, swallows the miss and retries into the same refusal, so the
+      // process never finishes booting. That is the failure this whole
+      // function exists to prevent, one rename away.
+      const live = await collection.indexes().catch(() => []);
+      const same = JSON.stringify(spec.key);
+      const holder = live.find(
+        (one) => one.name !== '_id_' && JSON.stringify(one.key) === same,
+      ) as { name?: string } | undefined;
+      await collection.dropIndex(holder?.name ?? spec.name).catch(() => undefined);
       await collection.createIndexes([spec]);
     }
   }

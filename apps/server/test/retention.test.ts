@@ -215,6 +215,46 @@ describe('what the service promises to forget', () => {
  * on before a document is read, and it goes stale the moment somebody adds or
  * drops one. This is the test that notices, in both directions.
  */
+describe('starting against a database that has run another version', () => {
+  let harness: Harness;
+  before(async () => {
+    harness = await startHarness();
+  });
+  after(async () => {
+    await harness?.stop();
+  });
+
+  it('replaces an index that is there under a different name', async () => {
+    // The failure this cannot have: MongoDB refuses to create an index whose
+    // key already exists under another name, and the recovery used to drop the
+    // name being asked for, which is not the name it is under. The drop found
+    // nothing, the retry met the same refusal, and the process never finished
+    // booting, which is the exact thing the recovery exists to prevent.
+    const { createStore } = await import('../src/db.js');
+    const items = harness.store.items;
+    const unique = (await items.indexes()).find(
+      (one) => (one as { unique?: boolean }).unique && JSON.stringify(one.key) === '{"projectId":1,"slug":1}',
+    ) as { name: string } | undefined;
+    assert.ok(unique, 'the fixture: the slug index is unique');
+
+    await items.dropIndex(unique.name);
+    await items.createIndex({ projectId: 1, slug: 1 }, { name: 'renamed_by_hand', unique: true });
+
+    // A boot against that database. Before the fix this threw and nothing
+    // started.
+    const second = await createStore(harness.config.mongoUri, harness.config.mongoDb);
+    assert.ok(second, 'it starts');
+    // Closed here, or the runner waits on a client nothing owns and the whole
+    // file stops finishing rather than failing.
+    await second.client.close();
+
+    const after = await items.indexes();
+    const byKey = after.filter((one) => JSON.stringify(one.key) === '{"projectId":1,"slug":1}');
+    assert.equal(byKey.length, 1, 'one index on that key, not two');
+    assert.equal((byKey[0] as { unique?: boolean }).unique, true, 'and it is still the unique one');
+  });
+});
+
 describe('the filters a slow search is told to use', () => {
   let harness: Harness;
   before(async () => {
