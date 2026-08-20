@@ -95,11 +95,14 @@ const [
         { $match: { kind: 'view', from: { $ne: null }, at: { $gte: since(30) } } },
         { $group: { _id: '$from', n: { $sum: 1 } } },
         { $sort: { n: -1 } },
-        // Room for the rows dropped below. The limit used to be the fifteen
-        // printed, so a test host in the top fifteen ate one of them and the
-        // next real source fell off the end of a table that then said nothing
-        // else had named a source.
-        { $limit: 60 },
+        // No limit here, and the cut happens after the reserved names are
+        // dropped. It used to cut at the fifteen printed, so a test host in the
+        // top fifteen took a slot from a real source and the table could then
+        // say nothing else had named one; widening it to sixty moved the same
+        // fault further away rather than removing it, because an audit using a
+        // fresh subdomain each run makes as many rows as it likes. One row per
+        // host that sent somebody here in a month is a list this report can
+        // hold, and this is a command somebody runs, not a request path.
       ])
       .toArray(),
     projects.countDocuments({ visibility: 'owner' }),
