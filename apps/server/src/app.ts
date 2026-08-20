@@ -41,6 +41,10 @@ export interface App {
  * compressed here, so that question never has to be argued.
  */
 declare module 'fastify' {
+  interface FastifyInstance {
+    /** Every route registered on this server, method by method. */
+    registeredRoutes: Array<{ method: string; url: string }>;
+  }
   interface FastifyReply {
     compressible?: boolean;
   }
@@ -378,6 +382,7 @@ export async function buildApp(
   store: Store,
   overrides: BuildOverrides = {},
 ): Promise<App> {
+  const registered: Array<{ method: string; url: string }> = [];
   const server = Fastify({
     logger: {
       level: config.logLevel,
@@ -442,6 +447,24 @@ export async function buildApp(
       },
     },
   });
+
+  /**
+   * Every route this server actually registered.
+   *
+   * For the tests that compare a published sentence with the doors behind it.
+   * The first of those read the source and matched one spelling of
+   * `app.post('...')`, which answers a question nobody asked: what one file
+   * looks like, rather than what is registered. A route written with double
+   * quotes, over two lines, through `app.route`, or with its path in a
+   * constant would have been invisible to it, and the guard would have stayed
+   * green while the capability went unpublished.
+   */
+  server.addHook('onRoute', (route) => {
+    for (const method of [route.method].flat()) {
+      registered.push({ method, url: route.url });
+    }
+  });
+  server.decorate('registeredRoutes', registered);
 
   setSiteVerification(config.siteVerification);
   setContactEmail(config.contactEmail);

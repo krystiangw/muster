@@ -289,7 +289,6 @@ if (args.includes('--verify')) {
     process.exit(1);
   }
   recordCheck(true, []);
-  sayIfItMovedUnderUs();
 
   // Said, never failed on. A collection that had rows and now has none is
   // worth an eyebrow and is not by itself wrong: emptying one is what a purge
@@ -319,6 +318,12 @@ if (args.includes('--verify')) {
       // The older copy being unreadable says nothing about this one.
     }
   }
+
+  // Last on the way out, after the comparison above has finished reading the
+  // older copy: anything that replaces or prunes this archive while that runs
+  // would otherwise slip past the check meant to explain it. On the failing
+  // path it is said early instead, because that path exits there.
+  sayIfItMovedUnderUs();
 
   console.log(`\n${total} documents came back from ${at}, counts and shapes intact.`);
   process.exit(0);

@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { after, before, describe, it } from 'node:test';
 import { redactCapabilities } from '../src/app.js';
 import { connectStore, ensureIndexes } from '../src/db.js';
@@ -366,14 +365,23 @@ describe('what the link says about itself', () => {
     // The list is checked against the routes, not against itself. Written out
     // by hand it was wrong: holding a card behind other cards is a write the
     // link has always granted, and it was missing while consolidating two
-    // spellings of one agent was named. So every write route on the link is
-    // read out of the source and has to be either named in the sentence or
-    // gated by more than the link. Adding one and saying nothing fails here.
-    const source = readFileSync(new URL('../src/routes/public.ts', import.meta.url), 'utf8');
-    const onTheLink = [...source.matchAll(/app\.(?:post|patch|delete)\('(\/r\/:readToken[^']*)'/g)].map(
-      (found) => found[1]!,
-    );
-    assert.ok(onTheLink.length >= 12, 'the routes were read, not guessed');
+    // spellings of one agent was named. So every write route on the link has
+    // to be either named in the sentence or gated by more than the link, and
+    // adding one and saying nothing fails here.
+    //
+    // Read off the running server rather than out of the file. The first
+    // version of this matched one spelling of `app.post('...')` in the source,
+    // which would have missed a route written with double quotes, over two
+    // lines, through `app.route`, or with its path in a constant, and stayed
+    // green while the capability went unpublished.
+    const onTheLink = [
+      ...new Set(
+        harness.server.registeredRoutes
+          .filter((route) => route.url.startsWith('/r/:readToken') && !['GET', 'HEAD', 'OPTIONS'].includes(route.method))
+          .map((route) => route.url),
+      ),
+    ];
+    assert.ok(onTheLink.length >= 12, 'the routes were read off the server, not guessed');
 
     const named: Record<string, RegExp | null> = {
       '/r/:readToken/board': /replaces the\s+layout/,
