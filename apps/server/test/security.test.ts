@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { redactCapabilities } from '../src/app.js';
 import { connectStore, ensureIndexes } from '../src/db.js';
+import { revokeApiKey } from '../src/service.js';
 import { hashToken } from '../src/ids.js';
 import {
   authed,
@@ -1503,5 +1504,122 @@ describe('every form these pages render', () => {
         `${form.action} was refused, and it is rendered on ${form.page}`,
       );
     }
+  });
+});
+
+describe('a project cannot revoke its own way in', () => {
+  /**
+   * Measured before it was guarded: the call answered `{"ok":true}` and shut
+   * every API door on the project, because minting a key needs an admin key.
+   * The sequence that gets there is the one a leak calls for, run in the wrong
+   * order, and an unclaimed board is what an agent signs up.
+   */
+  const del = (project: Project, id: string, token?: string) =>
+    harness.server.inject({
+      method: 'DELETE',
+      url: `${project.api}/keys/${id}`,
+      headers: token ? { authorization: `Bearer ${token}` } : authed(project),
+    });
+
+  const keysOf = async (project: Project, token?: string) =>
+    (
+      await harness.server.inject({
+        method: 'GET',
+        url: `${project.api}/keys`,
+        headers: token ? { authorization: `Bearer ${token}` } : authed(project),
+      })
+    ).json().keys as Array<{ id: string; role: string; revoked_at: string | null }>;
+
+  it('refuses the last admin key, and leaves it working', async () => {
+    const project = await createProject(harness);
+    const only = (await keysOf(project))[0]!;
+
+    const refused = await del(project, only.id);
+    assert.equal(refused.statusCode, 409);
+    assert.equal(refused.json().error, 'last_admin_key');
+
+    // Nothing was changed by the refusal: the door the caller came through is
+    // still open, which is the whole point of refusing rather than obeying.
+    const after = await keysOf(project);
+    assert.equal(after[0]!.revoked_at, null);
+    assert.equal(after.length, 1);
+  });
+
+  it('allows it the moment there is another way in', async () => {
+    const project = await createProject(harness);
+    const spare = (
+      await post(project, '/keys', { name: 'spare', role: 'admin' })
+    ).json().token as string;
+    const first = (await keysOf(project))[0]!;
+
+    const gone = await del(project, first.id, spare);
+    assert.equal(gone.statusCode, 200);
+    assert.equal((await keysOf(project, spare)).find((k) => k.id === first.id)!.revoked_at !== null, true);
+  });
+
+  it('does not count a key that has run out as the way in', async () => {
+    const project = await createProject(harness);
+    const admin = (await keysOf(project))[0]!;
+    const expired = (await post(project, '/keys', { name: 'expired', role: 'admin' })).json().key.id;
+    await harness.store.keys.updateOne(
+      { _id: expired },
+      { $set: { expiresAt: new Date(Date.now() - 60_000) } },
+    );
+
+    const refused = await del(project, admin.id);
+    assert.equal(refused.statusCode, 409, 'an expired admin key is not a way back in');
+    assert.equal((await keysOf(project))[0]!.revoked_at, null);
+  });
+
+  it('never leaves nothing behind when two revocations race', async () => {
+    // A fleet shares one key, so two loops reacting to the same leak fire two
+    // revocations at once. This is why the write happens first and the count
+    // after it, and the interleaving is forced rather than hoped for: run as
+    // two ordinary concurrent requests, the pair serialises and proves
+    // nothing, measured eight times out of eight.
+    const project = await createProject(harness);
+    await post(project, '/keys', { name: 'second', role: 'admin' });
+    const both = await keysOf(project);
+
+    // Both calls are held at their count until the other has reached its own.
+    // Counting before the write, that is the moment each of them still sees
+    // the other key alive and decides it may go ahead.
+    let waiting: (() => void) | null = null;
+    const meet = () =>
+      new Promise<void>((resolve) => {
+        if (waiting) {
+          waiting();
+          resolve();
+        } else {
+          waiting = resolve;
+        }
+      });
+    const real = harness.store.keys.countDocuments.bind(harness.store.keys);
+    harness.store.keys.countDocuments = (async (...args: Parameters<typeof real>) => {
+      await meet();
+      return real(...args);
+    }) as typeof real;
+
+    try {
+      await Promise.all([
+        revokeApiKey(harness.store, project.id, both[0]!.id).catch(() => undefined),
+        revokeApiKey(harness.store, project.id, both[1]!.id).catch(() => undefined),
+      ]);
+    } finally {
+      harness.store.keys.countDocuments = real;
+    }
+
+    const live = await harness.store.keys.countDocuments({
+      projectId: project.id,
+      role: 'admin',
+      revokedAt: null,
+    });
+    assert.ok(live >= 1, `something can still open this project: ${live} admin keys left`);
+  });
+
+  it('lets a worker key go even when it is the only one', async () => {
+    const project = await createProject(harness);
+    const worker = (await post(project, '/keys', { name: 'worker', role: 'write' })).json().key.id;
+    assert.equal((await del(project, worker)).statusCode, 200);
   });
 });

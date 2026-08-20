@@ -3314,16 +3314,56 @@ export async function listApiKeys(
     .toArray();
 }
 
+/**
+ * Revoking, with the one revocation that has no way back refused.
+ *
+ * Measured before it was guarded: revoking your own last admin key answered
+ * `{"ok":true}` and shut every API door on the project. Nothing could read it,
+ * nothing could write to it, and no key could be made, because making a key
+ * needs an admin key. The way back exists but it is not an agent's to walk: a
+ * person holding the read link claims the board by email and mints one from
+ * the operator view. On an unclaimed board, which is what an agent signs up,
+ * that means a fleet locked itself out of its own work and needs a human with
+ * an inbox to let it back in.
+ *
+ * The sequence that gets there is not exotic. It is the one you run when a
+ * token leaks, in the wrong order: revoke the leaked key first, then discover
+ * that minting the replacement needed the key you just revoked.
+ *
+ * Revoked first and checked after, not the other way round. A fleet shares one
+ * key, so two loops reacting to the same leak fire two revocations at once,
+ * and a count taken before the write sees the other key still alive in both of
+ * them: check first and they both proceed, which is the brick this refuses.
+ * This way the worst case is both of them putting their key back and both
+ * being told no, and the project keeps an admin key either way.
+ */
 export async function revokeApiKey(
   store: Store,
   projectId: string,
   keyId: string,
 ): Promise<void> {
-  const result = await store.keys.updateOne(
+  const revoked = new Date();
+  const result = await store.keys.findOneAndUpdate(
     { projectId, _id: keyId, revokedAt: null },
-    { $set: { revokedAt: new Date() } },
+    { $set: { revokedAt: revoked } },
   );
-  if (result.matchedCount === 0) {
+  if (!result) {
     throw new ServiceError(404, 'not_found', `No active key ${keyId} in this project.`);
   }
+  if (result.role !== 'admin') return;
+  // A key that has run out is not a way back in, so it does not count as the
+  // one that is left.
+  const left = await store.keys.countDocuments({
+    projectId,
+    role: 'admin',
+    revokedAt: null,
+    $or: [{ expiresAt: null }, { expiresAt: { $gt: revoked } }],
+  });
+  if (left > 0) return;
+  await store.keys.updateOne({ projectId, _id: keyId, revokedAt: revoked }, { $set: { revokedAt: null } });
+  throw new ServiceError(
+    409,
+    'last_admin_key',
+    'That is the only admin key this project has left, and revoking it would shut every door: making a key needs an admin key, so nothing here could make the next one. Create the replacement first, then revoke this one. Nothing was changed.',
+  );
 }

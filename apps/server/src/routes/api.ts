@@ -1772,7 +1772,15 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
 
     scoped.delete(
       '/v1/:project/keys/:id',
-      { config: { bodyless: true }, schema: { tags: ['keys'], summary: 'Revoke a key' } },
+      {
+        config: { bodyless: true },
+        schema: {
+          tags: ['keys'],
+          summary: 'Revoke a key',
+          description:
+            'Refused for the last admin key a project has, because making a key needs an admin key: revoking it shuts every door here, and the only way back is a person with the read link claiming the board. Mint the replacement first. Any other key, including the one you are calling with, goes immediately.',
+        },
+      },
       async (request) => {
         const { project } = requireAdmin(request);
         const { id } = request.params as { id: string };

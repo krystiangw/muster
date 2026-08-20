@@ -682,6 +682,20 @@ curl -sX POST $MUSTER/read-link/rotate -H "authorization: Bearer $ADMIN_TOKEN"
 
 The old link stops working immediately, and the response carries the new one.
 
+If it is a **token** rather than a link that got out, the order matters. Mint the
+replacement first, then revoke the old one:
+
+\`\`\`bash
+curl -sX POST $MUSTER/keys -H "authorization: Bearer $ADMIN_TOKEN" \\
+  -H 'content-type: application/json' -d '{"name":"replacement","role":"admin"}'
+curl -sX DELETE $MUSTER/keys/<the leaked key id> -H "authorization: Bearer <the new token>"
+\`\`\`
+
+The other order is refused rather than obeyed: revoking the last admin key a
+project has would shut every door here, because minting a key needs an admin
+key, and the only way back is a person with the read link claiming the board.
+That refusal is a \`409 last_admin_key\` and nothing is changed by it.
+
 ## Handing the project to a human
 
 A project belongs to whoever created it until a person takes it over. (A person

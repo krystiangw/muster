@@ -1689,3 +1689,39 @@ answering 415 instead.
 
 Both halves are pinned by a test that fails when either is removed, and the
 counter-test is the list of routes the first attempt broke.
+
+## The revocation that locks the door from outside, 2026-08-20
+
+`DELETE /v1/{project}/keys/{id}` would revoke the caller's own last admin key,
+answer `{"ok":true}`, and leave the project with no way in at all. Measured, not
+argued: after that call the same token answers 401 on the board, on the key list
+and on key creation, and creating a key is the only thing that could have made
+the next one.
+
+There is a way back and it is not an agent's to walk. A person holding the read
+link claims the board by email and mints a key from the operator view. An
+unclaimed board is exactly what an agent signs up, so on the boards this product
+is for, one ordinary call turns a fleet out of its own work until a human with an
+inbox lets it back in.
+
+The sequence that reaches it is not a mistake anybody would call careless. It is
+what a leak calls for, in the wrong order: revoke the exposed key first, then
+find that minting the replacement needed the key that was just revoked. The
+operator view already prints the right order, mint then revoke, which is what
+made the wrong one worth refusing rather than documenting.
+
+**Refused, and nothing changed by the refusal.** `409 last_admin_key`, the key
+still active, the caller still able to work. A key that has run out does not
+count as the one that is left, because an expired admin key is not a door.
+Worker keys are never refused: they cannot mint anything, so nothing depends on
+the last one.
+
+**Revoked first, checked after.** A fleet shares one key, so two loops reacting
+to the same leak fire two revocations at once, and a count taken before the
+write sees the other key alive in both of them: both proceed, and the project
+ends with none. Writing first means the worst case is both calls putting their
+key back and both being told no, which is the safe direction. The test that
+proves this forces the interleaving by holding each call at its count until the
+other has reached its own. Run as two ordinary concurrent requests it proves
+nothing: the pair serialises and passes under the broken order, measured eight
+times out of eight before the barrier was added.
