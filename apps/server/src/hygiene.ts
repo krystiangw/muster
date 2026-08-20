@@ -316,6 +316,12 @@ export async function dropContentless(
           ),
           status: 'dropped',
           closedAt: now,
+          // Which rule closed it, so the undo can be exact. The line above
+          // tells the agent that a body brings this back, and the write that
+          // honours that has to tell a card this rule dropped from a card
+          // somebody dropped on purpose. Nothing outside the service reads
+          // this field; `itemJson` does not carry it.
+          closedBy: 'hygiene:require_body',
         },
       },
     ],
@@ -366,6 +372,14 @@ export async function resolveAbsent(
           ),
           status: 'done',
           closedAt: now,
+          // The same marker, for the same reason as the drop above: an
+          // external signal that comes back is work again, and the write that
+          // brings it back has to be told apart from somebody closing this by
+          // hand. An observation saying the thing is present resets the
+          // absence streak and nothing else, so without this a resolved
+          // mirror card stayed resolved through every return of the signal it
+          // mirrors.
+          closedBy: 'hygiene:absence_resolve',
           // The second way an item gets closed, and it used to leave the claim
           // behind. An agent then held a lease on finished work until it timed
           // out, and any column asking for `claimed: true` showed a done card

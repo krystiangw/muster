@@ -1265,7 +1265,7 @@ export async function upsertItem(
   project: ProjectDoc,
   rawInput: UpsertItemInput,
 ): Promise<UpsertItemResult> {
-  const input = normalizeUpsertInput(rawInput);
+  let input = normalizeUpsertInput(rawInput);
   const slug = normalizeSlug(input.slug);
   if (!slug) {
     throw new ServiceError(400, 'bad_slug', 'slug must contain at least one alphanumeric character.');
@@ -1304,7 +1304,7 @@ export async function upsertItem(
 
   const existing = await store.items.findOne(
     { projectId: project._id, slug },
-    { projection: { _id: 1, status: 1, title: 1 } },
+    { projection: { _id: 1, status: 1, title: 1, closedBy: 1 } },
   );
 
   /**
@@ -1342,6 +1342,53 @@ export async function upsertItem(
     );
   };
   const atCapacity = (): boolean => project.counts.items >= project.limits.items;
+
+  /**
+   * Undoing the machine, which is the third thing this engine promises.
+   *
+   * Hygiene drops a card that was opened and never described, and the line it
+   * writes says to upsert the same slug with a body to bring it back. Doing
+   * exactly that left it dropped: an upsert that names no status changes no
+   * status, so the instruction the service gave was one the service ignored.
+   * Measured, not read: the card came back only when the caller also said
+   * `status: open`, which is not what any of the three places we say this
+   * promise it.
+   *
+   * Turned into an ordinary reopening rather than a special case, so the
+   * guarded transition, the capacity check, the counter and the timeline entry
+   * are the same ones every other reopening goes through. Narrow on purpose: a
+   * card a person dropped stays dropped, which is the rule about finished work
+   * that the claim door already keeps, so this reads the marker hygiene left
+   * rather than guessing from the shape of the card.
+   */
+  const closedByTheMachine = existing?.closedBy ?? null;
+  const undoesTheMachine =
+    existing !== null
+    && input.status === undefined
+    // A body is the undo the drop asks for by name, because a card that comes
+    // back without one is a card tomorrow's sweep drops again. An absence
+    // close asks for nothing: the card already has its description, and a
+    // write arriving at all is the signal that the thing it mirrors is back.
+    && ((closedByTheMachine === 'hygiene:require_body' && (input.body ?? '').trim() !== '')
+      || closedByTheMachine === 'hygiene:absence_resolve');
+  if (undoesTheMachine) {
+    if (atCapacity()) {
+      // Refusing the whole write would be refusing the description, which is
+      // the part that was asked for and the part that stops it being dropped
+      // again tomorrow. So the body lands, the card stays where it is, and the
+      // answer says why rather than leaving somebody to notice.
+      warnings.push(
+        closedByTheMachine === 'hygiene:require_body'
+          ? 'This card was dropped for having no description, and now it has one, but the board is at its '
+            + 'open item limit so it stays dropped. Close something and write again, or send `status` yourself.'
+          : 'This card was closed because its source signal went away, and this write says it is back, but '
+            + 'the board is at its open item limit so it stays closed. Close something and write again, or '
+            + 'send `status` yourself.',
+      );
+    } else {
+      input = { ...input, status: 'open' };
+    }
+  }
 
   const wasTerminal = existing ? TERMINAL_STATUSES.includes(existing.status) : false;
   const willBeTerminal = input.status !== undefined && TERMINAL_STATUSES.includes(input.status);
@@ -1407,6 +1454,10 @@ export async function upsertItem(
         $set: {
           status: input.status!,
           closedAt: willBeTerminal ? now : null,
+          // Whoever moves it now owns why it is where it is. Leaving the
+          // marker on would let a card dropped by hand months later reopen
+          // itself on a body, which is the opposite of what it is for.
+          closedBy: null,
           updatedAt: now,
           // Finished work is not work in progress. A claim outliving the item
           // it covers puts a done card in the "in progress" column of every

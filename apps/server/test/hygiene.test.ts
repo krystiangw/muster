@@ -323,20 +323,63 @@ describe('contentless items', () => {
     }
   });
 
-  it('comes back when an agent finally describes it', async () => {
+  it('comes back when an agent finally describes it, saying nothing about status', async () => {
+    // Exactly what the line hygiene wrote says to do, and nothing more. This
+    // test used to send `status: 'open'` beside the body, which is the
+    // workaround rather than the promise: it passed for months while doing
+    // what the card actually told you to do left it dropped. The engine's
+    // third invariant is that an ordinary upsert undoes the machine, and an
+    // upsert that has to name the status is not an ordinary one.
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'second-chance', title: 't', actor: 'a' });
     await backdate(project, 'second-chance', { createdAt: hoursAgo(48) });
     await sweepProject(harness.store, await projectDoc(project));
     assert.equal((await itemDoc(project, 'second-chance')).status, 'dropped');
 
-    await post(project, '/items', {
-      slug: 'second-chance',
-      body: 'here is what it is',
-      status: 'open',
-      actor: 'a',
-    });
-    assert.equal((await itemDoc(project, 'second-chance')).status, 'open');
+    await post(project, '/items', { slug: 'second-chance', body: 'here is what it is', actor: 'a' });
+    const back = await itemDoc(project, 'second-chance');
+    assert.equal(back.status, 'open');
+    assert.equal(back.body, 'here is what it is');
+    assert.equal(back.closedAt, null, 'and it is not carrying the time it was closed');
+  });
+
+  it('leaves a card somebody dropped on purpose where they put it', async () => {
+    // The other half of the same rule. Finished work stays finished, whoever
+    // finished it, and describing it afterwards is not a decision to reopen:
+    // that is the rule the claim door keeps, and it would be worth nothing if
+    // an ordinary write could walk around it.
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'by-hand', title: 't', actor: 'a' });
+    await post(project, '/items', { slug: 'by-hand', status: 'dropped', actor: 'a' });
+
+    await post(project, '/items', { slug: 'by-hand', body: 'somebody wrote a description', actor: 'a' });
+    const still = await itemDoc(project, 'by-hand');
+    assert.equal(still.status, 'dropped');
+    assert.equal(still.body, 'somebody wrote a description', 'the description landed all the same');
+  });
+
+  it('says why it stayed dropped when the board has no room to reopen it', async () => {
+    // Refusing the write would be refusing the description, which is the part
+    // that was asked for and the part that stops it being dropped again
+    // tomorrow. So the body lands, the card does not move, and the answer says
+    // so rather than leaving somebody to notice.
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'placeholder', title: 't', actor: 'a' });
+    await backdate(project, 'placeholder', { createdAt: hoursAgo(48) });
+    await sweepProject(harness.store, await projectDoc(project));
+    assert.equal((await itemDoc(project, 'placeholder')).status, 'dropped');
+
+    // One open card and room for exactly that one, so the reopening is the
+    // write that would not fit.
+    await post(project, '/items', { slug: 'one', title: 'one', body: 'x', actor: 'a' });
+    await harness.store.projects.updateOne({ _id: project.id }, { $set: { 'limits.items': 1 } });
+
+    const answer = await post(project, '/items', { slug: 'placeholder', body: 'described at last', actor: 'a' });
+    assert.equal(answer.statusCode, 200);
+    const said = JSON.stringify(answer.json());
+    assert.match(said, /open item limit/);
+    assert.equal((await itemDoc(project, 'placeholder')).status, 'dropped');
+    assert.equal((await itemDoc(project, 'placeholder')).body, 'described at last');
   });
 });
 
@@ -383,6 +426,34 @@ describe('absence resolve', () => {
     assert.equal(item.status, 'done');
     assert.match(item.timeline.at(-1)!.message, /source signal absent/);
     assert.equal(item.timeline.at(-1)!.by, 'hygiene');
+  });
+
+  it('opens again when the thing it mirrors comes back', async () => {
+    // The half that was missing. Absence closed the card and presence reset
+    // the streak, which left a resolved card resolved through every return of
+    // the signal it mirrors: an error that came back was invisible to the loop
+    // that filed it, because the loop upserts what it sees and an upsert that
+    // names no status moved nothing. A card the machine closed is reopened by
+    // an ordinary write, which is the third invariant this engine claims.
+    const project = await createProject(harness);
+    await mirrored(project, 'signal-again');
+    await post(project, '/observe', { source: 'scanner', present: [] });
+    await post(project, '/observe', { source: 'scanner', present: [] });
+    await backdate(project, 'signal-again', { 'absence.since': hoursAgo(48) });
+    await sweepProject(harness.store, await projectDoc(project));
+    assert.equal((await itemDoc(project, 'signal-again')).status, 'done');
+
+    await post(project, '/items', { slug: 'signal-again', body: 'the venue is refusing again', actor: 'scanner' });
+    assert.equal((await itemDoc(project, 'signal-again')).status, 'open');
+  });
+
+  it('leaves a mirrored card somebody resolved by hand resolved', async () => {
+    const project = await createProject(harness);
+    await mirrored(project, 'signal-by-hand');
+    await post(project, '/items', { slug: 'signal-by-hand', status: 'done', actor: 'a' });
+
+    await post(project, '/items', { slug: 'signal-by-hand', body: 'still writing about it', actor: 'scanner' });
+    assert.equal((await itemDoc(project, 'signal-by-hand')).status, 'done');
   });
 
   it('resets the streak the moment the signal comes back', async () => {

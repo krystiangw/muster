@@ -572,7 +572,10 @@ stopped, marks untouched items stale, drops items that were opened and never
 described, and closes mirrored items whose source signal has been absent for
 several consecutive observations **and** for hours of wall clock. Every one of
 those writes appears in the timeline signed \`hygiene\`, none of them moves
-\`touchedAt\`, and any of them is undone by your next ordinary upsert.
+\`touchedAt\`, and any of them is undone by your next ordinary upsert: a
+placeholder it dropped by one that finally describes it, a mirrored item it
+resolved by one that says the thing is back. You do not have to send a status
+to undo the machine, and a card **you** closed is never reopened this way.
 
 One thing happens because nothing happened: if a claimed board has open work
 that hygiene has marked stale and nobody has written to it in a day, its

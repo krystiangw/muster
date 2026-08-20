@@ -171,6 +171,16 @@ export interface ItemDoc {
   /** Last write by an agent or human. Hygiene writes deliberately do not move it. */
   touchedAt: Date;
   closedAt: Date | null;
+  /**
+   * Which hygiene rule closed it, when one did.
+   *
+   * Internal, and not carried by `itemJson`: it exists so the undo can be
+   * exact. Hygiene tells an agent that a body brings a dropped card back, and
+   * the write that honours that has to tell a card the machine dropped from a
+   * card somebody dropped on purpose. Cleared by any ordinary write that moves
+   * the status, because whoever moves it then owns why it is where it is.
+   */
+  closedBy?: string | null;
 }
 
 export interface AgentDoc {
