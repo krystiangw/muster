@@ -17,17 +17,21 @@ import type { FastifyRequest } from 'fastify';
  * anyway because it is nobody else's page either. Neither header at all is curl
  * and the agents, and refusing those would break the doors this product is for.
  */
-export type OriginReason = 'cross-site' | 'same-site' | 'origin';
-
 /**
- * The same three, at runtime.
+ * Why a write was refused as coming from somewhere else.
  *
- * The report groups refusals by reason and then asks which form each one came
- * from, and only these three have a form to name: a search that ran out of
- * budget is refused too, and putting it in the same bucket made a refusal from
- * an hour ago read as a form refusal older than the column that records forms.
+ * The list first and the type from it, rather than the other way round. The
+ * report groups refusals by reason and then asks which form each one came
+ * from, and only these have a form to name: a search that ran out of budget is
+ * refused too, and putting it in the same bucket made a refusal from an hour
+ * ago read as a form refusal older than the column that records forms. Written
+ * as a type with the list annotated against it, a fourth reason would type
+ * check while quietly falling out of that report, which is the drift the list
+ * exists to prevent.
  */
-export const ORIGIN_REASONS: readonly OriginReason[] = ['cross-site', 'same-site', 'origin'];
+export const ORIGIN_REASONS = ['cross-site', 'same-site', 'origin'] as const;
+
+export type OriginReason = (typeof ORIGIN_REASONS)[number];
 
 export type OriginVerdict = { ok: true } | { ok: false; reason: OriginReason; came: string };
 
