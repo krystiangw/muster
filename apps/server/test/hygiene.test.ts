@@ -343,6 +343,43 @@ describe('contentless items', () => {
     assert.equal(back.closedAt, null, 'and it is not carrying the time it was closed');
   });
 
+  it('stops undoing a close that somebody affirmed, even in the same words', async () => {
+    // Naming a status takes ownership of where the card is, and naming the one
+    // it already has is still naming it. Without this, a caller who said
+    // `status: dropped` on a card hygiene had dropped would find the next
+    // write with no status at all putting it back.
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'affirmed', title: 't', actor: 'a' });
+    await backdate(project, 'affirmed', { createdAt: hoursAgo(48) });
+    await sweepProject(harness.store, await projectDoc(project));
+    assert.equal((await itemDoc(project, 'affirmed')).status, 'dropped');
+
+    await post(project, '/items', { slug: 'affirmed', status: 'dropped', actor: 'a' });
+    await post(project, '/items', { slug: 'affirmed', body: 'described after all', actor: 'a' });
+    assert.equal((await itemDoc(project, 'affirmed')).status, 'dropped');
+  });
+
+  it('does not reopen on a write that is guarded on what the caller last saw', async () => {
+    // This service refuses a guarded write that also moves a status, and says
+    // so in as many words: the correction first, the move after. Reopening on
+    // the caller's behalf would break that rule from the inside.
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'guarded', title: 't', actor: 'a' });
+    await backdate(project, 'guarded', { createdAt: hoursAgo(48) });
+    await sweepProject(harness.store, await projectDoc(project));
+    assert.equal((await itemDoc(project, 'guarded')).status, 'dropped');
+
+    const answer = await post(project, '/items', {
+      slug: 'guarded',
+      body: 'described, carefully',
+      expect: { title: 't' },
+      actor: 'a',
+    });
+    assert.equal(answer.statusCode, 200, answer.body);
+    assert.equal((await itemDoc(project, 'guarded')).status, 'dropped');
+    assert.equal((await itemDoc(project, 'guarded')).body, 'described, carefully');
+  });
+
   it('leaves a card somebody dropped on purpose where they put it', async () => {
     // The other half of the same rule. Finished work stays finished, whoever
     // finished it, and describing it afterwards is not a decision to reopen:

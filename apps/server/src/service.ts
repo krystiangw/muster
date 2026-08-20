@@ -1365,6 +1365,11 @@ export async function upsertItem(
   const undoesTheMachine =
     existing !== null
     && input.status === undefined
+    // A guarded write says "only if it still reads like this", and this
+    // service refuses one that also moves a status: the correction first, the
+    // move after. Reopening on its behalf would be moving one for it, quietly,
+    // which is the same rule broken from the inside.
+    && !input.expect
     // A body is the undo the drop asks for by name, because a card that comes
     // back without one is a card tomorrow's sweep drops again. An absence
     // close asks for nothing: the card already has its description, and a
@@ -1489,6 +1494,13 @@ export async function upsertItem(
   const set: Record<string, unknown> = input.guest
     ? { updatedAt: now }
     : { updatedAt: now, touchedAt: now };
+  // Naming a status takes ownership of where the card is, including when the
+  // status named is the one it already has. The transition branch above only
+  // runs when the status moves, so affirming a machine's close (`status: done`
+  // on a card hygiene resolved) left the marker on, and the next write with no
+  // status at all would have reopened work somebody had just said to keep
+  // closed.
+  if (input.status !== undefined) set.closedBy = null;
   const setOnInsert: Record<string, unknown> = {
     _id: newId('i'),
     projectId: project._id,
