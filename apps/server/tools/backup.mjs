@@ -14,6 +14,7 @@
  *   MONGODB_URI=... node apps/server/tools/backup.mjs                  # write one
  *   MONGODB_URI=... node apps/server/tools/backup.mjs --list           # what is there
  *   MONGODB_URI=... node apps/server/tools/backup.mjs --restore <file> --yes
+ *   node apps/server/tools/backup.mjs --verify [file]                  # does it come back?
  *
  * Restore is refused without --yes, and refused outright against a database
  * that already holds projects unless --force says otherwise: the realistic
@@ -84,6 +85,71 @@ if (args.includes('--list')) {
   process.exit(0);
 }
 
+/**
+ * Does the newest copy actually come back?
+ *
+ * An archive nobody has read is a promise, and this one had been a promise for
+ * three days. Checked once by hand and then made a command, because a backup
+ * verified in August is a backup unverified in September.
+ *
+ * It touches nothing that matters: no MONGODB_URI is read, and the archive is
+ * poured into a database that exists for the length of this command. Running
+ * it against production is not a thing somebody can do by accident here.
+ *
+ * What it does not check is the half after this one: that the server boots on
+ * what came back and rebuilds its indexes. That was measured by hand the day
+ * this was written, on the copy from that morning, and the recipe is in
+ * docs/deploy.md rather than in here, because booting a server inside a backup
+ * tool is a lot of machinery for a thing somebody does once a quarter.
+ */
+if (args.includes('--verify')) {
+  const named = flag('verify');
+  const file = named && !named.startsWith('--') ? named : listBackups().at(-1)?.path;
+  if (!file) {
+    console.error(`No backup to check in ${DIR}.`);
+    process.exit(1);
+  }
+  let MemoryServer;
+  try {
+    ({ MongoMemoryServer: MemoryServer } = await import('mongodb-memory-server'));
+  } catch {
+    console.error(
+      'This check needs mongodb-memory-server, which lives in the dev dependencies.\n' +
+        'Run it from a checkout with `pnpm install`, or restore into a scratch database by hand.',
+    );
+    process.exit(1);
+  }
+  const mongod = await MemoryServer.create();
+  const scratch = new MongoClient(mongod.getUri());
+  await scratch.connect();
+  const into = scratch.db('verify');
+  console.log(`checking ${file}`);
+  const { archive, written } = await restoreInto(into, file, (line) => console.log(line));
+
+  const wrong = [];
+  let total = 0;
+  for (const [name, count] of Object.entries(written)) {
+    const found = await into.collection(name).countDocuments({});
+    total += found;
+    if (found !== count) wrong.push(`${name}: archive says ${count}, ${found} came back`);
+  }
+  // One document read all the way, because a count says the rows arrived and
+  // nothing about whether they are usable: dates that stayed strings would
+  // make every query in this service quietly wrong.
+  const card = await into.collection('items').findOne({});
+  if (card && !(card.createdAt instanceof Date)) wrong.push('dates came back as text, not dates');
+  if (card && !Array.isArray(card.timeline)) wrong.push('a timeline came back as something other than a list');
+
+  await scratch.close();
+  await mongod.stop();
+  if (wrong.length > 0) {
+    console.error(`\nThis copy does not come back cleanly:\n  ${wrong.join('\n  ')}`);
+    process.exit(1);
+  }
+  console.log(`\n${total} documents came back from ${archive.at}, counts and shapes intact.`);
+  process.exit(0);
+}
+
 if (!uri) {
   console.error('Set MONGODB_URI. Nothing was read or written.');
   process.exit(1);
@@ -92,6 +158,28 @@ if (!uri) {
 const client = new MongoClient(uri, { serverSelectionTimeoutMS: 15_000 });
 await client.connect();
 const db = client.db(dbName);
+
+/**
+ * The way back in, used by the restore and by the check that the restore
+ * works. One function rather than two, because a check that re-implements the
+ * thing it checks is a check on the copy.
+ */
+async function restoreInto(target, file, say = () => {}) {
+  const chunks = [];
+  await pipeline(createReadStream(file), createGunzip(), async function* (source) {
+    for await (const chunk of source) chunks.push(chunk);
+  });
+  const archive = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  say(`archive from ${archive.at}, database "${archive.db}"`);
+  const written = {};
+  for (const [name, docs] of Object.entries(archive.collections)) {
+    await target.collection(name).deleteMany({});
+    if (docs.length > 0) await target.collection(name).insertMany(docs.map(reviveDates));
+    written[name] = docs.length;
+    say(`  ${name}: ${docs.length} restored`);
+  }
+  return { archive, written };
+}
 
 const restoring = flag('restore');
 if (restoring) {
@@ -110,18 +198,7 @@ if (restoring) {
     process.exit(1);
   }
 
-  const chunks = [];
-  await pipeline(createReadStream(restoring), createGunzip(), async function* (source) {
-    for await (const chunk of source) chunks.push(chunk);
-  });
-  const archive = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-  console.log(`archive from ${archive.at}, database "${archive.db}"`);
-
-  for (const [name, docs] of Object.entries(archive.collections)) {
-    await db.collection(name).deleteMany({});
-    if (docs.length > 0) await db.collection(name).insertMany(docs.map(reviveDates));
-    console.log(`  ${name}: ${docs.length} restored`);
-  }
+  await restoreInto(db, restoring, (line) => console.log(line));
   await client.close();
   console.log('\nRestored. Indexes are rebuilt by the server on its next boot.');
   process.exit(0);

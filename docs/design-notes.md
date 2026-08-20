@@ -2621,3 +2621,29 @@ it. Not the underscore, which the first version of that guard also forbade and
 which is half of `expires_in`: a rule against markup that forbids naming a
 field is a rule that stops the sentence saying the useful thing.
 
+
+## The backup nobody had booted, 2026-08-20
+
+The nightly copy runs, keeps seven, and had been read back once by hand. What
+nobody had done is the half that matters on the day: point a server at what
+came back. A copy that restores into a database the service will not boot on is
+still not a recovery.
+
+Measured, on the copy from this morning. The archive restored into a throwaway
+mongod, a server started against it, `/health` answered 200 with the store ok,
+the board came back with its seven waiting cards and 184 finished, the offer
+answered, and the server rebuilt all sixteen indexes on `items` at boot, `ttl`
+among them. So the whole path works, and now it is written down instead of
+being a thing somebody once did.
+
+**And the cheap half is a command now.** `--verify` pours the newest archive
+into a database that lives for the length of the command, goes through the same
+restore a recovery would rather than a copy of it, counts every collection back
+and reads one card all the way to check the dates are dates. It reads no
+`MONGODB_URI`, so pointing it at production is not an accident anybody can
+have; it exits 1 when a copy does not come back, so a schedule can read it.
+
+The date check is the one worth having. A count says the rows arrived and
+nothing about whether they are usable: a timestamp that came back as text
+passes every count and breaks every query that compares it. Taking that check
+out fails the test; so does letting a bad copy exit zero.

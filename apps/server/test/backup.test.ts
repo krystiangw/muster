@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { gunzipSync, gzipSync } from 'node:zlib';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -124,6 +125,54 @@ describe('the nightly backup', () => {
     } finally {
       await recovered.stop();
     }
+  });
+
+  it('reads a copy back on its own, without being pointed at anything live', async () => {
+    const written = backup(['--dir', dir], harness.config.mongoDb);
+    assert.equal(written.code, 0, written.out);
+    const file = readdirSync(dir).filter((name) => name.endsWith('.json.gz')).sort().at(-1)!;
+
+    // No MONGODB_URI at all. The check pours the archive into a database that
+    // lives for the length of the command, so the accident this tool spends
+    // its refusals guarding against cannot happen here in the first place.
+    const clean = { ...process.env };
+    delete clean.MONGODB_URI;
+    delete clean.MONGODB_DB;
+    const checked = execFileSync('node', ['tools/backup.mjs', '--verify', join(dir, file)], {
+      cwd: HERE,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: clean,
+    });
+    assert.match(checked, /documents came back/);
+    assert.match(checked, /counts and shapes intact/);
+
+    // And it says no when the copy is not one. A date turned back into text is
+    // the rot this format is most likely to grow, and a count would never see
+    // it: the rows all arrive, and every query that compares a date stops
+    // working.
+    const raw = JSON.parse(gunzipSync(readFileSync(join(dir, file))).toString('utf8')) as {
+      collections: Record<string, Array<Record<string, unknown>>>;
+    };
+    raw.collections.items![0]!.createdAt = 'yesterday';
+    const broken = join(dir, 'broken.json.gz');
+    writeFileSync(broken, gzipSync(Buffer.from(JSON.stringify(raw))));
+    let code = 0;
+    let said = '';
+    try {
+      execFileSync('node', ['tools/backup.mjs', '--verify', broken], {
+        cwd: HERE,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: clean,
+      });
+    } catch (error) {
+      const failed = error as { status?: number; stdout?: string; stderr?: string };
+      code = failed.status ?? 1;
+      said = `${failed.stdout ?? ''}${failed.stderr ?? ''}`;
+    }
+    assert.equal(code, 1, 'a copy that does not come back has to fail, or a schedule cannot read it');
+    assert.match(said, /dates came back as text/);
   });
 
   it('refuses the two restores that are somebody having a bad day', async () => {

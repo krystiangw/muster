@@ -121,6 +121,31 @@ holds projects, because the realistic accident is restoring over production
 instead of into a copy. Test the restore, not the backup: an archive nobody has
 read back is a guess.
 
+Reading one back is a command rather than an errand:
+
+```bash
+node apps/server/tools/backup.mjs --verify           # the newest one
+node apps/server/tools/backup.mjs --verify <file>    # a particular one
+```
+
+It reads no `MONGODB_URI` at all and pours the archive into a database that
+lives for the length of the command, so running it against production is not
+something anybody can do by accident. It goes through the same restore the
+recovery would, then counts every collection back and reads one card all the
+way to check the dates are dates. Exit code 1 when a copy does not come back,
+so a schedule can read it: a backup verified in August is a backup unverified
+in September.
+
+**The half that command does not cover** is the one that matters on the day:
+whether the service boots on what came back. Measured by hand on 2026-08-20
+against `muster-2026-08-20-0317.json.gz`, restored into a throwaway mongod and
+served from it: `/health` answered 200 with the store ok, the board read back
+with its seven waiting items and 184 finished, the offer answered, and the
+server rebuilt all sixteen indexes on `items` at boot, `ttl` among them. Do it
+this way when it matters: restore into a scratch database, point a server at it
+with `MONGODB_URI` and a spare `PORT`, and read the board through the API
+rather than through the database.
+
 Last read back on 2026-08-19 at 23:40, from `muster-2026-08-19-0317.json.gz`
 into a throwaway mongod: 15 projects, ours among them with its counts intact,
 137 items, 11 agents, 11 escalations, 18 keys and 2189 telemetry rows. Dates
