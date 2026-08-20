@@ -1790,8 +1790,27 @@ wrong and unactionable.
 holding it is refused. Heartbeat refuses both, and refuses a card that does not
 exist with the same words, which is the next thread rather than this one.
 
+Two more turned up in review after that table was written, which is the point
+about measuring: offering a board somebody else owns, and reopening a question
+onto a queue with no room. Acknowledging also has three conflicting states
+rather than the one the first sentence named, and the sentence now says all
+three.
+
+**And the same reading of 404, which had gone stale.** The map's own note said
+naming a card that is not there gets 400 from five doors and 404 from the two
+that read or delete it. Measured again: seven of the eight answer 404, and the
+odd one out was heartbeat, which said the lease was not yours and told the
+caller to claim the card again. Claiming it answers 404 for the same name, so a
+typo in a slug got two doors disagreeing about a card that never existed, and
+advice that could not be followed. One read on the failure path tells them
+apart.
+
 **The test now runs both directions.** It already proved every code it provokes
 is documented. Naming a conflict on a door that cannot have one passed it
-silently, so it now also requires a row for every 409 on the map. Removing the
-map fails the first half; adding a sentence to a door that never conflicts fails
-the second.
+silently, so it now also requires a row for every 409 and every 404 on the map.
+Removing the map fails the first half; adding a sentence to a door that never
+conflicts fails the second.
+
+What neither half can see is a door that starts conflicting and says nothing,
+because the reverse check can only ask whether what is written down happens.
+Both of the omissions review found were exactly that shape.

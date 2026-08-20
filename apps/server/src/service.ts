@@ -2051,6 +2051,17 @@ export async function heartbeatClaim(
     { returnDocument: 'after' },
   );
   if (!item) {
+    // One read, and only when the write matched nothing: a guarded update
+    // cannot tell "not your lease" from "no such card", and it was answering
+    // the first for both. A typo in a slug was told to claim the card again,
+    // which then answered 404 for the same name, so the two doors disagreed
+    // about a card that had never existed. Every other call on a card that is
+    // not there says so.
+    const exists = await store.items.findOne(
+      { projectId: project._id, slug: normalizeSlug(slug) },
+      { projection: { _id: 1 } },
+    );
+    if (!exists) throw notFound(slug);
     throw new ServiceError(
       409,
       'not_claim_holder',
@@ -2108,9 +2119,10 @@ export async function releaseItem(
     // Held by somebody else is still a refusal. That is the case the guard
     // exists for, and it is the opposite of this one.
     const current = await store.items.findOne({ projectId: project._id, slug: normalizeSlug(slug) });
-    if (!current) {
-      throw new ServiceError(404, 'not_found', `No item "${slug}" in this project.`);
-    }
+    // The same sentence every other door says about a card that is not there:
+    // one name for one thing, so a caller matching on the message does not
+    // have to know which call it came from.
+    if (!current) throw notFound(slug);
     // A lease that has run out is free work everywhere else in this service:
     // `/next` offers it, a claim takes it, the board counts it as unclaimed. A
     // release that refused it would be the one place where a dead claim still

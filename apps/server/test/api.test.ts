@@ -1900,10 +1900,6 @@ describe('the map every refusal points at', () => {
     // document rather than by writing thirty cards, because what is being
     // tested is the answer at the cap and not the arithmetic that reaches it.
     const full = await createProject(harness, 'full');
-    await harness.store.projects.updateOne(
-      { _id: full.id },
-      { $set: { 'limits.items': 0, 'limits.agents': 0, 'limits.escalations': 0 } },
-    );
 
     // A question nobody has answered, for the acknowledgement that is refused,
     // and one already taken back, for the withdrawal that is.
@@ -1930,6 +1926,34 @@ describe('the map every refusal points at', () => {
       payload: { agent: 'somebody', reason: 'mine to take back' },
     });
 
+    // A question already answered on a project whose queue then filled up, for
+    // the reopening that is refused, and a board somebody else owns, for the
+    // offer that is.
+    const crowded = (
+      await harness.server.inject({
+        method: 'POST',
+        url: `${full.api}/escalations`,
+        headers: { authorization: `Bearer ${full.token}`, 'content-type': 'application/json' },
+        payload: { question: 'asked while there was still room' },
+      })
+    ).json().escalation.id as string;
+    await harness.server.inject({
+      method: 'PATCH',
+      url: `${full.api}/escalations/${crowded}`,
+      headers: { authorization: `Bearer ${full.token}`, 'content-type': 'application/json' },
+      payload: { status: 'answered', answer: 'yes' },
+    });
+    await harness.store.projects.updateOne(
+      { _id: full.id },
+      { $set: { 'limits.items': 0, 'limits.agents': 0, 'limits.escalations': 0 } },
+    );
+
+    const owned = await createProject(harness, 'owned');
+    await harness.store.projects.updateOne(
+      { _id: owned.id },
+      { $set: { claimedBy: 'the.owner@example.com', claimedAt: new Date() } },
+    );
+
     // Each row is one request and the code it is expected to come back with.
     // The document has to name that code for that operation.
     const cases: { method: string; url: string; path: string; payload?: unknown; headers?: Record<string, string>; code: number }[] = [
@@ -1946,6 +1970,18 @@ describe('the map every refusal points at', () => {
       { method: 'POST', url: `${project.api}/items/blocked/claim`, path: '/v1/{project}/items/{slug}/claim', payload: { agent: 'third' }, headers: admin, code: 409 },
       { method: 'GET', url: `${project.api}/items/not-here`, path: '/v1/{project}/items/{slug}', headers: reading, code: 404 },
       { method: 'DELETE', url: `${project.api}/items/not-here`, path: '/v1/{project}/items/{slug}', headers: reading, code: 404 },
+      // Every other door onto a card, with a name no card has. They used to
+      // disagree: heartbeat said the lease was not yours and told the caller to
+      // claim it again, which answered 404 for the same name.
+      { method: 'POST', url: `${project.api}/items/not-here/claim`, path: '/v1/{project}/items/{slug}/claim', payload: { agent: 'x' }, headers: admin, code: 404 },
+      { method: 'POST', url: `${project.api}/items/not-here/heartbeat`, path: '/v1/{project}/items/{slug}/heartbeat', payload: { agent: 'x' }, headers: admin, code: 404 },
+      { method: 'POST', url: `${project.api}/items/not-here/release`, path: '/v1/{project}/items/{slug}/release', payload: { agent: 'x' }, headers: admin, code: 404 },
+      { method: 'POST', url: `${project.api}/items/not-here/timeline`, path: '/v1/{project}/items/{slug}/timeline', payload: { message: 'anything' }, headers: admin, code: 404 },
+      { method: 'POST', url: `${project.api}/items/not-here/move`, path: '/v1/{project}/items/{slug}/move', payload: { column: 'done' }, headers: admin, code: 404 },
+      { method: 'POST', url: `${project.api}/items`, path: '/v1/{project}/items', payload: { slug: 'not-here', title: 'only if it is already there', must_exist: true }, headers: admin, code: 404 },
+      // Not a name that matches nothing but a deployment that never opted in,
+      // which is this harness: the door exists and declines to be one.
+      { method: 'POST', url: '/feedback', path: '/feedback', payload: { title: 'nobody is listening' }, headers: { 'content-type': 'application/json' }, code: 404 },
       { method: 'DELETE', url: `${project.api}/keys/k_not_here`, path: '/v1/{project}/keys/{id}', headers: reading, code: 404 },
       { method: 'PATCH', url: `${project.api}/escalations/e_not_here`, path: '/v1/{project}/escalations/{id}', payload: { status: 'answered' }, headers: admin, code: 404 },
       { method: 'POST', url: `${project.api}/agents/not-here/rename`, path: '/v1/{project}/agents/{handle}/rename', payload: { to: 'other' }, headers: admin, code: 404 },
@@ -2054,6 +2090,27 @@ describe('the map every refusal points at', () => {
         headers: admin,
         code: 409,
       },
+      { method: 'POST', url: `${project.api}/escalations/e_not_here/ack`, path: '/v1/{project}/escalations/{id}/ack', payload: { agent: 'nobody' }, headers: admin, code: 404 },
+      // Reopening a question onto a queue with no room, and offering a board
+      // that is somebody else's to offer. Both were answered by the deployment
+      // and named nowhere, which is what the reverse check cannot see: it can
+      // only ask whether what is written down happens.
+      {
+        method: 'PATCH',
+        url: `${full.api}/escalations/${crowded}`,
+        path: '/v1/{project}/escalations/{id}',
+        payload: { status: 'open' },
+        headers: { authorization: `Bearer ${full.token}`, 'content-type': 'application/json' },
+        code: 409,
+      },
+      {
+        method: 'POST',
+        url: `${owned.api}/share`,
+        path: '/v1/{project}/share',
+        payload: { email: 'somebody.else@example.com' },
+        headers: { authorization: `Bearer ${owned.token}`, 'content-type': 'application/json' },
+        code: 409,
+      },
       // A write that declares no body schema of its own, and a DELETE. Both
       // answer 415 all the same, which is why the map derives it from the
       // method rather than from whether a body is documented.
@@ -2148,6 +2205,19 @@ describe('the map every refusal points at', () => {
       if (one.code === 409) conflicts.delete(`${one.method} ${one.path}`);
     }
     assert.deepEqual([...conflicts], [], 'every operation the map says can conflict was made to');
+
+    // And the same both ways for the code that says a name matches nothing.
+    const missing = new Set(
+      Object.entries(paths).flatMap(([path, item]) =>
+        Object.entries(item as Record<string, { responses?: Record<string, unknown> }>)
+          .filter(([method, op]) => ['get', 'post', 'delete', 'patch', 'put'].includes(method) && op.responses?.['404'])
+          .map(([method]) => `${method.toUpperCase()} ${path}`),
+      ),
+    );
+    for (const one of cases) {
+      if (one.code === 404) missing.delete(`${one.method} ${one.path}`);
+    }
+    assert.deepEqual([...missing], [], 'every operation the map says can answer 404 was made to');
   });
 
   it('keeps the refusals it documents in one shape, and does not narrow them', async () => {

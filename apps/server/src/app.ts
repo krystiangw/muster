@@ -220,14 +220,23 @@ const TOKEN_DOOR = ['400', '401', '403', '429', '503'];
 
 /**
  * Measured against the deployment, one request each, rather than derived from
- * the shape of the path. The shape would have been wrong: every action on a
- * card takes its slug in the address, and naming a card that is not there gets
- * 400 from five of them and 404 from the two that only read or delete it. A
- * guess would have put 404 on all seven and been wrong about five.
+ * the shape of the path, and measured again on 2026-08-20 because the first
+ * reading had gone stale: every call that takes a card's slug in the address
+ * now answers 404 for a card that is not there, where five of them once
+ * answered 400. Naming a slug that never existed is the same news whichever
+ * door you say it at, and only the map was still describing the old spread.
  */
 const NOT_FOUND = new Set([
   'get /v1/{project}/items/{slug}',
   'delete /v1/{project}/items/{slug}',
+  'post /v1/{project}/items/{slug}/claim',
+  'post /v1/{project}/items/{slug}/heartbeat',
+  'post /v1/{project}/items/{slug}/release',
+  'post /v1/{project}/items/{slug}/timeline',
+  'post /v1/{project}/items/{slug}/move',
+  // Only when the write says the card has to be there already: `must_exist`,
+  // or a guard, which are the two ways of asking for one you did not create.
+  'post /v1/{project}/items',
   'delete /v1/{project}/keys/{id}',
   'post /v1/{project}/agents/{handle}/rename',
   'patch /v1/{project}/escalations/{id}',
@@ -269,9 +278,13 @@ const CONFLICT_SAYS: Record<string, string> = {
   'post /v1/{project}/escalations':
     'The project is at its cap for unanswered questions, which answering them frees.',
   'post /v1/{project}/escalations/{id}/ack':
-    'Nobody has answered it yet, and acknowledging an answer that does not exist is a guess about what it will say.',
+    'There is no answer to act on: nobody has written one, or the question was taken back before anybody did. Or this agent acknowledged it already, and a second one would say nothing the first did not.',
   'post /v1/{project}/escalations/{id}/withdraw':
     'Already withdrawn, or already answered: taking back a question somebody has answered throws away the attention they spent on it, and acknowledging is the verb for that.',
+  'patch /v1/{project}/escalations/{id}':
+    'Reopening a question the project has no room for: the cap counts what is unanswered, and answering frees it.',
+  'post /v1/{project}/share':
+    'Somebody else already owns this board, so it is not yours to hand on. Offering it to the address that owns it is not refused: that answers 200 and says so.',
   'delete /v1/{project}/keys/{id}':
     'The last admin key this project has, which cannot go because making a key needs one; or one of two admin revocations arriving at once, since each would count the other as the key that is left.',
 };
