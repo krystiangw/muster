@@ -1044,7 +1044,17 @@ describe('next', () => {
     // door returns. The looking door answers item and reason; only the taking
     // door adds `claimed`, and the first draft of this paragraph told a
     // restarting agent to read a field that is not in the answer it gets.
-    assert.match(said, /taking door below answers.{0,12}claimed.{0,12}beside it; this one, which takes nothing, does not/);
+    // Named by its section rather than by a direction. "Below" was wrong: the
+    // taking door is earlier in the document and what follows this paragraph
+    // is the limits. A cross reference that says which way to walk is a
+    // reference that goes stale the next time anything moves.
+    assert.match(said, /taking door, the .POST. under "Claim it before you work on it", answers/);
+    assert.match(said, /this one, which takes nothing, does not/);
+    const doc = said;
+    assert.ok(
+      doc.indexOf('Claim it before you work on it') < doc.indexOf('The taking door'),
+      'and the section it names really is the one before this paragraph',
+    );
   });
 
   it('skips items another agent already holds', async () => {
