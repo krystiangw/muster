@@ -484,18 +484,27 @@ async function ensure(collection: IndexedCollection, specs: IndexDescription[]):
       // Either way the process never finishes booting, which is the failure
       // this whole function exists to prevent.
       const live = await collection.indexes().catch(() => []);
-      const wanted = indexShape(spec as unknown as Record<string, unknown>);
+      const asked = spec as unknown as Record<string, unknown>;
+      const wanted = indexShape(asked);
+      const sameKey = JSON.stringify(spec.key);
       const blocking = new Set<string>();
       for (const one of live) {
         const name = typeof one.name === 'string' ? one.name : '';
         if (!name || name === '_id_') continue;
-        // The name being asked for, whatever is under it, and an index that is
-        // already this one under another name. Not every index on the same
-        // key: MongoDB is content to hold two of those when their options
-        // differ, so a partial index somebody built by hand for a slow query
-        // is theirs to keep, and dropping it here would be this function
-        // helping itself to the database on the way past.
-        if (name === spec.name || indexShape(one) === wanted) blocking.add(name);
+        // The name being asked for, whatever is under it; an index that is
+        // already this one under another name; and a lifetime on this key that
+        // disagrees with the one being asked for.
+        //
+        // Not every index on the same key, and which ones is measured rather
+        // than assumed. Asked of MongoDB: on one key it will hold a plain
+        // index beside a unique one, beside a sparse one, beside a partial
+        // one. What it refuses, with the same code 85, is a second lifetime:
+        // plain against ttl, ttl against a different ttl, either way round. So
+        // a partial index somebody built by hand for a slow query is theirs to
+        // keep, and a stale expiry is in the way whatever it is called.
+        const lifetime =
+          JSON.stringify(one.key) === sameKey && one.expireAfterSeconds !== asked.expireAfterSeconds;
+        if (name === spec.name || indexShape(one) === wanted || lifetime) blocking.add(name);
       }
       for (const name of blocking) await collection.dropIndex(name).catch(() => undefined);
       await collection.createIndexes([spec]);

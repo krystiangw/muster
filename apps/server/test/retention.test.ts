@@ -288,6 +288,35 @@ describe('starting against a database that has run another version', () => {
     await items.dropIndex('by_hand_for_a_slow_query');
   });
 
+  it('starts when a stale lifetime sits on the key it needs', async () => {
+    // Measured of MongoDB rather than assumed: on one key it holds a plain
+    // index beside a unique one, a sparse one and a partial one, and refuses
+    // exactly one thing, a second lifetime. So an expiry left under another
+    // name is in the way however different it looks, and leaving it there is a
+    // database the next start cannot come up against.
+    const { createStore } = await import('../src/db.js');
+    const items = harness.store.items;
+    const ttl = (await items.indexes()).find(
+      (one) => (one as { expireAfterSeconds?: number }).expireAfterSeconds !== undefined,
+    ) as { name: string };
+
+    await items.dropIndex(ttl.name);
+    // The same key, a different lifetime, another name. Nothing about its
+    // shape matches what the code declares.
+    await items.createIndex({ expiresAt: 1 }, { name: 'left_by_an_older_version', expireAfterSeconds: 3600 });
+
+    const second = await createStore(harness.config.mongoUri, harness.config.mongoDb);
+    assert.ok(second, 'it starts');
+    await second.client.close();
+
+    const after = await items.indexes();
+    const lifetimes = after.filter(
+      (one) => (one as { expireAfterSeconds?: number }).expireAfterSeconds !== undefined,
+    );
+    assert.equal(lifetimes.length, 1, 'one lifetime on this collection');
+    assert.equal((lifetimes[0] as { expireAfterSeconds?: number }).expireAfterSeconds, 0, 'the declared one');
+  });
+
   it('starts when the name and the key are blocked by different indexes at once', async () => {
     // The harder half. Something else holds the name being asked for, and the
     // key being asked for sits under another name. Resolving only one of them

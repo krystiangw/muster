@@ -1608,3 +1608,30 @@ when it asks, and withdrawing does not unset it. Nothing here changes a status
 somebody else set, and the document says plainly that reopening is the agent's
 own job, because a card waiting on an answer that is no longer coming is the
 same false alarm one table over.
+
+**What MongoDB will and will not hold twice on one key, 2026-08-20.** The boot
+replaces an index whose definition has moved, and deciding what stands in the
+way needs to know what actually conflicts. Asked of the database rather than
+assumed, creating a second index on the same key:
+
+| beside an existing | asking for | answer |
+|---|---|---|
+| plain | `unique` | coexist |
+| plain | `sparse` | coexist |
+| plain | `partialFilterExpression` | coexist |
+| `expireAfterSeconds: 0` | same, plus a partial filter | coexist |
+| plain | `expireAfterSeconds: 0` | refused, 85 |
+| `expireAfterSeconds: 0` | plain | refused, 85 |
+| `expireAfterSeconds: 0` | `expireAfterSeconds: 60` | refused, 85 |
+
+So a key holds many indexes and exactly one lifetime. That is the whole rule the
+recovery needs: drop the name being asked for, drop an index that is already
+this one under another name, and drop a lifetime on this key that disagrees with
+the one being declared. Everything else on that key belongs to whoever made it,
+which on a production database is somebody who found a slow query, and dropping
+it while passing would be the boot helping itself.
+
+The surprise worth writing down is `unique`: a plain index and a unique one on
+the same key coexist, so a definition tightening from one to the other is not
+resolved by the key at all. It is resolved because the declared name is already
+taken, which is the first of the three.
