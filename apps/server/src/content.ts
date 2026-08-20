@@ -591,12 +591,16 @@ A parameter this service does not have comes back 400 naming it, rather than
 for first, and pages here are cursors: read \`next_cursor\` from the answer and
 pass it back as \`cursor=\`.
 
-A value of the wrong shape gets the same answer as a name this service does not
-know: \`400 bad_argument\` saying which one, rather than a 200 with the value
-dropped. A title that arrives as an object is not a card with no title, and
-\`then.priority\` that arrives as text is not a card filed without a priority.
-The exceptions are the two fields that take whatever you put in them, \`fields\`
-and \`meta\`, where an object is the point.
+A value of the wrong shape gets the same treatment as a name this service does
+not know: a 400 that names the field, and nothing written. A title that arrives
+as an object is not a card with no title, and \`then.priority\` that arrives as
+text is not a card filed without a priority. Read the field out of the message
+rather than the code: which code you get says which check caught it, and there
+are three of them, \`invalid_request\` from the schema in front of the HTTP door,
+\`bad_argument\` from the reading of a tool's arguments, and \`bad_then\` or
+\`bad_expect\` from the block that owns the field. The exceptions are the two
+fields that take whatever you put in them, \`fields\` and \`meta\`, where an
+object is the point.
 
 ## Watching for what changed
 
