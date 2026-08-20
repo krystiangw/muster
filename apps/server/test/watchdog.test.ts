@@ -83,6 +83,10 @@ describe('the watchdog, watched', () => {
       // The refusal a browser gets for an unknown status word, which is the
       // whole point of that probe: the path in front of the write is open.
       if (url.pathname.startsWith('/r/') && url.pathname.includes('/escalations/')) {
+        // The watched board answers 404 to this when it is private, exactly as
+        // it does for its page; the spare one answers the form.
+        if (url.pathname.startsWith('/r/r_test/') && state.private) return send(404, 'not here');
+        if (url.pathname.startsWith('/r/r_spare/') && state.spare !== 200) return send(state.spare, 'not here');
         return send(400, '{"error":"unknown_status"}', 'application/json');
       }
       // The spare board, which is any board this check can still open: the
@@ -462,7 +466,11 @@ describe('the watchdog, watched', () => {
     state.private = true;
     writeFileSync(join(home, 'walkthrough.json'), JSON.stringify({ [base]: { readToken: 'r_spare' } }));
     await round();
-    assert.match(await round(), new RegExp(`board script ${hashOf(script)}, on the spare board`));
+    const out = await round();
+    assert.match(out, new RegExp(`board script ${hashOf(script)}, on the spare board`));
+    // The form probe moves with it, and for the same reason: a private board
+    // answers 404 whatever the route does, which says nothing about the form.
+    assert.match(out, /browser form 400, on the spare board/);
 
     // And it still catches the thing it is for, on that board.
     state.serves = 'something else entirely';
@@ -475,6 +483,7 @@ describe('the watchdog, watched', () => {
     await round();
     const out = await round();
     assert.match(out, /board script not checked: no board this can open/);
+    assert.match(out, /browser form not checked: no board this can open/);
     assert.equal(saved().failures, 0, 'and it is still not an outage');
   });
 

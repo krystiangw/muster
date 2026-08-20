@@ -154,49 +154,6 @@ const checks = [
  * this check exists for. An older deployment that does not report `visibility`
  * gets the benefit of the doubt rather than a page.
  */
-const summary = checks.find((check) => check.name === 'api read')?.body;
-const readUrl = summary?.read_url;
-// A closed set, so a healthy answer has to be named rather than merely not be
-// a 403. Everything else, a 500 or a timeout included, is a miss.
-const formOpen = summary?.visibility === undefined || summary.visibility === 'owner' ? [400, 404] : [400];
-if (readUrl) {
-  const form = await probe(`${readUrl}/escalations/e_watchdog_probe`, {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/x-www-form-urlencoded',
-      // What a browser sends from one of our own pages, and what the check has
-      // to accept. Not curl's absent headers, which pass by a different rule.
-      origin: 'null',
-      'sec-fetch-site': 'same-origin',
-    },
-    body: 'status=watchdog-probe',
-  });
-  checks.push({
-    name: 'browser form',
-    ok: formOpen.includes(form.status),
-    status: form.status || form.error,
-  });
-}
-
-/**
- * Does the board still carry the code it says it carries?
- *
- * Every check above is answered by the server rendering HTML, and until this
- * week that was the whole product. It is not any more: the fields on a board
- * become lists somebody can arrow through, and a card can be dragged, and all
- * of that lives in one file the page names in a script tag. A deploy that
- * shipped the page without the file, or shipped a page pointing at the previous
- * build's file, leaves every check here green while the board quietly loses the
- * half of itself that only a browser sees. That is this monitor's whole subject.
- *
- * The assertion costs nothing and knows nothing about what the script says,
- * because the URL is the file's own name: the path carries the first twelve hex
- * of the sha256 of the body it serves. Hashing what came back and comparing it
- * to what it was fetched as proves three things at once, that the page names a
- * script, that the script is served, and that the two came out of the same
- * build. Coupling the check to any string inside the script would instead make
- * it fail the next time somebody edits a comment.
- */
 /**
  * Any board this can open, since the one it watches may not be one.
  *
@@ -221,6 +178,67 @@ function spareBoard() {
     return null;
   }
 }
+
+const summary = checks.find((check) => check.name === 'api read')?.body;
+const readUrl = summary?.read_url;
+// A closed set, so a healthy answer has to be named rather than merely not be
+// a 403. Everything else, a 500 or a timeout included, is a miss.
+const formOpen = summary?.visibility === undefined || summary.visibility === 'owner' ? [400, 404] : [400];
+if (readUrl) {
+  const askTheForm = (where) =>
+    probe(`${where}/escalations/e_watchdog_probe`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        // What a browser sends from one of our own pages, and what the check
+        // has to accept. Not curl's absent headers, which pass by a different
+        // rule.
+        origin: 'null',
+        'sec-fetch-site': 'same-origin',
+      },
+      body: 'status=watchdog-probe',
+    });
+
+  let form = await askTheForm(readUrl);
+  let said = String(form.status || form.error);
+  // The same move the script check makes below, for the same reason. A private
+  // board answers 404 to this whatever the route does, so accepting that as
+  // healthy is accepting an answer that says nothing about the form: the
+  // question is whether a browser posting a bad status to one of our own pages
+  // is refused by name, and any board open by link answers it.
+  if (form.status === 404 && formOpen.includes(404)) {
+    const spare = spareBoard();
+    const other = spare === null ? null : await askTheForm(spare);
+    if (other !== null && other.status !== 404) {
+      form = other;
+      said = `${other.status || other.error}, on the spare board`;
+    } else {
+      said = spare === null ? 'not checked: no board this can open' : `not checked: the spare board answers ${other.status || other.error}`;
+      form = { status: 400 };
+    }
+  }
+  checks.push({ name: 'browser form', ok: formOpen.includes(form.status), status: said });
+}
+
+/**
+ * Does the board still carry the code it says it carries?
+ *
+ * Every check above is answered by the server rendering HTML, and until this
+ * week that was the whole product. It is not any more: the fields on a board
+ * become lists somebody can arrow through, and a card can be dragged, and all
+ * of that lives in one file the page names in a script tag. A deploy that
+ * shipped the page without the file, or shipped a page pointing at the previous
+ * build's file, leaves every check here green while the board quietly loses the
+ * half of itself that only a browser sees. That is this monitor's whole subject.
+ *
+ * The assertion costs nothing and knows nothing about what the script says,
+ * because the URL is the file's own name: the path carries the first twelve hex
+ * of the sha256 of the body it serves. Hashing what came back and comparing it
+ * to what it was fetched as proves three things at once, that the page names a
+ * script, that the script is served, and that the two came out of the same
+ * build. Coupling the check to any string inside the script would instead make
+ * it fail the next time somebody edits a comment.
+ */
 
 if (readUrl) {
   /**
