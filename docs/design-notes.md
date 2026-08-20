@@ -2857,3 +2857,37 @@ generalises, and the general form is better: *who reads this answer, and what
 would they conclude if the thing it describes had changed underneath it?* A
 check nobody reads, a count that merges two populations, and an inventory
 nobody compares with the doors all fail that question the same way.
+
+## The change that turned two checks off
+
+Same day, later. Boards became private the moment somebody claims them, which
+is what the operator asked for and what the product should have been doing all
+along. Two of the watchdog's production checks stopped working that afternoon
+and both of them reported that they were fine.
+
+The watchdog reads the board it watches through that board's read link, and a
+private board answers 404 to anything without the owner's session, which a cron
+line has no way to hold. Both checks already had an exception for that: on a
+private board, 404 is the healthy answer, because demanding otherwise would page
+about a setting. The exception was right when a private board was a deliberate,
+rare thing. As the default it swallowed the whole check: the form probe stopped
+asking whether a bad status is refused by name, and the script probe stopped
+asking whether the deploy serves the file its page names, which is the one
+question that monitor exists for. The hourly line said `browser form 404, board
+script not open by link` and counted both as passes.
+
+Nothing failed. No test failed either, because the tests set that state on
+purpose and assert the exception. What found it was reading the rehearsal line
+after a deploy and noticing two words had changed since the morning.
+
+The fix is the same shape as the backup check earlier in the day: the question
+is about the deployment rather than about one board, so it is asked of any board
+this can open. The walkthrough leaves one behind every morning, unclaimed and
+therefore readable. When there is none, the line says `not checked` rather than
+passing in the words of a check that ran.
+
+**The general form, which is the third time today.** A check that cannot run
+must not answer like a check that did. Say the state out loud in the place
+somebody reads, and let a pass mean a pass. The corollary is the part I want to
+remember: a change to the product can turn off a monitor without touching it,
+and the monitor will not tell you, because everything it says is still true.
