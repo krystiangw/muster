@@ -25,7 +25,7 @@
  * Reads only. It never writes, so running it against production is safe.
  */
 import { connectStore } from '../src/db.js';
-import { KEEP_DAYS, insights } from '../src/events.js';
+import { KEEP_DAYS, insights, isUnholdable } from '../src/events.js';
 
 const uri = process.env.MONGODB_URI;
 const dbName = process.env.MONGODB_DB ?? 'muster';
@@ -265,9 +265,24 @@ if (pageRows.length > 0) {
   );
 }
 
-if (arrivals.length > 0) {
+// Names nobody can hold are dropped where the visit is recorded now, but two
+// hundred are already stored and this table is where they were read as the
+// largest source of traffic this service had. Counted and named as what they
+// are rather than deleted: the visit happened, only the claim about where it
+// came from was somebody's own audit.
+const real = arrivals.filter((row) => !isUnholdable(String(row._id)));
+const fromTests = arrivals
+  .filter((row) => isUnholdable(String(row._id)))
+  .reduce((sum, row) => sum + row.n, 0);
+if (real.length > 0 || fromTests > 0) {
   console.log('\nWhere they came from, last 30 days');
-  for (const { _id, n } of arrivals) row(_id, n);
+  for (const { _id, n } of real) row(_id, n);
+  if (fromTests > 0) {
+    row('  arrivals naming a test host', `${fromTests}, not a site`);
+  }
+  if (real.length === 0) {
+    console.log('  and nothing else named a source');
+  }
 } else {
   // Said out loud rather than left as an empty section: nothing here means
   // either nobody arrived from anywhere or every browser withheld the header,

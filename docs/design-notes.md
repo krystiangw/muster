@@ -1949,3 +1949,27 @@ same side.
 The caveat sits on the row somebody reads first rather than four lines below it.
 A footnote under a table is read after the number it corrects, which is the
 wrong order for a number that is off by a factor of sixty.
+
+## The largest source of traffic was a name nobody can hold, 2026-08-20
+
+`launch-audit.invalid` sent this service two hundred readers, according to this
+service. It was the top named referrer in the report, above every real site,
+and it is a flag somebody's own audit left in a header. The reserved names exist
+so they can never resolve to anybody: RFC 2606 set aside `.invalid`, `.test` and
+`.example`, and RFC 6761 did the same for `localhost`. A visit carrying one is a
+test saying so out loud.
+
+They are dropped where the visit is recorded now, and only the claim about where
+somebody came from is dropped: the read still counts, because somebody did fetch
+the page.
+
+**The rule is written against the name without the port.** `localhost:4600` is
+the shape this arrives in, and the first version tested the host, which misses it
+by a colon. The test caught it because it sent all four reserved shapes rather
+than the one that had actually turned up in production.
+
+The two hundred already stored get the same treatment as the board reloads:
+counted, named as what they are, and not deleted. The arrivals table now prints
+them as "arrivals naming a test host, not a site", which is the whole of that
+table today. The honest reading of the report this morning is that nothing has
+sent us a reader yet, and until now it said the opposite.

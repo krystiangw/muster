@@ -394,11 +394,34 @@ export interface ViewedRequest {
  * host answers it. Our own host is dropped, because a person moving between
  * our pages arrived once.
  */
+/**
+ * Names nobody can hold, so a visit carrying one came from a test.
+ *
+ * RFC 2606 and RFC 6761 set these aside precisely so they can never resolve to
+ * anybody's site. Storing one teaches the report a lie it then prints as its
+ * top source of traffic: measured on production, `launch-audit.invalid` was two
+ * hundred arrivals and the largest named referrer this service had, which is a
+ * flag somebody's own audit left behind rather than a site sending readers.
+ *
+ * The visit still counts, because somebody did fetch the page. Only the claim
+ * about where they came from is dropped.
+ */
+const UNHOLDABLE = /\.(invalid|test|example|localhost)$|^localhost$/;
+
+/** Exported for the report, which has two hundred of these already stored. */
+export function isUnholdable(host: string): boolean {
+  return UNHOLDABLE.test(host.toLowerCase().split(':')[0] ?? '');
+}
+
 export function arrivedFrom(referer: string | undefined, self: string): string | null {
   if (!referer) return null;
   try {
-    const host = new URL(referer).host.toLowerCase();
+    const url = new URL(referer);
+    const host = url.host.toLowerCase();
     if (!host || host === self.toLowerCase()) return null;
+    // The name without the port, because `localhost:4600` is the shape this
+    // arrives in and a rule written against the host misses it by a colon.
+    if (UNHOLDABLE.test(url.hostname.toLowerCase())) return null;
     return host.slice(0, 120);
   } catch {
     return null;

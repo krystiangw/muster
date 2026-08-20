@@ -784,6 +784,38 @@ describe('counting the people, not the agents', () => {
       assert.notEqual(event.from, new URL(harness.config.baseUrl).host);
     }
   });
+
+  it('does not name a host nobody can hold as the place somebody came from', async () => {
+    // Measured on production: `launch-audit.invalid` was two hundred arrivals
+    // and the largest named referrer this service had, which is a flag left
+    // behind by somebody's own audit rather than a site sending readers. The
+    // reserved names exist so they can never resolve to anybody, so a visit
+    // carrying one is a test saying so out loud.
+    const before = await harness.store.events.countDocuments({ kind: 'view', from: { $exists: true } });
+    const readsBefore = await harness.store.events.countDocuments({ kind: 'view', detail: 'pricing' });
+    for (const referer of [
+      'https://launch-audit.invalid/report',
+      'https://probe.test/',
+      'https://www.example/',
+      'http://localhost:4600/',
+    ]) {
+      await harness.server.inject({ method: 'GET', url: '/pricing', headers: { referer } });
+    }
+    await flushEvents();
+
+    assert.equal(
+      await harness.store.events.countDocuments({ kind: 'view', from: { $exists: true } }),
+      before,
+      'none of them named a source',
+    );
+    // And the visits themselves still count: somebody did fetch the page, and
+    // only the claim about where they came from was dropped.
+    assert.equal(
+      await harness.store.events.countDocuments({ kind: 'view', detail: 'pricing' }),
+      readsBefore + 4,
+      'the reads are still reads',
+    );
+  });
 });
 
 /**
