@@ -359,6 +359,25 @@ describe('contentless items', () => {
     assert.equal((await itemDoc(project, 'affirmed')).status, 'dropped');
   });
 
+  it('loses the reopening to somebody affirming the close at the same moment', async () => {
+    // Two writes arriving together: one saying the card stays dropped, one
+    // describing it. Whichever reads first, the card must not end up open,
+    // and that only holds if the undo is guarded on the marker it read rather
+    // than on the status alone: affirming a close clears the marker and
+    // leaves the status where it is, so a status guard sees no change at all.
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'raced', title: 't', actor: 'a' });
+    await backdate(project, 'raced', { createdAt: hoursAgo(48) });
+    await sweepProject(harness.store, await projectDoc(project));
+    assert.equal((await itemDoc(project, 'raced')).status, 'dropped');
+
+    await Promise.all([
+      post(project, '/items', { slug: 'raced', status: 'dropped', actor: 'a' }),
+      post(project, '/items', { slug: 'raced', body: 'described', actor: 'a' }),
+    ]);
+    assert.equal((await itemDoc(project, 'raced')).status, 'dropped');
+  });
+
   it('does not reopen on a write that is guarded on what the caller last saw', async () => {
     // This service refuses a guarded write that also moves a status, and says
     // so in as many words: the correction first, the move after. Reopening on
@@ -378,6 +397,27 @@ describe('contentless items', () => {
     assert.equal(answer.statusCode, 200, answer.body);
     assert.equal((await itemDoc(project, 'guarded')).status, 'dropped');
     assert.equal((await itemDoc(project, 'guarded')).body, 'described, carefully');
+  });
+
+  it('counts the card it brings back, so the board can still refuse at the limit', async () => {
+    // A reopening costs a slot, and a slot that is not taken is a limit that
+    // stops meaning anything: the counter is what the capacity check reads,
+    // and there is a repair pass in this file whose whole job is undoing
+    // drift like it. Counted here rather than trusted, because the undo goes
+    // through the transition sideways.
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'counted', title: 't', actor: 'a' });
+    await backdate(project, 'counted', { createdAt: hoursAgo(48) });
+    await sweepProject(harness.store, await projectDoc(project));
+    const closed = (await projectDoc(project)).counts.items;
+
+    await post(project, '/items', { slug: 'counted', body: 'described', actor: 'a' });
+    const open = await harness.store.items.countDocuments({
+      projectId: project.id,
+      status: { $nin: ['done', 'dropped'] },
+    });
+    assert.equal((await projectDoc(project)).counts.items, closed + 1, 'the slot was taken');
+    assert.equal((await projectDoc(project)).counts.items, open, 'and it matches what is actually open');
   });
 
   it('leaves a card somebody dropped on purpose where they put it', async () => {
@@ -463,6 +503,10 @@ describe('absence resolve', () => {
     assert.equal(item.status, 'done');
     assert.match(item.timeline.at(-1)!.message, /source signal absent/);
     assert.equal(item.timeline.at(-1)!.by, 'hygiene');
+    // And it says how to get it back, the way the drop rule does. A card that
+    // closed itself and does not say what undoes it is a card somebody
+    // reopens by hand, or does not reopen at all.
+    assert.match(item.timeline.at(-1)!.message, /Write to this slug again/);
   });
 
   it('opens again when the thing it mirrors comes back', async () => {

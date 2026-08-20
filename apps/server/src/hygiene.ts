@@ -365,7 +365,8 @@ export async function resolveAbsent(
               $concat: [
                 'source signal absent for ',
                 { $toString: { $ifNull: ['$absence.count', 0] } },
-                ` consecutive observations and over ${minHours}h, resolved automatically`,
+                ` consecutive observations and over ${minHours}h, resolved automatically. `
+                  + 'Write to this slug again if the signal comes back and it reopens.',
               ],
             },
             now,

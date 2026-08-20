@@ -1454,7 +1454,18 @@ export async function upsertItem(
     // The previous status is the guard, so exactly one of several concurrent
     // requests owns the transition and only that one moves the counter.
     const moved = await store.items.findOneAndUpdate(
-      { projectId: project._id, slug, status: existing.status },
+      {
+        projectId: project._id,
+        slug,
+        status: existing.status,
+        // A synthesized undo is guarded on the marker it read, not only on the
+        // status. Both are the same value in the moment it was read, and they
+        // stop being the same the instant somebody else affirms the close:
+        // that write clears the marker and leaves the status alone, so a
+        // transition guarded on status alone would still win and put back work
+        // that had just been kept closed, in that order.
+        ...(undoesTheMachine ? { closedBy: closedByTheMachine } : {}),
+      },
       {
         $set: {
           status: input.status!,
@@ -1500,7 +1511,14 @@ export async function upsertItem(
   // on a card hygiene resolved) left the marker on, and the next write with no
   // status at all would have reopened work somebody had just said to keep
   // closed.
-  if (input.status !== undefined) set.closedBy = null;
+  // Not on an insert-only write: the caller that loses that race changes
+  // nothing except the timeline, and clearing this would be a change, and one
+  // that quietly turns off the automatic reopening of a card the winner is
+  // looking after. No door sends both today, since `insertOnly` is internal to
+  // the feedback route and that route names no status, so there is no test
+  // below: the condition is here to keep the two rules from meeting later,
+  // not to fix something reachable now.
+  if (input.status !== undefined && !input.insertOnly) set.closedBy = null;
   const setOnInsert: Record<string, unknown> = {
     _id: newId('i'),
     projectId: project._id,
