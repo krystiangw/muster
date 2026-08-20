@@ -2567,3 +2567,17 @@ gap makes the answer say a card is open while refusing it for being finished.
 The status now comes from the refusal that saw it, and the race is staged in a
 test by closing the card inside the move's first read.
 
+
+**A probe of the read link that found nothing, 2026-08-20.** The published
+sentence calls the link a capability and lists what it grants. Every verb on
+that list was driven through the browser doors and checked by its effect rather
+than its status code: the note lands, the card is filed, the words change, the
+urgency, owner and labels are set, the card moves, the blockers are written, the
+layout is replaced, and two spellings of one handle merge. The token also does
+not work as a bearer on the admin door, which answers 401. The promise and the
+service agree.
+
+Three of the calls in that probe were wrong before they were right, and all
+three the same way: `/board/label` for `/board/labels`, `labels=` for `add=`,
+and `handle=` for `from=`. A guessed name answers something, and something is
+easy to read as an answer about the product. Read the route, then call it.
