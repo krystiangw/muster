@@ -1915,3 +1915,17 @@ Not a cookie and not an address: the marker is on the page's own reload, not on
 the reader, so nothing about who is reading is stored or needs to be. Somebody
 arriving at a link that happens to carry the marker is undercounted by one,
 which is the direction to be wrong in.
+
+**Building that address had two faults and the door could not show either.**
+Review found both. Splitting the URL on every `?` and keeping the second piece
+turns a search for `why?now` into a search for `why` on the first reload, and
+taking the path from the request line puts somebody else's origin in front of a
+reader a minute later if a request arrives in absolute form. Neither is
+reachable through the server in a test: `inject` normalises the request line, so
+the absolute form never arrives, and a browser percent-encodes a typed `?`
+before sending it. The test through the door passed with both faults in place.
+
+So the builder is exported and asked directly, which is the whole lesson: a
+guard against a shape the harness cannot produce has to be tested at the level
+where the shape exists, or it is decoration. The path is now rebuilt from the
+token this route matched, and the query is everything after the first mark.

@@ -6,6 +6,7 @@ import { authed, createProject, signIn, startHarness, type Harness, type Project
 import { flushEvents } from '../src/events.js';
 import { hashToken } from '../src/ids.js';
 import { boardApplyJson } from '../src/serialize.js';
+import { refreshUrl } from '../src/routes/public.js';
 import { handBack } from '../src/service.js';
 
 /**
@@ -2319,6 +2320,23 @@ describe('a board many agents write to', () => {
     // person following a link without it is still counted.
     await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board?agent=errors-loop` });
     assert.equal(await views(), after + 1, 'somebody arriving still counts');
+
+    // Both of the ways this address can be built wrong, asked of the function
+    // that builds it. Through the server neither can be reached: inject
+    // normalises the request line, so the absolute form never arrives, and a
+    // browser percent-encodes a typed `?` before it is sent. A test that only
+    // went through the door passed with both faults in place, which is what it
+    // did until this was written.
+    assert.equal(
+      refreshUrl('r_token', '/r/r_token/board?q=why?now'),
+      '/r/r_token/board?q=why%3Fnow&refreshed=1',
+      'a search with a question mark in it survives the reload',
+    );
+    assert.equal(
+      refreshUrl('r_token', 'http://elsewhere.example/r/r_token/board?agent=a'),
+      '/r/r_token/board?agent=a&refreshed=1',
+      'and the reload names this service, whatever the request line said',
+    );
   });
 
   it('sends the token back the way it arrived, whatever it was', async () => {

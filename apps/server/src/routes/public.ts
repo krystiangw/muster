@@ -233,14 +233,23 @@ const BOARD_REFRESH_SECONDS = 60;
 /**
  * The same address, marked as one the page asked for rather than a person.
  *
- * Kept relative, so nothing here has to know the public origin, and built from
- * the URL as it arrived so every filter the reader chose survives the reload.
+ * The path is rebuilt from the token this route matched rather than taken from
+ * the request line. A request may arrive in absolute form, authority and all,
+ * and Fastify keeps that in `request.url`; a meta refresh built from it would
+ * then send the reader to somebody else's origin a minute later. Whether this
+ * deployment can actually be reached that way was not something the harness
+ * could reproduce, which is a reason to build the safe one rather than to
+ * decide it does not matter.
+ *
+ * The query is everything after the first `?`, not the second piece of a split:
+ * `?q=why?now` is a search somebody can type, and cutting it at the second mark
+ * quietly changed what they were looking for on the first reload.
  */
-function refreshUrl(url: string): string {
-  const [path, sent] = url.split('?');
-  const params = new URLSearchParams(sent ?? '');
+export function refreshUrl(readToken: string, url: string): string {
+  const at = url.indexOf('?');
+  const params = new URLSearchParams(at === -1 ? '' : url.slice(at + 1));
   params.set('refreshed', '1');
-  return `${path}?${params.toString()}`;
+  return `/r/${encodeURIComponent(readToken)}/board?${params.toString()}`;
 }
 
 interface KeptFilter {
@@ -1657,7 +1666,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
             // is the one thing on this page that nothing else can recover.
             ...(sheetOpen
               ? {}
-              : { refreshSeconds: BOARD_REFRESH_SECONDS, refreshTo: refreshUrl(request.url) }),
+              : { refreshSeconds: BOARD_REFRESH_SECONDS, refreshTo: refreshUrl(readToken, request.url) }),
           },
           body,
         ),
