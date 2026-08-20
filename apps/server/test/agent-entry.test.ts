@@ -798,7 +798,27 @@ describe('B. agent entry', () => {
       `the token said it lasts ${access.expires_in} seconds`,
     );
     assert.match(OAUTH_TOKEN_IS, /admin key/);
-    assert.match(OAUTH_TOKEN_IS, /60 minutes/);
+    assert.match(OAUTH_TOKEN_IS, /up to 60 minutes/);
+
+    // The hour is a ceiling, not a promise: a key never outlives the board it
+    // is for. Said as a flat sixty minutes, the sentence was wrong for every
+    // unclaimed project in its last hour, which is the shape this service
+    // hands out by default.
+    await harness.store.projects.updateOne(
+      { _id: access.project },
+      { $set: { expiresAt: new Date(Date.now() + 10 * 60_000) } },
+    );
+    const shortened = await harness.server.inject({
+      method: 'POST',
+      url: '/oauth/token',
+      payload: { grant_type: 'client_credentials', client_id, client_secret },
+    });
+    assert.equal(shortened.statusCode, 200);
+    assert.ok(
+      shortened.json().expires_in <= 600,
+      `a board with ten minutes left handed out ${shortened.json().expires_in} seconds`,
+    );
+    assert.match(OAUTH_TOKEN_IS, /expires_in/);
   });
 
   it('publishes every call an agent needs, including the ones added last', async () => {

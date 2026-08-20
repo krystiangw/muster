@@ -2602,3 +2602,14 @@ claims: mints a key, deletes a card, is refused on another board, and reads the
 hour off the answer. Turning the key to `write` fails it, and so does changing
 the sentence to say `write` while the code still mints admin. The words cannot
 drift in either direction on their own.
+
+**And the hour was a ceiling, not a promise.** Review, on the sentence written
+one commit earlier: a key never outlives the board it is for, so a token asked
+for on an unclaimed project in its last ten minutes comes back with six hundred
+seconds, and thirty seconds before the end it comes back with twenty nine. Both
+measured. "Good for sixty minutes" was therefore wrong for every unclaimed
+board in its final hour, which is the shape this service hands out by default.
+It says up to, says why, and points at `expires_in`, which is the number that
+was right all along. Taking the ceiling out of the code fails the test, and so
+does taking the words back to a flat hour.
+

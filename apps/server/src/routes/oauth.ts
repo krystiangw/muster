@@ -34,9 +34,14 @@ const TOKEN_TTL_MS = 60 * 60 * 1000;
  * None of that was published anywhere. "A project token" is true and says
  * nothing about the half somebody wiring this into a shared context needs to
  * know.
+ *
+ * And the hour is a ceiling rather than a promise, which the first version of
+ * this sentence got wrong: a key is capped at its project's own deadline, so
+ * an unclaimed board in its last ten minutes hands back six hundred seconds.
+ * Measured at ten minutes and at thirty seconds, both times to the second.
  */
 export const OAUTH_TOKEN_IS =
-  `an admin key for the project the client was registered with, good for ${TOKEN_TTL_MS / 60_000} minutes: it reads and writes there, mints further keys and deletes cards, and is refused on every other project. Ask for a new one rather than storing it`;
+  `an admin key for the project the client was registered with, good for up to ${TOKEN_TTL_MS / 60_000} minutes: it reads and writes there, mints further keys and deletes cards, and is refused on every other project. Up to, because a key never outlives the board it is for, so a token asked for on an unclaimed project in its last hour comes back shorter. Read \`expires_in\` rather than the number in this sentence, and ask for a new one rather than storing it`;
 
 export function registerOAuth(app: FastifyInstance, deps: OAuthDeps): void {
   const { store, config, limiter } = deps;
