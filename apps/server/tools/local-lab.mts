@@ -18,7 +18,7 @@
  * Nothing here touches production, and nothing here ships: it is a laboratory,
  * and the data in it is invented.
  */
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { createStore } from '../src/db.js';
@@ -35,7 +35,7 @@ const PORT = Number(flag('--port') ?? 3100);
 const EMAIL = flag('--email') ?? 'operator@example.com';
 const CODE = '123456';
 
-const mongo = await MongoMemoryServer.create();
+const mongo = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
 const config = loadConfig({
   MONGODB_URI: mongo.getUri(),
   MONGODB_DB: 'muster_lab',

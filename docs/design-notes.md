@@ -1716,31 +1716,34 @@ count as the one that is left, because an expired admin key is not a door.
 Worker keys are never refused: they cannot mint anything, so nothing depends on
 the last one.
 
-**Every failure here has to leave the key alive**, and three shapes were tried
-before one did. Counting first and writing after lets two revocations each count
-the other as the key that is left. Writing first and putting the key back when
-the count comes up empty shipped for twenty minutes, and review found what it
-costs: a store that goes away between the two writes never puts the key back,
-and the retry then answers 404 because the key is already revoked. The same
-lockout, through the door built to close it. A version number bumped between the
-count and the write looked like the fix and is not, which review also caught:
-bumping a number is not holding it, so the loser re-reads, passes, and revokes
-while the winner is still on its way to the key.
+**Every failure here has to leave the key alive**, and four shapes were tried
+before one did. Counting then writing lets two revocations each count the other
+as the key that is left. Writing then putting the key back when the count comes
+up empty leaves it revoked for good if the store goes away in between, which is
+the lockout arriving through the guard itself. A version bumped between the two
+is not held, so the loser re-reads and passes. A hold with a lifetime is not
+fenced, so a caller stalled past it writes on a reading the world has moved on
+from. Three of those four were found by review rather than by thinking harder,
+which is the argument for reaching for the thing built for it.
 
-This is the only call in the service whose answer depends on documents other
-than the one it writes, so it is the only one that cannot read and write
-separately. The count and the write happen under a hold on the project, taken in
-one conditional update and given back in one more. A second revocation arriving
-meanwhile is refused with `revoke_in_progress` rather than guessing, which is
-the same answer this product gives everywhere else it cannot know. The hold is a
-moment it lapses rather than a flag, so a process that dies mid-revocation locks
-nothing for longer than ten seconds. No count is cached anywhere on purpose: a
-denormalised number of admin keys drifts the first time one expires instead of
-being revoked, and a drifted count is a lockout waiting for the next call.
+**So the count and the write are one transaction**, and this is the only place
+in the service that needs one: everywhere else the answer depends only on the
+document being written. The `$inc` on the project inside it is not bookkeeping
+and cannot be removed. Snapshot isolation does not stop two transactions that
+read the same rows and write different ones, so without a document they both
+write, two revocations of two different keys both see the other and both commit.
+That is the conflict the database needs to find. Removing the `$inc` fails the
+race test three runs out of three; removing the session fails it too.
 
-Four tests, one per part, each failing when its part is removed: the hold
-unchecked, the hold that never lapses, the hold never given back, and the store
-disappearing mid-call. None of them could be written casually. The race forces
-its own interleaving by holding the first call inside its count until the second
-has been answered; run as two ordinary concurrent requests the pair serialises
-and passes under every broken order, measured eight times out of eight.
+**Paid for where it is used.** A transaction needs a replica set, and putting
+every test file on one took the suite from 55 seconds to 91. Worker keys are
+nobody's way back in, so revoking one holds no invariant and takes no
+transaction, and that alone put four of the five affected files back on a plain
+`mongod`. The one file that revokes admin keys asks for a replica set; the suite
+is back to 54 seconds. Atlas, including the free tier, is a replica set already,
+and the runbook now proves it with a read-only transaction rather than assuming.
+
+The race test forces its own interleaving, holding both calls at their first
+read until the other has arrived, so the two transactions are open over each
+other. Run as two ordinary concurrent calls the pair serialises and passes under
+every broken order, measured eight times out of eight.

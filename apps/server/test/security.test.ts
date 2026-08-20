@@ -22,7 +22,9 @@ import {
 let harness: Harness;
 
 before(async () => {
-  harness = await startHarness({ LIMIT_CLAIM_EMAILS_PER_HOUR: '100' });
+  // A replica set, because revoking an admin key is judged inside a
+  // transaction and a standalone will not start one.
+  harness = await startHarness({ LIMIT_CLAIM_EMAILS_PER_HOUR: '100' }, {}, { replicaSet: true });
 });
 
 after(async () => {
@@ -1573,81 +1575,68 @@ describe('a project cannot revoke its own way in', () => {
 
   it('never leaves nothing behind when two revocations race', async () => {
     // A fleet shares one key, so two loops reacting to the same leak fire two
-    // revocations at once, and this call is the only one whose answer depends
-    // on documents other than the one it writes. Counting and then writing lets
-    // each of them count the other as the key that is left; so does bumping a
-    // version between the two, because bumping a number is not holding it.
-    //
-    // Forced rather than hoped for: the first call is held inside its count
-    // until the second has been answered. Run as two ordinary concurrent
-    // requests the pair serialises and passes under the broken order, measured
-    // eight times out of eight.
+    // revocations at once. Forced rather than hoped for: both are held at their
+    // first read until the other has reached its own, so the two transactions
+    // are open over each other. Run as two ordinary concurrent calls the pair
+    // serialises and passes under every broken order, measured eight times out
+    // of eight.
     const project = await createProject(harness);
     await post(project, '/keys', { name: 'second', role: 'admin' });
     const both = await keysOf(project);
 
-    let release: (() => void) | null = null;
-    const reached = new Promise<void>((seen) => {
-      const real = harness.store.keys.countDocuments.bind(harness.store.keys);
-      harness.store.keys.countDocuments = (async (...args: Parameters<typeof real>) => {
-        harness.store.keys.countDocuments = real;
-        seen();
+    let waiting: (() => void) | null = null;
+    let met = 0;
+    const real = harness.store.keys.findOne.bind(harness.store.keys);
+    harness.store.keys.findOne = (async (...args: Parameters<typeof real>) => {
+      if (met < 2) {
+        met += 1;
         await new Promise<void>((go) => {
-          release = go;
+          if (waiting) {
+            waiting();
+            waiting = null;
+            go();
+          } else {
+            waiting = go;
+          }
         });
-        return real(...args);
-      }) as typeof real;
-    });
+      }
+      return real(...args);
+    }) as typeof real;
 
-    const first = revokeApiKey(harness.store, project.id, both[0]!.id);
-    await reached;
-
-    // The second one arrives while the first is still deciding. It must not be
-    // allowed to make the same decision from the same reading.
-    await assert.rejects(
-      () => revokeApiKey(harness.store, project.id, both[1]!.id),
-      (error: ServiceError) => error.code === 'revoke_in_progress',
-    );
-
-    release!();
-    await first;
+    let outcomes: Array<string> = [];
+    try {
+      outcomes = await Promise.all(
+        both.map((key) =>
+          revokeApiKey(harness.store, project.id, key.id).then(
+            () => 'revoked',
+            (error: ServiceError) => error.code ?? 'threw',
+          ),
+        ),
+      );
+    } finally {
+      harness.store.keys.findOne = real;
+    }
 
     const live = await harness.store.keys.countDocuments({
       projectId: project.id,
       role: 'admin',
       revokedAt: null,
     });
-    assert.equal(live, 1, 'exactly one of the two went, and something can still open this project');
+    assert.equal(live, 1, `something can still open this project: ${outcomes.join(', ')}`);
+    assert.equal(outcomes.filter((o) => o === 'revoked').length, 1, outcomes.join(', '));
+    assert.equal(outcomes.filter((o) => o === 'last_admin_key').length, 1, outcomes.join(', '));
   });
 
-  it('hands the hold back, so the next revocation does not wait it out', async () => {
-    // The hold lasts ten seconds, so a revocation that keeps it would make
-    // every clean-up after a leak a queue of refusals ten seconds apart.
+  it('lets one revocation follow another', async () => {
+    // Cleaning up after a leak is a run of these, so nothing may be left
+    // behind by one that makes the next one wait or fail.
     const project = await createProject(harness);
     await post(project, '/keys', { name: 'second', role: 'admin' });
     await post(project, '/keys', { name: 'third', role: 'admin' });
     const all = await keysOf(project);
 
     assert.equal((await del(project, all[1]!.id)).statusCode, 200);
-    assert.equal((await del(project, all[2]!.id)).statusCode, 200, 'the hold was given back');
-  });
-
-  it('does not stay shut when the process holding it dies', async () => {
-    // The hold is a moment it lapses rather than a flag, so a revocation that
-    // never finished cannot lock the door it was guarding.
-    const project = await createProject(harness);
-    await post(project, '/keys', { name: 'second', role: 'admin' });
-    const both = await keysOf(project);
-    await harness.store.projects.updateOne(
-      { _id: project.id },
-      { $set: { adminRevokeUntil: new Date(Date.now() - 1000) } },
-    );
-
-    // Read from the store rather than through the API: the key just revoked is
-    // the one this project's token is.
-    await revokeApiKey(harness.store, project.id, both[0]!.id);
-    const gone = await harness.store.keys.findOne({ _id: both[0]!.id });
-    assert.notEqual(gone!.revokedAt, null, 'a lapsed hold does not refuse the next revocation');
+    assert.equal((await del(project, all[2]!.id)).statusCode, 200, 'the second one goes too');
   });
 
   it('leaves the key alive when the database goes away mid-call', async () => {

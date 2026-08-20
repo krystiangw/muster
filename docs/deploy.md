@@ -26,6 +26,25 @@ Create a free M0 cluster in an EU region, a database user for Muster only, and
 allow the Heroku egress range or `0.0.0.0/0` with a strong password. Take the
 connection string.
 
+It has to be a replica set, which every Atlas cluster including M0 already is.
+One call needs a transaction: revoking an admin key has to count the others in
+the same breath, and a standalone `mongod` refuses to start one. Verified
+against this deployment rather than assumed, with a read-only transaction:
+
+```bash
+node --input-type=module -e '
+import { MongoClient } from "mongodb";
+const client = new MongoClient(process.env.MONGODB_URI);
+await client.connect();
+const session = client.startSession();
+await session.withTransaction(async () => {
+  await client.db("muster").collection("apiKeys").countDocuments({}, { session });
+});
+console.log("transactions available");
+await session.endSession();
+await client.close();'
+```
+
 ## 3. Heroku
 
 ```bash

@@ -3315,17 +3315,6 @@ export async function listApiKeys(
 }
 
 /**
- * How long a revocation may hold the project before the hold lapses on its own.
- *
- * It covers two queries, so it is generous by three orders of magnitude on
- * purpose: the number that matters is not how long the work takes but how long
- * a crashed process may keep the next caller out, and ten seconds is short
- * enough to wait through and long enough that a slow store does not break the
- * hold under a caller still using it.
- */
-const ADMIN_REVOKE_HOLD_MS = 10_000;
-
-/**
  * Revoking, with the one revocation that has no way back refused.
  *
  * Measured before it was guarded: revoking your own last admin key answered
@@ -3341,32 +3330,37 @@ const ADMIN_REVOKE_HOLD_MS = 10_000;
  * token leaks, in the wrong order: revoke the leaked key first, then discover
  * that minting the replacement needed the key you just revoked.
  *
- * This is the only call whose answer depends on documents other than the one it
- * writes, and two earlier shapes of it were both wrong for the same reason.
- * Counting and then writing lets two revocations each count the other as the
- * key that is left. Writing and then putting the key back when the count comes
- * up empty leaves it revoked for good if the store goes away in between, which
- * is the lockout arriving through the guard itself. A version bumped between
- * the two is no better: bumping a number is not holding it, so the loser can
- * re-read and pass while the winner is still on its way to the key.
+ * This is the only call in the service whose answer depends on documents other
+ * than the one it writes, and every way of doing that without a transaction was
+ * wrong, each in its own way. Count then write, and two revocations each count
+ * the other as the key that is left. Write then put it back if the count comes
+ * up empty, and a store that goes away in between leaves it revoked for good.
+ * A version bumped between the two is not held, so the loser re-reads and
+ * passes. A hold with a lifetime is not fenced, so a caller stalled past it
+ * writes on a reading the world has moved on from. Each of those was found by
+ * review rather than by thinking harder, which is the argument for using the
+ * thing built for it.
  *
- * So the count and the write happen under a hold on the project, taken in one
- * conditional update and released in one more. Every failure path leaves the
- * key alive, and a process that dies holding it blocks nothing for longer than
- * the hold lasts.
+ * The bump on the project inside the transaction is not bookkeeping and cannot
+ * be removed. Snapshot isolation does not stop two transactions that read the
+ * same rows and write different ones: without a document they both write, two
+ * revocations of two different keys both see the other and both commit. The
+ * bump is that document. One of them then loses on a write conflict, retries,
+ * counts again and is refused.
  */
 export async function revokeApiKey(
   store: Store,
   projectId: string,
   keyId: string,
 ): Promise<void> {
-  const key = await store.keys.findOne({ projectId, _id: keyId, revokedAt: null });
-  if (!key) {
+  const found = await store.keys.findOne({ projectId, _id: keyId, revokedAt: null });
+  if (!found) {
     throw new ServiceError(404, 'not_found', `No active key ${keyId} in this project.`);
   }
   // A worker key is nobody's way back in, so revoking one answers to nothing
-  // but itself and takes no hold.
-  if (key.role !== 'admin') {
+  // but itself: no invariant to hold, and no transaction, which is also what
+  // keeps this call working against a database that has none.
+  if (found.role !== 'admin') {
     await store.keys.updateOne(
       { projectId, _id: keyId, revokedAt: null },
       { $set: { revokedAt: new Date() } },
@@ -3374,49 +3368,47 @@ export async function revokeApiKey(
     return;
   }
 
-  const now = new Date();
-  const until = new Date(now.getTime() + ADMIN_REVOKE_HOLD_MS);
-  const held = await store.projects.updateOne(
-    {
-      _id: projectId,
-      $or: [{ adminRevokeUntil: { $exists: false } }, { adminRevokeUntil: { $lte: now } }],
-    },
-    { $set: { adminRevokeUntil: until } },
-  );
-  if (held.modifiedCount === 0) {
-    throw new ServiceError(
-      409,
-      'revoke_in_progress',
-      'Another admin key on this project is being revoked right now, and the two cannot be judged separately: each would count the other as the one that is left. Nothing was changed; try again in a moment.',
-    );
-  }
-
+  const session = store.client.startSession();
   try {
-    // A key that has run out is not a way back in, so it does not count as the
-    // one that is left.
-    const others = await store.keys.countDocuments({
-      projectId,
-      _id: { $ne: keyId },
-      role: 'admin',
-      revokedAt: null,
-      $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }],
-    });
-    if (others === 0) {
-      throw new ServiceError(
-        409,
-        'last_admin_key',
-        'That is the only admin key this project has left, and revoking it would shut every door: making a key needs an admin key, so nothing here could make the next one. Create the replacement first, then revoke this one. Nothing was changed.',
+    await session.withTransaction(async () => {
+      // Read again inside the transaction: the one above only decided which
+      // rules apply, and by now somebody else may have revoked it.
+      const key = await store.keys.findOne({ projectId, _id: keyId, revokedAt: null }, { session });
+      if (!key) {
+        throw new ServiceError(404, 'not_found', `No active key ${keyId} in this project.`);
+      }
+
+      await store.projects.updateOne(
+        { _id: projectId },
+        { $inc: { adminEpoch: 1 } },
+        { session },
       );
-    }
-    await store.keys.updateOne(
-      { projectId, _id: keyId, revokedAt: null },
-      { $set: { revokedAt: new Date() } },
-    );
+      // A key that has run out is not a way back in, so it does not count as
+      // the one that is left.
+      const others = await store.keys.countDocuments(
+        {
+          projectId,
+          _id: { $ne: keyId },
+          role: 'admin',
+          revokedAt: null,
+          $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }],
+        },
+        { session },
+      );
+      if (others === 0) {
+        throw new ServiceError(
+          409,
+          'last_admin_key',
+          'That is the only admin key this project has left, and revoking it would shut every door: making a key needs an admin key, so nothing here could make the next one. Create the replacement first, then revoke this one. Nothing was changed.',
+        );
+      }
+      await store.keys.updateOne(
+        { projectId, _id: keyId, revokedAt: null },
+        { $set: { revokedAt: new Date() } },
+        { session },
+      );
+    });
   } finally {
-    // Only this caller's hold, by the stamp it wrote: one that already lapsed
-    // may belong to whoever took it next.
-    await store.projects
-      .updateOne({ _id: projectId, adminRevokeUntil: until }, { $unset: { adminRevokeUntil: '' } })
-      .catch(() => undefined);
+    await session.endSession();
   }
 }

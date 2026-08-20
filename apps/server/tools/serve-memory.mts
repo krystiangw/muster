@@ -20,7 +20,7 @@
  */
 import { createServer } from 'node:net';
 import type { AddressInfo } from 'node:net';
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { MongoMemoryReplSet } from 'mongodb-memory-server';
 import { buildApp } from '../src/app.js';
 import { loadConfig } from '../src/config.js';
 import { createStore } from '../src/db.js';
@@ -51,7 +51,7 @@ const freePort = async (): Promise<number> =>
     });
   });
 
-const mongo = await MongoMemoryServer.create();
+const mongo = await MongoMemoryReplSet.create({ replSet: { count: 1 } });
 const requested = Number(process.env.PORT ?? 4600);
 const port = requested === 0 ? await freePort() : requested;
 const config = loadConfig({

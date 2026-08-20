@@ -1,4 +1,4 @@
-import { MongoMemoryServer } from 'mongodb-memory-server';
+import { MongoMemoryReplSet, MongoMemoryServer } from 'mongodb-memory-server';
 import type { FastifyInstance } from 'fastify';
 import { buildApp, type BuildOverrides } from '../src/app.js';
 import { loadConfig, type Config } from '../src/config.js';
@@ -23,12 +23,21 @@ export interface Harness {
  * isolated harness mid-file, so a server each meant a dozen mongod processes
  * racing to boot, and one of them occasionally timing out. They are already
  * isolated by database name, which is the isolation the tests actually need.
+ *
+ * Standalone unless a file asks for a replica set, which one does: revoking an
+ * admin key runs in a transaction, and a standalone refuses to start one. The
+ * difference is not the 190 ms of extra boot but what comes after it, because
+ * every write then goes through replication. Measured across the suite: 55
+ * seconds standalone against 91 with every file on a replica set, so the file
+ * that needs one asks for it and the rest stay as they were.
  */
-let shared: Promise<MongoMemoryServer> | null = null;
+let shared: Promise<MongoMemoryReplSet | MongoMemoryServer> | null = null;
 let users = 0;
 
-async function sharedMongo(): Promise<MongoMemoryServer> {
-  if (!shared) shared = MongoMemoryServer.create();
+async function sharedMongo(replicaSet: boolean): Promise<MongoMemoryReplSet | MongoMemoryServer> {
+  if (!shared) {
+    shared = replicaSet ? MongoMemoryReplSet.create({ replSet: { count: 1 } }) : MongoMemoryServer.create();
+  }
   users += 1;
   return shared;
 }
@@ -44,8 +53,14 @@ async function releaseMongo(): Promise<void> {
 export async function startHarness(
   overrides: NodeJS.ProcessEnv = {},
   build: BuildOverrides = {},
+  /**
+   * Ask for a replica set when the file under test reaches a transaction. Set
+   * by the first harness in the file, because the server is shared by all of
+   * them.
+   */
+  options: { replicaSet?: boolean } = {},
 ): Promise<Harness> {
-  const mongo = await sharedMongo();
+  const mongo = await sharedMongo(options.replicaSet === true);
   const config = loadConfig({
     MONGODB_URI: mongo.getUri(),
     // Harnesses in one file share a mongod, so the database name is what keeps

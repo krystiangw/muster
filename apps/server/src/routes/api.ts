@@ -1778,7 +1778,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
           tags: ['keys'],
           summary: 'Revoke a key',
           description:
-            'Refused for the last admin key a project has, because making a key needs an admin key: revoking it shuts every door here, and the only way back is a person with the read link claiming the board. Mint the replacement first. Two admin revocations at once are refused as well, with `revoke_in_progress`, because each would count the other as the key that is left. Any other key, including the one you are calling with, goes immediately.',
+            'Refused for the last admin key a project has, because making a key needs an admin key: revoking it shuts every door here, and the only way back is a person with the read link claiming the board. Mint the replacement first. One of two admin revocations arriving at once is refused the same way, because each would otherwise count the other as the key that is left. Any other key, including the one you are calling with, goes immediately.',
         },
       },
       async (request) => {

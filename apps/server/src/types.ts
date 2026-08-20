@@ -474,15 +474,15 @@ export interface ProjectDoc {
   /** Absent on projects created before this existed; `link` applies. */
   visibility?: ProjectVisibility;
   /**
-   * Held while an admin key is being revoked here, and by nothing else.
+   * Incremented by every admin-key revocation, and read by nothing.
    *
-   * Revoking one is the only operation whose answer depends on how many other
-   * keys exist, so it is the only one that cannot read and write separately:
-   * two of them overlapping would each count the other as the key that is left.
-   * The stamp is when the hold lapses rather than a flag, so a process that
-   * dies mid-revocation cannot wedge the door shut.
+   * Not a count and not a version anybody compares. It is a document that two
+   * concurrent revocations both write, inside the transaction that judges them,
+   * so that the database has a conflict to find: snapshot isolation does not
+   * stop two transactions reading the same rows and writing different ones, and
+   * without this they would both see the other key as the one that is left.
    */
-  adminRevokeUntil?: Date;
+  adminEpoch?: number;
   /**
    * When the project first received an item. Absent means never, which is what
    * makes the activation moment countable exactly once: the open item counter
