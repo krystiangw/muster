@@ -11,8 +11,12 @@ import { TERMINAL_STATUSES, type HygieneRules, type ProjectDoc } from './types.j
  *
  * Three invariants keep the engine trustworthy:
  *
- *  1. Every automatic change writes a timeline entry signed `hygiene`, so no
- *     state moves without a visible cause.
+ *  1. Every automatic change to an item writes a timeline entry signed
+ *     `hygiene`, so no state moves without a visible cause. The counter repair
+ *     below is the one pass with nothing to write on, because it corrects a
+ *     number on the project rather than anything about a card: it says what it
+ *     did in the insights report, under counters checked and drifted, and that
+ *     is where a number that moved on its own has to be accounted for.
  *  2. Automatic changes never move `touchedAt`. Hygiene must not look like
  *     activity, or a stale item would keep resetting its own staleness clock.
  *  3. Every automatic change is reversible by an ordinary upsert on the same
