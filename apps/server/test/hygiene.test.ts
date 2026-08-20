@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { lapsedLeaseFilter, maybeSweep, sweepProject } from '../src/hygiene.js';
 import { projectJson } from '../src/serialize.js';
+import { TERMINAL_STATUSES } from '../src/types.js';
 import { authed, createProject, startHarness, type Harness, type Project } from './helper.js';
 
 let harness: Harness;
@@ -428,7 +429,10 @@ describe('contentless items', () => {
     await post(project, '/items', { slug: 'counted', body: 'described', actor: 'a' });
     const open = await harness.store.items.countDocuments({
       projectId: project.id,
-      status: { $nin: ['done', 'dropped'] },
+      // The constant, not the two words I had in mind: a status added to the
+      // terminal list later would otherwise be counted as open here and this
+      // assertion would go on passing about something else.
+      status: { $nin: [...TERMINAL_STATUSES] },
     });
     assert.equal((await projectDoc(project)).counts.items, closed + 1, 'the slot was taken');
     assert.equal((await projectDoc(project)).counts.items, open, 'and it matches what is actually open');
