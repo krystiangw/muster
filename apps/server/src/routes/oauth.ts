@@ -151,9 +151,19 @@ export function registerOAuth(app: FastifyInstance, deps: OAuthDeps): void {
       },
     },
     async (request, reply) => {
-      const body = (request.body ?? {}) as Record<string, string>;
-      let clientId = body.client_id;
-      let clientSecret = body.client_secret;
+      // Read as whatever arrived, not as text this endpoint wishes for. This
+      // door takes both JSON and a form and declares no body schema, because
+      // OAuth clients send either, so nothing in front of it refuses an object
+      // where a name belongs. Measured: `client_secret` as `{"$ne": null}`
+      // reached the hash and answered 500, which is the one class this protocol
+      // tells an agent to retry, so a permanently malformed request became a
+      // loop. `client_id` in that shape reached the lookup as an operator and
+      // matched a client it was never given.
+      const body = (request.body ?? {}) as Record<string, unknown>;
+      const text = (value: unknown): string | undefined =>
+        typeof value === 'string' ? value : undefined;
+      let clientId = text(body.client_id);
+      let clientSecret = text(body.client_secret);
 
       const authHeader = request.headers.authorization;
       if (!clientId && typeof authHeader === 'string' && authHeader.toLowerCase().startsWith('basic ')) {
@@ -172,9 +182,11 @@ export function registerOAuth(app: FastifyInstance, deps: OAuthDeps): void {
         });
       }
       if (!clientId || !clientSecret) {
-        return reply
-          .code(400)
-          .send({ error: 'invalid_request', error_description: 'client_id and client_secret are required.' });
+        return reply.code(400).send({
+          error: 'invalid_request',
+          error_description:
+            'client_id and client_secret are required, and both are text. A value of any other shape is refused here rather than carried into a lookup.',
+        });
       }
 
       // Per source rather than per client: an unknown client_id costs a lookup

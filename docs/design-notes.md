@@ -1982,3 +1982,25 @@ counted, named as what they are, and not deleted. The arrivals table now prints
 them as "arrivals naming a test host, not a site", which is the whole of that
 table today. The honest reading of the report this morning is that nothing has
 sent us a reader yet, and until now it said the opposite.
+
+## The one door with no schema in front of it, 2026-08-20
+
+Refusing a query where a name belongs was done once already, at the doors where
+MCP arguments land in a filter. The token endpoint was missed, and it is the one
+place that cannot be covered by a body schema: OAuth clients send JSON or a
+form, both have to be read, and so nothing in front of the handler says these
+two fields are text.
+
+Measured by sending them as something else. `client_secret` as `{"$ne": null}`
+reached the hash and answered **500**, which is the single class this protocol
+tells an agent to retry, so a request that can never succeed became a loop.
+`client_id` in that shape reached the lookup as an operator and matched a client
+nobody had named; the secret comparison is JavaScript rather than a query, so it
+stopped there, but the door had already opened further than it should.
+
+Both are now read as text or not at all, and the refusal says so rather than
+saying the fields are missing, because they were not missing. Registration next
+door was already safe: it declares a body schema, and the schema refused every
+crafted shape before the handler saw it. That is the argument for the schema
+where one is possible, and this endpoint is why the check has to exist in the
+handler where one is not.

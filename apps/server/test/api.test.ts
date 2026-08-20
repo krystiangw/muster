@@ -611,6 +611,52 @@ describe('items', () => {
     assert.equal(fine.json().result.structuredContent.items.length, 1);
   });
 
+  it('refuses one at the token endpoint too, which had no schema to refuse it', async () => {
+    // The same class as above at the one door that declares no body schema,
+    // because OAuth clients send JSON or a form and both have to be read.
+    // Measured before this: `client_secret` as an object reached the hash and
+    // answered 500, which is the class this protocol tells an agent to retry,
+    // so a malformed request that can never succeed became a loop. And
+    // `client_id` in that shape reached the lookup as an operator, matching a
+    // client nobody had named.
+    const registered = await harness.server.inject({
+      method: 'POST',
+      url: '/oauth/register',
+      headers: { 'content-type': 'application/json' },
+      payload: { client_name: 'crafted', redirect_uris: [] },
+    });
+    const { client_id: id, client_secret: secret } = registered.json() as {
+      client_id: string;
+      client_secret: string;
+    };
+
+    for (const [label, payload] of [
+      ['secret as an object', { grant_type: 'client_credentials', client_id: id, client_secret: { $ne: null } }],
+      ['id as an object', { grant_type: 'client_credentials', client_id: { $ne: null }, client_secret: secret }],
+      ['both as objects', { grant_type: 'client_credentials', client_id: { $gt: '' }, client_secret: { $gt: '' } }],
+      ['secret as a number', { grant_type: 'client_credentials', client_id: id, client_secret: 12345 }],
+    ] as [string, Record<string, unknown>][]) {
+      const answer = await harness.server.inject({
+        method: 'POST',
+        url: '/oauth/token',
+        headers: { 'content-type': 'application/json' },
+        payload,
+      });
+      assert.equal(answer.statusCode, 400, `${label}: ${answer.body.slice(0, 120)}`);
+      assert.equal(answer.json().error, 'invalid_request', label);
+    }
+
+    // And the door still opens for the client it was made for.
+    const fine = await harness.server.inject({
+      method: 'POST',
+      url: '/oauth/token',
+      headers: { 'content-type': 'application/json' },
+      payload: { grant_type: 'client_credentials', client_id: id, client_secret: secret },
+    });
+    assert.equal(fine.statusCode, 200, fine.body.slice(0, 120));
+    assert.ok(String(fine.json().access_token).length > 0);
+  });
+
   it('hands a fleet distinct work when it asks for the claim in the same call', async () => {
     // `/next` deliberately does not claim, and the cost of that shows up on a
     // fleet: ten loops asking at once are all offered the same item, one wins
