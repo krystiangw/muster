@@ -1877,24 +1877,48 @@ export async function circleBack(
   waitingOn: string[],
 ): Promise<string[] | null> {
   const parent = new Map<string, string>();
-  const seen = new Set<string>([own]);
+  // The cards this one would wait on are visited, not merely queued. Left out
+  // of this set they can be reached a second time from deeper in the walk and
+  // given a parent, and a parent map with a loop in it is a chain that never
+  // ends: with `a` waiting on `b` and `b` waiting on `a` and `c`, asking
+  // whether `c` may wait on `a` walked a -> b, then gave `a` the parent `b`,
+  // and the chain then read b, a, b, a for ever, on the event loop, holding
+  // the whole process. Only data written before this refusal existed can hold
+  // a circle, which is exactly the data this walk is asked about.
+  const seen = new Set<string>([own, ...waitingOn]);
   let frontier = waitingOn.filter((slug) => slug !== own);
   let budget = CIRCLE_BUDGET;
 
   // The chain reads the way somebody would say it out loud: this card, then
   // each card it ends up waiting on, then this card again.
+  //
+  // `walked` is a second lock on the same door, and it is deliberately one the
+  // tests cannot tell apart from the first: `seen` above is the fix, and this
+  // only matters if that line is ever wrong again. Removing either one alone
+  // leaves the suite green, which is the honest state of it. It stays because
+  // the failure it prevents is an event loop that never comes back, and that
+  // is worth a line nothing can prove.
   const chainTo = (from: string): string[] => {
     const path: string[] = [];
-    for (let at: string | undefined = from; at !== undefined; at = parent.get(at)) path.push(at);
+    const walked = new Set<string>();
+    for (let at: string | undefined = from; at !== undefined && !walked.has(at); at = parent.get(at)) {
+      walked.add(at);
+      path.push(at);
+    }
     return [own, ...path.reverse(), own];
   };
 
   while (frontier.length > 0 && budget > 0) {
+    // Bounded on the way in as well as on the way out. A level wider than the
+    // budget would otherwise be read whole and walked whole, which is the
+    // ceiling this constant exists to hold not being held.
+    const asking = frontier.slice(0, budget);
     const rows = (await store.items
-      .find({ projectId, slug: { $in: frontier } }, { projection: { slug: 1, blockedBy: 1 } })
+      .find({ projectId, slug: { $in: asking } }, { projection: { slug: 1, blockedBy: 1 } })
       .toArray()) as Array<Pick<ItemDoc, 'slug' | 'blockedBy'>>;
     const next: string[] = [];
     for (const row of rows) {
+      if (budget <= 0) break;
       budget -= 1;
       for (const waits of row.blockedBy ?? []) {
         if (waits === own) return chainTo(row.slug);

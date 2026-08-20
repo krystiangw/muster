@@ -2288,3 +2288,36 @@ and a walk that hits it stops looking and lets the write through. Refusing a
 legal card because the board is big is a worse failure than the one this
 prevents, and it is the kind that arrives on the day somebody's board finally
 gets busy.
+
+**Review found a hang in the walk, and reproducing it took one insert.** The
+cards this one would wait on were queued but not marked as visited, so a deeper
+level could reach one of them again and give it a parent. A parent map with a
+loop in it is a chain that never ends: with `a` waiting on `b`, and `b` waiting
+on `a` and `c`, asking whether `c` may wait on `a` read b, a, b, a for ever, on
+the event loop, holding the whole process. It needs a circle already in the
+data, which is exactly the data this walk is asked about, and which only a
+board written before this refusal can hold.
+
+Two guards now stand there and the tests cannot tell them apart: marking the
+first level as visited is the fix, and a repeat check while reading the chain is
+a second lock that only matters if the first is ever wrong again. Removing
+either one alone leaves the suite green. That is worth writing down rather than
+pretending otherwise, and the second one stays because the failure it prevents
+is a process that never comes back.
+
+The budget was also not the ceiling it claimed. It was checked before each
+query and not while reading the rows, so a level wider than the budget was read
+whole and walked whole: twenty cards waiting on twenty each is four hundred
+rows, and the level after that is eight thousand. It is now bounded on the way
+in and on the way out, and a test builds eight hundred and twenty cards to say
+so.
+
+**What is left, and it is not fixed here.** The walk and the write are separate
+operations, so two requests closing a circle at the same instant can both read
+an acyclic board and both succeed. Serialising them means a transaction around
+the busiest write in the service, threading a session through counters, chains
+and the timeline, for a window that needs two simultaneous writes on the same
+pair of cards. The way circles actually arise is two agents minutes apart, and
+those are refused. What covers the rest is detection rather than prevention:
+the repair pass already reads every card that waits on anything, and there are
+two of them in the whole production database. That is filed as its own card.

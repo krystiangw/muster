@@ -3550,6 +3550,109 @@ describe('cards waiting on each other', () => {
     assert.deepEqual(stored?.blockedBy, ['three']);
   });
 
+  it('does not hang on a circle written before the refusal existed', { timeout: 20_000 }, async () => {
+    const project = await createProject(harness);
+    // Written straight into the store, because the door refuses it now: `a`
+    // waits on `b`, and `b` waits on both `a` and `c`. Asking whether `c` may
+    // wait on `a` used to walk a, then b, then give `a` the parent `b`, and
+    // read that chain for ever on the event loop, holding the whole process.
+    const base = {
+      projectId: project.id,
+      title: 'from before',
+      body: '',
+      status: 'open' as const,
+      owner: null,
+      priority: 0,
+      labels: [],
+      source: null,
+      fields: {},
+      stale: false,
+      staleSince: null,
+      claim: null,
+      timeline: [],
+      timelineCount: 0,
+      lastActor: 'x',
+      closedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      touchedAt: new Date(),
+    };
+    await harness.store.items.insertMany([
+      { ...base, _id: 'i_circle_a', slug: 'a', blockedBy: ['b'] },
+      { ...base, _id: 'i_circle_b', slug: 'b', blockedBy: ['a', 'c'] },
+      { ...base, _id: 'i_circle_c', slug: 'c', blockedBy: [] },
+    ] as never);
+
+    const refused = await post(project, '/items', { slug: 'c', blocked_by: ['a'], actor: 'x' });
+    assert.equal(refused.statusCode, 400, refused.body);
+    assert.deepEqual(refused.json().circle, ['c', 'a', 'b', 'c']);
+  });
+
+  it('stops walking a wide graph rather than reading all of it', { timeout: 30_000 }, async () => {
+    const project = await createProject(harness);
+    const rows: Record<string, unknown>[] = [];
+    const base = {
+      projectId: project.id,
+      title: 'wide',
+      body: '',
+      status: 'open' as const,
+      owner: null,
+      priority: 0,
+      labels: [],
+      source: null,
+      fields: {},
+      stale: false,
+      staleSince: null,
+      claim: null,
+      timeline: [],
+      timelineCount: 0,
+      lastActor: 'x',
+      closedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      touchedAt: new Date(),
+    };
+    // Twenty cards, each waiting on twenty more, each of those waiting on one:
+    // eight hundred and twenty cards to walk, and a ceiling of five hundred.
+    const top: string[] = [];
+    for (let a = 0; a < 20; a += 1) {
+      const mid: string[] = [];
+      for (let b = 0; b < 20; b += 1) {
+        const leaf = `leaf-${a}-${b}`;
+        rows.push({ ...base, _id: `i_${leaf}`, slug: leaf, blockedBy: [] });
+        mid.push(`mid-${a}-${b}`);
+        rows.push({ ...base, _id: `i_mid-${a}-${b}`, slug: `mid-${a}-${b}`, blockedBy: [leaf] });
+      }
+      rows.push({ ...base, _id: `i_top-${a}`, slug: `top-${a}`, blockedBy: mid });
+      top.push(`top-${a}`);
+    }
+    await harness.store.items.insertMany(rows as never);
+
+    let read = 0;
+    const real = harness.store.items.find.bind(harness.store.items);
+    (harness.store.items as unknown as { find: typeof real }).find = ((
+      ...args: Parameters<typeof real>
+    ) => {
+      const cursor = real(...args);
+      const toArray = cursor.toArray.bind(cursor);
+      cursor.toArray = (async () => {
+        const out = await toArray();
+        read += out.length;
+        return out;
+      }) as typeof cursor.toArray;
+      return cursor;
+    }) as typeof real;
+
+    try {
+      await post(project, '/items', { slug: 'asking', title: 'asking', blocked_by: top, actor: 'x' });
+    } finally {
+      (harness.store.items as unknown as { find: typeof real }).find = real;
+    }
+    // The ceiling is five hundred cards. Without a bound on the way in, one
+    // level of this graph is four hundred rows and the next is eight thousand.
+    assert.ok(read <= 600, `the walk read ${read} cards`);
+  });
+
   it('refuses it at the MCP door in the same words', async () => {
     const project = await createProject(harness);
     for (const slug of ['x1', 'x2']) await post(project, '/items', { slug, title: slug, actor: 'x' });
