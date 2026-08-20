@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
-import { maybeSweep, sweepProject } from '../src/hygiene.js';
+import { lapsedLeaseFilter, maybeSweep, sweepProject } from '../src/hygiene.js';
 import { projectJson } from '../src/serialize.js';
 import { authed, createProject, startHarness, type Harness, type Project } from './helper.js';
 
@@ -82,9 +82,10 @@ describe('claim expiry', () => {
         $set: {
           claim: {
             agent: 'crashed-mover',
-            claimedAt: minutesAgo(5),
+            claimedAt: minutesAgo(30),
+            heartbeatAt: minutesAgo(30),
             expiresAt: hoursAgo(-1),
-            ttlMinutes: 60,
+            nonce: 'l_crashedmove',
           },
         },
       },
@@ -115,8 +116,9 @@ describe('claim expiry', () => {
           claim: {
             agent: 'mover',
             claimedAt: new Date(),
+            heartbeatAt: new Date(),
             expiresAt: hoursAgo(-1),
-            ttlMinutes: 60,
+            nonce: 'l_inflight',
           },
         },
       },
@@ -125,6 +127,52 @@ describe('claim expiry', () => {
 
     const item = await itemDoc(project, 'work');
     assert.equal(item.claim?.agent, 'mover');
+  });
+});
+
+describe('what the lease sweep costs a read', () => {
+  it('walks the claimed items and not the history behind them', async () => {
+    const project = await createProject(harness);
+    // A project with a past: the sweep runs on the read path, and a branch
+    // that cannot use the claims index would walk every one of these.
+    await harness.store.items.insertMany(
+      Array.from({ length: 400 }, (_, index) => ({
+        _id: `i_history${index}`,
+        projectId: project.id,
+        slug: `old:${index}`,
+        title: 'finished long ago',
+        body: '',
+        status: 'done' as const,
+        owner: null,
+        priority: 0,
+        labels: [],
+        blockedBy: [],
+        source: null,
+        fields: {},
+        stale: false,
+        staleSince: null,
+        claim: null,
+        timeline: [],
+        timelineCount: 0,
+        lastActor: 'a',
+        closedAt: hoursAgo(80),
+        createdAt: hoursAgo(90),
+        updatedAt: hoursAgo(80),
+        touchedAt: hoursAgo(80),
+      })) as never,
+    );
+    await post(project, '/items', { slug: 'live', title: 'live', actor: 'a' });
+    await post(project, '/items/live/claim', { agent: 'holder' });
+
+    const plan = await harness.store.items
+      .find(lapsedLeaseFilter(project.id, new Date()))
+      .explain('executionStats');
+    const examined = (plan as { executionStats: { totalDocsExamined: number } }).executionStats
+      .totalDocsExamined;
+    assert.ok(
+      examined < 50,
+      `the sweep read ${examined} documents to find the leases in a project holding one`,
+    );
   });
 });
 

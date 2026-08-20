@@ -2169,9 +2169,30 @@ write that can fail.
 So the repair pass enforces it, which is where an invariant that has to survive
 a crash belongs. The lease sweep already clears expired leases and does not
 filter on status; it now also clears a lease sitting on a terminal card, but
-only one older than a minute. The grace is what tells a crash from a move in
-flight: a minute is far longer than two writes and far shorter than a lease,
-and the only thing waiting on the difference is a card nobody is working on.
-The timeline entry says which of the two cases it was, because "expired without
-a heartbeat" is not what happened. Both halves are pinned: taking the clause
-out leaves the wreckage, and taking the grace out sweeps a live move.
+only one old enough that no request could still be behind it. The timeline
+entry says which of the two cases it was, because "expired without a heartbeat"
+is not what happened. Both halves are pinned: taking the clause out leaves the
+wreckage, and taking the grace out sweeps a live move.
+
+**The review then found the cost, and the cost was real.** This branch runs on
+the read path, throttled to every fifteen seconds, and the only index over
+claims is sparse on `claim.expiresAt`. A branch that never names that field
+cannot use that index, so on a project with a long history the sweep walks
+every card it ever finished, to find the lease it almost never has.
+
+Naming the field was not enough either, which is the part worth writing down:
+`$exists: true` reads like it says the lease is there, and it does not bound an
+index scan. Measured on four hundred finished cards holding one lease, that
+shape read four hundred documents. A range does bound the scan, and every lease
+has a date in that field, so the filter says `claim.expiresAt` is at or after
+the epoch: one predicate, true of every lease and of nothing else, and the same
+measurement then reads one document. The test asks the database for its plan
+rather than trusting the comment above it.
+
+**And the grace is a number with a reason.** The only thing separating a dead
+move from a slow one is elapsed time. Five minutes rather than one, because the
+router in front of this service gives up on a request after thirty seconds: a
+move still running after five minutes is not one anybody is waiting on.
+Sweeping a move that is genuinely still going would take its lease away and
+leave it writing a status it no longer holds, so the number errs long. The
+residue either way is a fraction of a lease, on a card nobody is working on.

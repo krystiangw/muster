@@ -120,33 +120,52 @@ async function releaseSlots(store: Store, projectId: string, count: number): Pro
  * process that is gone.
  *
  * So the repair pass does it, which is where invariants that have to survive a
- * crash belong. A minute is far longer than the move and far shorter than a
- * lease, and being generous costs nothing: the only thing waiting on it is a
- * card nobody is working on.
+ * crash belong. Elapsed time is the only thing separating a dead move from a
+ * slow one, and the number is not a guess: the router in front of this service
+ * gives up on a request in thirty seconds, so a move still running after five
+ * minutes is not one anybody is waiting on. It errs long on purpose. Sweeping
+ * a move that is genuinely still going would take its lease away and leave it
+ * writing a status it no longer holds, and the residue either way is a
+ * fraction of a lease on a card nobody is working on.
  */
-const FINISHED_LEASE_GRACE_MS = 60_000;
+const FINISHED_LEASE_GRACE_MS = 300_000;
+
+/**
+ * The two leases this pass takes back, as one filter and exported, so a test
+ * can ask the database what it would do with it rather than take a comment's
+ * word for it.
+ */
+export function lapsedLeaseFilter(projectId: string, now: Date): Record<string, unknown> {
+  return {
+    projectId,
+    // Every lease in this project and nothing else, and written as a range
+    // rather than as `$exists` on purpose. The `claims` index is sparse on
+    // this field, so it holds exactly the claimed items; a range is what
+    // bounds a scan of it, and `$exists` is not one. Measured, because the
+    // first shape of this said `$exists` and read four hundred documents to
+    // find one lease: without the bound the sweep walks every card the
+    // project ever finished, on the read path, every fifteen seconds.
+    'claim.expiresAt': { $gte: new Date(0) },
+    $or: [
+      { 'claim.expiresAt': { $lte: now } },
+      // Finished work is not work in progress, and this is the half of that
+      // rule no request path can enforce. A lease is refused over a card that
+      // is already over; one that is there anyway got there through a move
+      // that did not finish.
+      {
+        status: { $in: [...TERMINAL_STATUSES] },
+        'claim.claimedAt': { $lte: new Date(now.getTime() - FINISHED_LEASE_GRACE_MS) },
+      },
+    ],
+  };
+}
 
 export async function expireClaims(
   store: Store,
   projectId: string,
   now: Date,
 ): Promise<HygieneOutcome> {
-  const result = await store.items.updateMany(
-    {
-      $or: [
-        { projectId, 'claim.expiresAt': { $lte: now } },
-        // Finished work is not work in progress, and this is the half of that
-        // rule no request path can enforce. A lease is refused over a card
-        // that is already over; one that is there anyway got there through a
-        // move that did not finish.
-        {
-          projectId,
-          status: { $in: [...TERMINAL_STATUSES] },
-          'claim.claimedAt': { $lte: new Date(now.getTime() - FINISHED_LEASE_GRACE_MS) },
-        },
-      ],
-    },
-    [
+  const result = await store.items.updateMany(lapsedLeaseFilter(projectId, now), [
       {
         $set: {
           ...appendTimeline(
