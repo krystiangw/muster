@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Store } from './db.js';
 import { newId } from './ids.js';
+import { ORIGIN_REASONS } from './origin.js';
 
 /**
  * What this service knows about how it is being used.
@@ -956,7 +957,11 @@ export async function insights(store: Store, now = new Date()): Promise<Insights
     // refusing pages it served itself, which is the whole question.
     store.events
       .aggregate<{ _id: string | null; count: number }>([
-        { $match: { kind: 'refused', ours: { $ne: true } } },
+        // The three origin reasons and nothing else. A search refused for
+        // running out of budget is a refusal with no form behind it, and it
+        // was landing in the bucket this calls "older than this column",
+        // which turned a refusal from an hour ago into old form telemetry.
+        { $match: { kind: 'refused', ours: { $ne: true }, detail: { $in: [...ORIGIN_REASONS] } } },
         { $group: { _id: '$route', count: { $sum: 1 } } },
         { $sort: { count: -1 } },
       ])

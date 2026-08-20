@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { after, before, describe, it } from 'node:test';
 import { runMigrations } from '../src/db.js';
-import { flushEvents, insights } from '../src/events.js';
+import { flushEvents, insights, record } from '../src/events.js';
 import { hashToken } from '../src/ids.js';
 import { authed, createProject, signIn, startHarness, type Harness, type Project } from './helper.js';
 
@@ -561,6 +561,19 @@ describe('counting the people, not the agents', () => {
       !Object.keys(after.refusedRoutes).some((route) => route.includes(readToken)),
       'and nothing here is a live capability',
     );
+
+    // A refusal with no form behind it does not belong in a breakdown of
+    // forms. A search that ran out of budget is refused too, and it was
+    // landing in the bucket the report calls "older than this column", which
+    // turned a refusal from an hour ago into old telemetry about forms.
+    const beforeSearch = after.refusedRoutes['not recorded'] ?? 0;
+    record(harness.store, 'refused', { door: 'http', detail: 'search_too_slow' });
+    await flushEvents();
+    assert.equal(
+      ((await insights(harness.store)).refusedRoutes['not recorded'] ?? 0) - beforeSearch,
+      0,
+      'a slow search is not a form',
+    );
   });
 
   it('counts a page an agent read beside the ones people read, not inside them', async () => {
@@ -662,15 +675,17 @@ describe('counting the people, not the agents', () => {
       1,
     );
 
-    // Three fixed words and nothing else. The origin is whatever the caller
-    // typed, and this collection is built to hold no caller-supplied text.
+    // Words this service chose, and nothing a caller typed: the origin header
+    // is whatever arrived, and this collection is built to hold no
+    // caller-supplied text at all. The list is every recorder's own word
+    // rather than the three this test used to name: a search that runs out of
+    // budget is refused too, and writing the assertion from the case in front
+    // of me made it a promise the service had already broken elsewhere.
+    const known = ['origin', 'cross-site', 'same-site', 'search_too_slow'];
     const recorded = await harness.store.events.find({ kind: 'refused' }).toArray();
     assert.ok(recorded.length > 0);
     for (const event of recorded) {
-      assert.ok(
-        ['origin', 'cross-site', 'same-site'].includes(String(event.detail)),
-        `${event.detail} is not one of the three reasons`,
-      );
+      assert.ok(known.includes(String(event.detail)), `${event.detail} is not one of the words we write`);
     }
 
     // And our own page still is not one of them.

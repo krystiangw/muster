@@ -19,6 +19,16 @@ import type { FastifyRequest } from 'fastify';
  */
 export type OriginReason = 'cross-site' | 'same-site' | 'origin';
 
+/**
+ * The same three, at runtime.
+ *
+ * The report groups refusals by reason and then asks which form each one came
+ * from, and only these three have a form to name: a search that ran out of
+ * budget is refused too, and putting it in the same bucket made a refusal from
+ * an hour ago read as a form refusal older than the column that records forms.
+ */
+export const ORIGIN_REASONS: readonly OriginReason[] = ['cross-site', 'same-site', 'origin'];
+
 export type OriginVerdict = { ok: true } | { ok: false; reason: OriginReason; came: string };
 
 const OK: OriginVerdict = { ok: true };
