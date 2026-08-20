@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
+import { itemJson } from '../src/serialize.js';
 import { scopeWarningSays } from '../src/types.js';
 import { startHarness, type Harness } from './helper.js';
 
@@ -226,6 +227,61 @@ describe('what we publish about ourselves', () => {
       .replace(/\{[a-zA-Z_]+\}/g, '{x}')
       .replace(/<[^>]+>/g, '{x}')
       .replace(/\/+$/, '') || '/';
+
+  it('describes the card the serializer actually writes', () => {
+    // The document's word against the code's, both directions. A published
+    // shape is a promise, and the way this one rots is a field added to the
+    // serializer and not to the schema, which is invisible from either side
+    // on its own.
+    const now = new Date();
+    const card = {
+      _id: 'i_everything',
+      projectId: 'p_x',
+      slug: 'ops:everything',
+      title: 'every field at once',
+      titleKey: 'every field at once',
+      body: 'a body',
+      owner: 'somebody',
+      status: 'open' as const,
+      priority: 3,
+      source: 'a system',
+      labels: ['one'],
+      fields: { anything: true },
+      claim: { agent: 'holder', claimedAt: now, heartbeatAt: now, expiresAt: new Date(Date.now() + 60_000), nonce: 'l_x' },
+      lastActor: 'somebody',
+      timeline: [{ at: now, by: 'somebody', kind: 'note' as const, message: 'said something' }],
+      timelineCount: 1,
+      then: { slug: 'ops:next-one' },
+      blockedBy: ['ops:first'],
+      absence: { count: 2, since: now },
+      stale: false,
+      staleSince: null,
+      closedAt: null,
+      createdAt: now,
+      updatedAt: now,
+      touchedAt: now,
+    };
+    const written = new Set(Object.keys(itemJson(card as never, true)));
+    const published = new Set(Object.keys((openapi.components.schemas.Item as { properties: object }).properties));
+
+    assert.deepEqual(
+      [...written].filter((field) => !published.has(field)).sort(),
+      [],
+      'the serializer writes a field the document does not describe',
+    );
+    assert.deepEqual(
+      [...published].filter((field) => !written.has(field)).sort(),
+      [],
+      'the document describes a field the serializer never writes',
+    );
+
+    // And the two that are absent rather than empty are absent, which is the
+    // half of the description a caller has to act on.
+    const bare = itemJson({ ...card, then: null, blockedBy: [] } as never);
+    assert.equal('then' in bare, false);
+    assert.equal('blocked_by' in bare, false);
+    assert.equal('timeline' in bare, false, 'history comes only where the call says it does');
+  });
 
   it('sends an agent to addresses that exist', async () => {
     // The catalogue is the map. A renamed route leaves it pointing at nothing,

@@ -92,6 +92,8 @@ export async function startHarness(
    * out without a list of exceptions.
    */
   const answered = new Map<string, Set<number>>();
+  /** Which doors were seen handing back a card, and under which key. */
+  const carried = new Map<string, Set<string>>();
   server.addHook('onSend', (request, reply, payload, done) => {
     const status = reply.statusCode;
     const pattern = request.routeOptions?.url;
@@ -105,6 +107,35 @@ export async function startHarness(
       const seen = answered.get(key) ?? new Set<number>();
       seen.add(status);
       answered.set(key, seen);
+      // The other half of the same question. The document named every refusal
+      // and no answer, and now it names the shape of the ones that hand back a
+      // card. A list of those is a list that is right on the day it is
+      // written, so whatever the suite provokes is read instead: a 2xx that
+      // carried a card from a door the document does not say carries one is
+      // the drift this catches.
+      if (status >= 200 && status < 300 && typeof payload === 'string' && payload.startsWith('{')) {
+        try {
+          const body = JSON.parse(payload) as Record<string, unknown>;
+          // A card, not a field named after one. Renaming a handle answers
+          // with `items: 4`, meaning it moved four of them, and reading the
+          // key alone would have had the document promise a page of cards
+          // where a count arrives. The slug is what makes it a card.
+          const isCard = (value: unknown): boolean =>
+            typeof value === 'object' && value !== null && 'slug' in (value as object);
+          if (isCard(body.item)) {
+            const keys = carried.get(key) ?? new Set<string>();
+            keys.add('item');
+            carried.set(key, keys);
+          }
+          if (Array.isArray(body.items) && body.items.some(isCard)) {
+            const keys = carried.get(key) ?? new Set<string>();
+            keys.add('items');
+            carried.set(key, keys);
+          }
+        } catch {
+          // Not JSON after all. Nothing to compare.
+        }
+      }
     }
     done(null, payload);
   });
@@ -131,6 +162,7 @@ export async function startHarness(
       await store.close();
       await releaseMongo();
       refusalsAreOnTheMap(documented, answered);
+      answersAreOnTheMap(documented, carried);
     },
   };
 }
@@ -221,6 +253,47 @@ export async function signIn(harness: Harness, email: string): Promise<OperatorS
  * document describes: a route hidden from the document is a browser door, and
  * those are not the contract this guards.
  */
+/**
+ * Every answer that handed back a card, against the document's word for it.
+ *
+ * Only in the direction that matters. A door the document says carries a card
+ * and that no test in this suite happened to drive says nothing either way,
+ * and failing on that would be failing on test coverage rather than on drift.
+ * A door that hands one back while the document is silent is the drift: a
+ * caller reading the document there learns nothing about the answer, which was
+ * true of all forty-two operations until it was not.
+ */
+function answersAreOnTheMap(
+  documented: Record<string, Record<string, { responses?: Record<string, unknown> }>>,
+  carried: Map<string, Set<string>>,
+): void {
+  const quiet: string[] = [];
+  for (const [key, fields] of carried) {
+    const [method, path] = key.split(' ') as [string, string];
+    const operation = documented?.[path]?.[method];
+    if (!operation) continue;
+    const said = new Set<string>();
+    for (const code of ['200', '201']) {
+      const response = operation.responses?.[code] as
+        | { content?: { 'application/json'?: { schema?: { properties?: Record<string, unknown> } } } }
+        | undefined;
+      for (const field of Object.keys(
+        response?.content?.['application/json']?.schema?.properties ?? {},
+      )) {
+        said.add(field);
+      }
+    }
+    for (const field of fields) {
+      if (!said.has(field)) quiet.push(`${method.toUpperCase()} ${path} answered with ${field}`);
+    }
+  }
+  assert.deepEqual(
+    [...new Set(quiet)].sort(),
+    [],
+    'a call that hands back a card says so in the document',
+  );
+}
+
 function refusalsAreOnTheMap(
   documented: Record<string, Record<string, { responses?: Record<string, unknown> }>>,
   answered: Map<string, Set<number>>,

@@ -6,6 +6,7 @@ import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import { gzipSync } from 'node:zlib';
 import type { Config } from './config.js';
 import { STORE_UNAVAILABLE, notReadyYet } from './content.js';
+import { ITEM_STATUSES, PRIORITY_MAX, PRIORITY_MIN } from './types.js';
 import { storeUnreachable, type Store } from './db.js';
 import { createMailer, type Mailer } from './email.js';
 import { escapeHtml, setContactEmail, setSiteVerification } from './html.js';
@@ -195,6 +196,33 @@ export function acceptsGzip(header: string | undefined): boolean {
  * the thing.
  */
 // Always 201: these make something new or refuse.
+/**
+ * Which answers carry a card, and which carry a page of them.
+ *
+ * Kept by hand and checked by machine, the way the refusal map is: a test
+ * drives every one of these and reads what came back, and another walks
+ * everything the suite provokes and fails on a 2xx that carried a card from a
+ * door not named here. A list nobody compares with the service is a list that
+ * is right on the day it is written.
+ *
+ * The response stays open. What is promised is that a card arrives under
+ * `item`, shaped as `Item` says; the envelope around it carries whatever else
+ * that call has to say, and adding to it is not a documentation change.
+ */
+const ANSWERS_WITH_ITEM = new Set([
+  'post /v1/{project}/items',
+  'get /v1/{project}/items/{slug}',
+  'post /v1/{project}/items/{slug}/claim',
+  'post /v1/{project}/items/{slug}/heartbeat',
+  'post /v1/{project}/items/{slug}/release',
+  'post /v1/{project}/items/{slug}/timeline',
+  'post /v1/{project}/items/{slug}/move',
+  'get /v1/{project}/next',
+  'post /v1/{project}/next',
+]);
+
+const ANSWERS_WITH_ITEMS = new Set(['get /v1/{project}/items']);
+
 const CREATES = new Set([
   'post /p',
   'post /oauth/register',
@@ -683,6 +711,112 @@ export async function buildApp(
         },
       };
 
+      /**
+       * The card, which is what most of this service answers with.
+       *
+       * The document named every refusal and no answer: forty-two operations,
+       * every one of them declaring a 2xx, not one of them saying what came
+       * back. A caller reading it knew what to send and what going wrong
+       * looked like, and had to call the thing to find out what an ordinary
+       * success was.
+       *
+       * Written here rather than in `schema.response` for the reason above:
+       * declaring a response schema on the route turns on Fastify's serializer
+       * and it drops what the schema does not list. This describes the answer
+       * without touching it, and stays open, so an answer growing a field is
+       * not a document that has to be edited before the field can ship.
+       *
+       * Every field here is one `itemJson` actually writes, and a test
+       * compares the two rather than trusting this comment.
+       */
+      doc.components.schemas.Item = {
+        type: 'object',
+        description:
+          'A card. Every call that answers with one answers with this shape, and the fields that are absent are absent for a reason the description gives.',
+        required: [
+          'slug',
+          'title',
+          'body',
+          'status',
+          'owner',
+          'priority',
+          'labels',
+          'source',
+          'fields',
+          'stale',
+          'last_actor',
+          'claim',
+          'absence',
+          'created_at',
+          'updated_at',
+          'touched_at',
+          'closed_at',
+          'timeline_count',
+        ],
+        properties: {
+          slug: { type: 'string', description: 'The identity. Writing to it twice writes to one card.' },
+          title: { type: 'string' },
+          body: { type: 'string' },
+          status: { type: 'string', enum: [...ITEM_STATUSES] },
+          owner: { type: ['string', 'null'], description: 'Whose area this is, not who is on it now.' },
+          priority: {
+            type: 'integer',
+            minimum: PRIORITY_MIN,
+            maximum: PRIORITY_MAX,
+            description: 'Higher is more urgent. Every queue here sorts by it.',
+          },
+          labels: { type: 'array', items: { type: 'string' } },
+          source: { type: ['string', 'null'], description: 'The system this mirrors, when it mirrors one.' },
+          fields: { type: 'object', additionalProperties: true, description: 'Yours. Nothing here reads it.' },
+          then: { type: 'object', additionalProperties: true, description: 'What this card files when it finishes. Absent when it files nothing.' },
+          blocked_by: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Cards this one waits on. Absent rather than empty, because the absence already says nothing is waiting.',
+          },
+          stale: { type: 'boolean' },
+          last_actor: { type: ['string', 'null'], description: 'Who touched it last. Hygiene never sets it.' },
+          claim: {
+            type: ['object', 'null'],
+            description: 'The live lease, or null. A lease that has run out is null here the moment it runs out, not the moment a sweep notices.',
+            required: ['agent', 'expires_at', 'heartbeat_at'],
+            properties: {
+              agent: { type: 'string' },
+              expires_at: { type: 'string', format: 'date-time' },
+              heartbeat_at: { type: 'string', format: 'date-time' },
+            },
+            additionalProperties: true,
+          },
+          absence: {
+            type: ['object', 'null'],
+            description: 'How many polls in a row have not seen the signal this card mirrors.',
+            properties: { count: { type: 'integer' }, since: { type: 'string', format: 'date-time' } },
+            additionalProperties: true,
+          },
+          created_at: { type: 'string', format: 'date-time' },
+          updated_at: { type: 'string', format: 'date-time' },
+          touched_at: { type: 'string', format: 'date-time', description: 'The last write by somebody working, which is what staleness is measured from.' },
+          closed_at: { type: ['string', 'null'], format: 'date-time' },
+          timeline_count: { type: 'integer', description: 'How many entries the timeline has, including the ones trimmed off the end of it.' },
+          timeline: {
+            type: 'array',
+            description: 'Only where the call says it carries history: reading one card, and being offered one.',
+            items: {
+              type: 'object',
+              required: ['at', 'by', 'kind', 'message'],
+              properties: {
+                at: { type: 'string', format: 'date-time' },
+                by: { type: 'string' },
+                kind: { type: 'string' },
+                message: { type: 'string' },
+              },
+              additionalProperties: true,
+            },
+          },
+        },
+        additionalProperties: true,
+      };
+
       // The token endpoint answers in the shape RFC 6749 defines, not in this
       // service's: one word, no sentence. Documenting it with the house schema
       // would put a `message` on the map that never arrives, which is the kind
@@ -712,7 +846,7 @@ export async function buildApp(
           ok: { type: 'boolean', description: 'false. The lease was not taken.' },
           held_by: { type: 'string', description: 'The agent holding it now.' },
           hint: { type: 'string', description: 'What to do instead.' },
-          item: { type: 'object', description: 'The card, as every other call returns it.' },
+          item: { $ref: '#/components/schemas/Item', description: 'The card, as every other call returns it.' },
         },
         additionalProperties: true,
       };
@@ -734,6 +868,39 @@ export async function buildApp(
               responses['200'] = responses['200'] ?? { description: 'Already there, and answered as such.' };
             } else {
               delete responses['200'];
+            }
+          }
+          // The shape of an ordinary success, on the calls that have one. Both
+          // offers can answer `item: null` and say why in `reason`, which is
+          // an answer rather than an absence of one, so the card is not
+          // required there.
+          if (ANSWERS_WITH_ITEM.has(key) || ANSWERS_WITH_ITEMS.has(key)) {
+            const carries = ANSWERS_WITH_ITEMS.has(key)
+              ? {
+                  items: {
+                    type: 'array',
+                    items: { $ref: '#/components/schemas/Item' },
+                  },
+                }
+              : {
+                  item: key.endsWith('/next')
+                    ? {
+                        oneOf: [{ $ref: '#/components/schemas/Item' }, { type: 'null' }],
+                        description: 'The card, or null when there is nothing to offer, in which case `reason` says why.',
+                      }
+                    : { $ref: '#/components/schemas/Item' },
+                };
+            for (const ok of ['200', '201']) {
+              const existing = responses[ok] as { description?: string; content?: unknown } | undefined;
+              if (!existing) continue;
+              responses[ok] = {
+                description: existing.description ?? 'Done.',
+                content: {
+                  'application/json': {
+                    schema: { type: 'object', properties: carries, additionalProperties: true },
+                  },
+                },
+              };
             }
           }
           const codes = [

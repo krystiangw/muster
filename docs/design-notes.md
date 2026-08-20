@@ -2442,3 +2442,39 @@ card's own slug that their name is not a slug sends them looking for a spelling
 mistake that is not there. A circle is the fourth reason and it landed in the
 generic branch, which says exactly that sentence. It has its own now, naming
 what is wrong rather than what is not.
+
+## Forty-two refusals and no answers, 2026-08-20
+
+Measured on the live document: forty-two operations, every one declaring a 2xx,
+not one of them saying what came back. Three named schemas, all of them about
+failure. A caller reading it knew what to send and what going wrong looked
+like, and had to call the thing to find out what an ordinary success was.
+
+It was not an oversight in `schema.response`, and fixing it there would have
+been wrong for the reason already written above that field: declaring a
+response schema turns on Fastify's serializer, and the serializer drops what
+the schema does not list, so the `unknown` and `belongs_in_body` fields a
+refusal carries would have gone quiet the moment they were documented.
+Documenting a thing must not change the thing. The way through is the one the
+refusals already use: write it into the document rather than into the route.
+
+**One shape, not forty-two.** Every published schema is a promise to keep, and
+two of the things fixed today were promises wider than the code. So the card
+gets a schema and the envelope around it does not: the operations that hand one
+back declare that `item` arrives shaped like `Item`, and stay open about
+everything else they say. Adding a field to an answer is then not a change to
+the document.
+
+**Two guards, because a published shape rots from both ends.** One compares the
+schema's fields with what `itemJson` actually writes, in both directions, on a
+card built with every field set. The other is the whole suite: the recorder
+that already reads every refusal now also reads every answer, and fails on a
+2xx that handed back a card from a door the document is silent about. Only that
+direction, because failing on a documented door no test happens to drive would
+be failing on coverage rather than on drift.
+
+That second guard found a door on its first run, and then found a bug in
+itself. `POST /agents/{handle}/rename` answers `items: 4`, meaning it moved
+four of them, and reading the key alone would have had the document promise a
+page of cards where a count arrives. A card is a thing with a slug, which is
+what the recorder looks for now.
