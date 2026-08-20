@@ -1896,6 +1896,40 @@ describe('the map every refusal points at', () => {
       payload: { slug: 'blocked', title: 'a card that waits', blocked_by: ['blocker'] },
     });
 
+    // A project with no room left in it, for the three caps. Set on the
+    // document rather than by writing thirty cards, because what is being
+    // tested is the answer at the cap and not the arithmetic that reaches it.
+    const full = await createProject(harness, 'full');
+    await harness.store.projects.updateOne(
+      { _id: full.id },
+      { $set: { 'limits.items': 0, 'limits.agents': 0, 'limits.escalations': 0 } },
+    );
+
+    // A question nobody has answered, for the acknowledgement that is refused,
+    // and one already taken back, for the withdrawal that is.
+    const unanswered = (
+      await harness.server.inject({
+        method: 'POST',
+        url: `${project.api}/escalations`,
+        headers: admin,
+        payload: { question: 'still waiting', agent: 'nobody' },
+      })
+    ).json().escalation.id as string;
+    const withdrawn = (
+      await harness.server.inject({
+        method: 'POST',
+        url: `${project.api}/escalations`,
+        headers: admin,
+        payload: { question: 'asked by mistake', agent: 'somebody' },
+      })
+    ).json().escalation.id as string;
+    await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/escalations/${withdrawn}/withdraw`,
+      headers: admin,
+      payload: { agent: 'somebody', reason: 'mine to take back' },
+    });
+
     // Each row is one request and the code it is expected to come back with.
     // The document has to name that code for that operation.
     const cases: { method: string; url: string; path: string; payload?: unknown; headers?: Record<string, string>; code: number }[] = [
@@ -1945,15 +1979,79 @@ describe('the map every refusal points at', () => {
         code: 415,
       },
       { method: 'POST', url: '/p', path: '/p', payload: '<p/>', headers: { 'content-type': 'application/xml' }, code: 415 },
-      // The refusal that is not "somebody got there first": this project's only
-      // admin key, which cannot go because making the next one needs it. Worker
-      // keys are not refused, so this is the one pair that proves the door
-      // answers 409 at all.
+      // The refusals that are not "somebody got there first". Every one of
+      // these was answered by the deployment before it was written on the map,
+      // and each is on a call an agent makes without thinking about it: the
+      // lease it is holding, the card it is writing, the board that filled up.
       {
         method: 'DELETE',
         url: `${project.api}/keys/${(await harness.server.inject({ method: 'GET', url: `${project.api}/keys`, headers: reading })).json().keys[0].id}`,
         path: '/v1/{project}/keys/{id}',
         headers: reading,
+        code: 409,
+      },
+      {
+        method: 'POST',
+        url: `${project.api}/items`,
+        path: '/v1/{project}/items',
+        payload: { slug: 'held', title: 'written by somebody else first', expect: { title: 'not what it says' } },
+        headers: admin,
+        code: 409,
+      },
+      {
+        method: 'POST',
+        url: `${project.api}/items/held/heartbeat`,
+        path: '/v1/{project}/items/{slug}/heartbeat',
+        payload: { agent: 'not-the-holder' },
+        headers: admin,
+        code: 409,
+      },
+      {
+        method: 'POST',
+        url: `${project.api}/items/held/release`,
+        path: '/v1/{project}/items/{slug}/release',
+        payload: { agent: 'not-the-holder' },
+        headers: admin,
+        code: 409,
+      },
+      {
+        method: 'POST',
+        url: `${full.api}/items`,
+        path: '/v1/{project}/items',
+        payload: { slug: 'one-too-many', title: 'no room' },
+        headers: { authorization: `Bearer ${full.token}`, 'content-type': 'application/json' },
+        code: 409,
+      },
+      {
+        method: 'POST',
+        url: `${full.api}/agents`,
+        path: '/v1/{project}/agents',
+        payload: { handle: 'one-too-many' },
+        headers: { authorization: `Bearer ${full.token}`, 'content-type': 'application/json' },
+        code: 409,
+      },
+      {
+        method: 'POST',
+        url: `${full.api}/escalations`,
+        path: '/v1/{project}/escalations',
+        payload: { question: 'no room for this either?' },
+        headers: { authorization: `Bearer ${full.token}`, 'content-type': 'application/json' },
+        code: 409,
+      },
+      {
+        method: 'POST',
+        url: `${project.api}/escalations/${unanswered}/ack`,
+        path: '/v1/{project}/escalations/{id}/ack',
+        payload: { agent: 'nobody' },
+        headers: admin,
+        code: 409,
+      },
+      {
+        method: 'POST',
+        url: `${project.api}/escalations/${withdrawn}/withdraw`,
+        path: '/v1/{project}/escalations/{id}/withdraw',
+        payload: { agent: 'somebody', reason: 'again' },
+        headers: admin,
         code: 409,
       },
       // A write that declares no body schema of its own, and a DELETE. Both
@@ -2033,6 +2131,23 @@ describe('the map every refusal points at', () => {
         assert.ok(matched >= 1, `${one.method} ${one.path} ${one.code}: nothing the map documents fits ${JSON.stringify(body).slice(0, 90)}`);
       }
     }
+
+    // The other direction, for the one code where the map says something
+    // specific per route. Naming a conflict on a door that cannot have one is
+    // the same lie as leaving one off a door that can, and only the second half
+    // was being checked: a row provoking every documented 409 is what keeps a
+    // sentence from outliving the behaviour it describes.
+    const conflicts = new Set(
+      Object.entries(paths).flatMap(([path, item]) =>
+        Object.entries(item as Record<string, { responses?: Record<string, unknown> }>)
+          .filter(([method, op]) => ['post', 'delete', 'patch', 'put'].includes(method) && op.responses?.['409'])
+          .map(([method]) => `${method.toUpperCase()} ${path}`),
+      ),
+    );
+    for (const one of cases) {
+      if (one.code === 409) conflicts.delete(`${one.method} ${one.path}`);
+    }
+    assert.deepEqual([...conflicts], [], 'every operation the map says can conflict was made to');
   });
 
   it('keeps the refusals it documents in one shape, and does not narrow them', async () => {

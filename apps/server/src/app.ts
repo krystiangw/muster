@@ -240,11 +240,41 @@ const NOT_FOUND = new Set([
 // guarded write instead, and answers 200.
 const CONFLICTS = new Set(['post /v1/{project}/items/{slug}/claim']);
 
-// Also one, and a different kind of 409: not somebody got there first, but what
-// you asked for cannot be true. Revoking the last admin key would leave nothing
-// that can make the next one, so the answer is a plain refusal rather than the
-// lease's shape, which returns the card with it.
-const IMPOSSIBLE = new Set(['delete /v1/{project}/keys/{id}']);
+/**
+ * The other 409s, one sentence each, and every one of them measured by making
+ * the request rather than by reading the code that throws it.
+ *
+ * The map existed to stop a generated client meeting a code nobody had named,
+ * and for a while it named this one on the lease and nowhere else, while seven
+ * operations answered it: two of them are the calls a lease-holding agent makes
+ * all day, and three are what happens when a project fills up. A client
+ * generated against that document treated the ordinary shape of a full board as
+ * a surprise.
+ *
+ * Words per route rather than one line reused, because these are not the same
+ * news. A cap is a state of the project and finishing work clears it; a stale
+ * `expect` means somebody else wrote first; an unanswered question is a fact
+ * about the question. Reading them as one would put "somebody got there first"
+ * on a full board.
+ */
+const CONFLICT_SAYS: Record<string, string> = {
+  'post /v1/{project}/items':
+    'The card changed under you and `expect` said not to write in that case, and nothing was written; or the project is at its cap for open items, which finishing work frees.',
+  'post /v1/{project}/items/{slug}/heartbeat':
+    'The lease is not yours to extend: somebody else holds it, or yours lapsed and the card went back in the pool. Claim it again rather than retrying this.',
+  'post /v1/{project}/items/{slug}/release':
+    'Somebody else holds the lease, so it is not yours to hand back. Having no lease at all is not refused: that is already the state this asks for.',
+  'post /v1/{project}/agents':
+    'The project is at its cap for agents. A human claiming the project by email raises it.',
+  'post /v1/{project}/escalations':
+    'The project is at its cap for unanswered questions, which answering them frees.',
+  'post /v1/{project}/escalations/{id}/ack':
+    'Nobody has answered it yet, and acknowledging an answer that does not exist is a guess about what it will say.',
+  'post /v1/{project}/escalations/{id}/withdraw':
+    'Already withdrawn, or already answered: taking back a question somebody has answered throws away the attention they spent on it, and acknowledging is the verb for that.',
+  'delete /v1/{project}/keys/{id}':
+    'The last admin key this project has, which cannot go because making a key needs one; or one of two admin revocations arriving at once, since each would count the other as the key that is left.',
+};
 
 const REFUSAL_SAYS: Record<string, string> = {
   '400': 'The request was not understood, and the message says which part. A parameter this endpoint does not have, a value of the wrong shape, or a field outside its set.',
@@ -679,10 +709,9 @@ export async function buildApp(
             ...(NOT_FOUND.has(key) ? ['404'] : []),
           ];
           for (const code of codes) responses[code] ??= refusal(code);
-          if (IMPOSSIBLE.has(key)) {
+          if (CONFLICT_SAYS[key]) {
             responses['409'] ??= {
-              description:
-                'The last admin key this project has, which cannot go because making a key needs one; or one of two admin revocations arriving at once, since each would count the other as the key that is left.',
+              description: CONFLICT_SAYS[key],
               content: { 'application/json': { schema: { $ref: '#/components/schemas/Refusal' } } },
             };
           }

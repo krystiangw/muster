@@ -1757,3 +1757,41 @@ The race test forces its own interleaving, holding both calls at their first
 read until the other has arrived, so the two transactions are open over each
 other. Run as two ordinary concurrent calls the pair serialises and passes under
 every broken order, measured eight times out of eight.
+
+## Seven doors that could conflict and one that said so, 2026-08-20
+
+The map of refusals exists because a generated client had no idea 409 or 429
+were possible at all. It named 409 on the lease and nowhere else. Measured by
+making the request rather than by reading the code that throws it, seven other
+operations answer one:
+
+| Call | What the conflict is |
+|---|---|
+| `POST /items` | `expect` no longer matches, or the board is at its cap |
+| `POST /items/{slug}/heartbeat` | the lease is not yours, or lapsed |
+| `POST /items/{slug}/release` | somebody else holds it |
+| `POST /agents` | at the cap for agents |
+| `POST /escalations` | at the cap for unanswered questions |
+| `POST /escalations/{id}/ack` | nobody has answered it yet |
+| `POST /escalations/{id}/withdraw` | already withdrawn, or already answered |
+
+Two of those are what a lease-holding agent calls all day and three are what a
+full board answers, so a client generated against that document met the ordinary
+shape of a busy project as a surprise.
+
+**A sentence each, not one line reused.** These are not the same news. A cap is a
+state of the project that finishing work clears; a stale `expect` means somebody
+wrote first; an unanswered question is a fact about the question. The reused
+line would have told a full board that somebody got there first, which is both
+wrong and unactionable.
+
+**Two measurements, not one.** Releasing a lease you do not hold at all answers
+200, because that is already the state the call asks for; only somebody else
+holding it is refused. Heartbeat refuses both, and refuses a card that does not
+exist with the same words, which is the next thread rather than this one.
+
+**The test now runs both directions.** It already proved every code it provokes
+is documented. Naming a conflict on a door that cannot have one passed it
+silently, so it now also requires a row for every 409 on the map. Removing the
+map fails the first half; adding a sentence to a door that never conflicts fails
+the second.
