@@ -408,6 +408,38 @@ describe('what we publish about ourselves', () => {
     );
   });
 
+  it('says which of its calls have a tool, and is right about every one', () => {
+    // The catalogue is what an agent reads to decide which door to use, and it
+    // used to carry a sentence claiming one entry had no tool over MCP. Nine
+    // had none. A claim like that, in the machine readable file, is worse than
+    // no claim: it is read once and believed.
+    const endpoints = catalogue.endpoints as Array<{ name: string; mcp: string | null }>;
+    const live = new Set(tools.map((tool) => tool.name as string));
+
+    const wrong: string[] = [];
+    for (const endpoint of endpoints) {
+      if (endpoint.mcp === undefined) {
+        wrong.push(`${endpoint.name} says nothing about whether a tool does it`);
+        continue;
+      }
+      if (endpoint.mcp === null) {
+        if (live.has(endpoint.name)) wrong.push(`${endpoint.name} says no tool, and one of that name exists`);
+        continue;
+      }
+      if (!live.has(endpoint.mcp)) wrong.push(`${endpoint.name} names the tool ${endpoint.mcp}, which is not on the list`);
+    }
+    assert.deepEqual(wrong.sort(), [], 'the catalogue is right about which calls have a tool');
+
+    // And the other direction, so a tool cannot arrive without the catalogue
+    // learning about it: every tool is named by some entry.
+    const named = new Set(endpoints.map((endpoint) => endpoint.mcp).filter(Boolean));
+    assert.deepEqual(
+      [...live].filter((tool) => !named.has(tool)).sort(),
+      [],
+      'a tool nobody points at is a tool an agent finds by luck',
+    );
+  });
+
   it('sends an agent to addresses that exist', async () => {
     // The catalogue is the map. A renamed route leaves it pointing at nothing,
     // and the agent reading it has no second source to check against.

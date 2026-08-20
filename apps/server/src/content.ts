@@ -1061,9 +1061,27 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       unclaimed_project: { ...config.tiers.demo, expires_after_days: config.demoTtlDays },
       claimed_project: config.tiers.free,
     },
+    /**
+     * Which tool does this over MCP, or null where nothing does.
+     *
+     * The sentence this replaces said take_next_item was the one name here
+     * without a tool. Measured against the live tool list: eight others have
+     * none either, and a claim like that in the file an agent reads to decide
+     * which door to use is worse than no claim at all. A field per entry
+     * cannot be wrong about one of them while being right about the rest, and
+     * a test drives the tool list and compares.
+     *
+     * The eight are two kinds. Reads an agent already has another way:
+     * list_agents is board_facets, list_escalations is inbox. And writes that
+     * belong to a person holding an admin token: the board's layout, renaming
+     * a handle, answering a question, deleting a card, minting a key. Nothing
+     * here is an oversight, which is exactly why it is worth saying out loud
+     * rather than leaving an agent to discover it by calling.
+     */
     endpoints: [
       {
         name: 'create_project',
+        mcp: 'create_project',
         method: 'POST',
         url: `${base}/p`,
         auth: 'none',
@@ -1071,12 +1089,14 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       },
       {
         name: 'register_agent',
+        mcp: 'register_agent',
         method: 'POST',
         url: `${base}/v1/{project}/agents`,
         request: { handle: 'errors-loop', scope: ['errors:'], description: 'what you own' },
       },
       {
         name: 'upsert_item',
+        mcp: 'upsert_item',
         method: 'POST',
         url: `${base}/v1/{project}/items`,
         request: { slug: 'stable-key', title: 'one line', body: 'markdown', actor: 'your handle' },
@@ -1084,6 +1104,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       },
       {
         name: 'claim_item',
+        mcp: 'claim_item',
         method: 'POST',
         url: `${base}/v1/{project}/items/{slug}/claim`,
         request: { agent: 'errors-loop', ttl_minutes: 60 },
@@ -1095,12 +1116,14 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
         // an agent that meets both doors should not have to work out that two
         // words describe one act.
         name: 'append_note',
+        mcp: 'append_note',
         method: 'POST',
         url: `${base}/v1/{project}/items/{slug}/timeline`,
         request: { actor: 'errors-loop', message: 'what you learned' },
       },
       {
         name: 'next_item',
+        mcp: 'next_item',
         method: 'GET',
         url: `${base}/v1/{project}/next?agent={handle}`,
         notes:
@@ -1108,14 +1131,16 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       },
       {
         name: 'take_next_item',
+        mcp: 'next_item',
         method: 'POST',
         url: `${base}/v1/{project}/next`,
         request: { agent: '{handle}', ttl_minutes: 60 },
         notes:
-          'The same choice, taken: the selection and the lease are one write, so a fleet asking at once gets different items instead of all but one losing the claim that follows an offer. Answers with the item already held and "claimed": true. Over MCP this is next_item with "claim": true rather than a tool of its own, which is the one name on this list that does not appear there.',
+          'The same choice, taken: the selection and the lease are one write, so a fleet asking at once gets different items instead of all but one losing the claim that follows an offer. Answers with the item already held and "claimed": true. Over MCP this is next_item with "claim": true rather than a tool of its own, which is why the mcp field here names a tool whose name is not this one.',
       },
       {
         name: 'read_item',
+        mcp: 'read_item',
         method: 'GET',
         url: `${base}/v1/{project}/items/{slug}`,
         notes: 'One card with its timeline, which is what to read before deciding whether to pick it up.',
@@ -1123,6 +1148,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       {
         // The names the MCP tools carry, because one operation has one name.
         name: 'heartbeat',
+        mcp: 'heartbeat',
         method: 'POST',
         url: `${base}/v1/{project}/items/{slug}/heartbeat`,
         request: { agent: '{handle}', ttl_minutes: 60 },
@@ -1131,6 +1157,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       },
       {
         name: 'release',
+        mcp: 'release',
         method: 'POST',
         url: `${base}/v1/{project}/items/{slug}/release`,
         request: { agent: '{handle}', note: 'why you are letting go' },
@@ -1139,6 +1166,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       },
       {
         name: 'list_agents',
+        mcp: null,
         method: 'GET',
         url: `${base}/v1/{project}/agents`,
         notes:
@@ -1146,6 +1174,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       },
       {
         name: 'rename_agent',
+        mcp: null,
         method: 'POST',
         url: `${base}/v1/{project}/agents/{handle}/rename`,
         request: { to: 'the-right-one' },
@@ -1155,6 +1184,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       {
         // One name for one operation, the same one the MCP tool carries.
         name: 'acknowledge',
+        mcp: 'acknowledge',
         method: 'POST',
         url: `${base}/v1/{project}/escalations/{id}/ack`,
         request: { agent: '{handle}', note: 'what you did with it' },
@@ -1163,6 +1193,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       },
       {
         name: 'withdraw',
+        mcp: 'withdraw',
         method: 'POST',
         url: `${base}/v1/{project}/escalations/{id}/withdraw`,
         request: { agent: '{handle}', reason: 'why you are taking it back' },
@@ -1171,12 +1202,14 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       },
       {
         name: 'board_presets',
+        mcp: null,
         method: 'GET',
         url: `${base}/v1/{project}/board/presets`,
         notes: 'The layouts this service ships, as a starting point for set_board.',
       },
       {
         name: 'observe',
+        mcp: 'observe',
         method: 'POST',
         url: `${base}/v1/{project}/observe`,
         request: { source: 'market-errors', present: ['slug-a', 'slug-b'] },
@@ -1185,18 +1218,21 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       },
       {
         name: 'escalate',
+        mcp: 'escalate',
         method: 'POST',
         url: `${base}/v1/{project}/escalations`,
         request: { agent: 'errors-loop', question: '...', context: '...', priority: 'high' },
       },
       {
         name: 'inbox',
+        mcp: 'inbox',
         method: 'GET',
         url: `${base}/v1/{project}/inbox?agent={handle}`,
         notes: 'Answers from the human. Four statuses: answered, resolved, wont_do, in_progress.',
       },
       {
         name: 'board',
+        mcp: 'board',
         method: 'GET',
         url: `${base}/v1/{project}/board`,
         notes:
@@ -1204,6 +1240,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       },
       {
         name: 'board_facets',
+        mcp: 'board_facets',
         method: 'GET',
         url: `${base}/v1/{project}/board/facets`,
         notes:
@@ -1211,6 +1248,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       },
       {
         name: 'move',
+        mcp: 'move',
         method: 'POST',
         url: `${base}/v1/{project}/items/{slug}/move`,
         request: { column: 'doing', actor: '{handle}' },
@@ -1219,6 +1257,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       },
       {
         name: 'set_board',
+        mcp: null,
         method: 'PUT',
         url: `${base}/v1/{project}/board`,
         auth: 'admin token',
@@ -1226,6 +1265,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       },
       {
         name: 'share_project',
+        mcp: 'share_project',
         method: 'POST',
         url: `${base}/v1/{project}/share`,
         auth: 'admin token',
@@ -1235,6 +1275,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       },
       {
         name: 'answer_escalation',
+        mcp: null,
         method: 'PATCH',
         url: `${base}/v1/{project}/escalations/{id}`,
         auth: 'admin token',
@@ -1244,6 +1285,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       },
       {
         name: 'list_items',
+        mcp: 'list_items',
         method: 'GET',
         url: `${base}/v1/{project}/items?order=id&limit=${PAGE_MAX}`,
         notes:
@@ -1251,6 +1293,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       },
       {
         name: 'list_escalations',
+        mcp: null,
         method: 'GET',
         url: `${base}/v1/{project}/escalations?limit=${PAGE_MAX}`,
         notes:
@@ -1258,6 +1301,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       },
       {
         name: 'delete_item',
+        mcp: null,
         method: 'DELETE',
         url: `${base}/v1/{project}/items/{slug}`,
         auth: 'admin token',
@@ -1266,6 +1310,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       },
       {
         name: 'create_api_key',
+        mcp: null,
         method: 'POST',
         url: `${base}/v1/{project}/keys`,
         auth: 'admin token',

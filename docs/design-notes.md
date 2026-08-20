@@ -2748,3 +2748,30 @@ where something *looked* checked: a rule that had a guard, a sentence that had a
 test, a bound that had a number. Nothing on this list was found by reading. All
 of it was found by driving the door, publishing the measurement, or mutating the
 guard and counting what went red.
+
+## The one name that was nine, 2026-08-20
+
+The first of the three questions above, asked of the catalogue an agent reads
+before deciding which door to use. One entry carried a note saying that
+`take_next_item` "is the one name on this list that does not appear" among the
+MCP tools. Measured against the live tool list: nine names have no tool.
+
+The absences are not the defect. Two of them are reads an agent already has
+another way, `list_agents` through `board_facets` and `list_escalations`
+through `inbox`, and the rest are writes belonging to a person holding an admin
+token: the board's layout, renaming a handle, answering a question, deleting a
+card, minting a key. Every one of those is deliberate.
+
+The defect is a claim about coverage written as prose in the machine readable
+file, which is read once and believed. Each entry now carries the tool that
+does it, or null, and the reason the nulls are nulls is stated once above the
+list. A field per entry cannot be wrong about one while being right about the
+rest, and a test drives the tool list and compares both ways: an entry naming a
+tool that is not there fails, and so does a tool no entry points at, because a
+tool nobody points at is one an agent finds by luck.
+
+Deriving it instead of writing it would have been better and is not available:
+`mcp.ts` already imports `content.ts`, so the catalogue cannot import the tool
+list back without a cycle. Hand-kept and machine-checked is the same trade the
+refusal map makes, and it is checked on every run rather than on the day
+somebody remembers.
