@@ -3063,16 +3063,26 @@ export async function nextItem(
    * would report something that was never on offer. Two questions, two sets.
    */
   const sayWaiting = async (): Promise<string> => {
-    if (waiting.length === 0) return '';
-    const said = `; ${waiting.length} ${waiting.length === 1 ? 'item is' : 'items are'} waiting on other cards`;
+    const said =
+      waiting.length === 0
+        ? ''
+        : `; ${waiting.length} ${waiting.length === 1 ? 'item is' : 'items are'} waiting on other cards`;
+    // Looked for whether or not anything open is waiting, which is the third
+    // time this has been drawn too narrow. A circle every one of whose cards
+    // is parked on a person contributes nothing to the count above, and is
+    // exactly the deadlock worth naming: when those people answer, the cards
+    // go back to open and still cannot start.
     const circles = circlesAmong(await waitingBlockers(store, project._id));
     if (circles.length === 0) return said;
-    return (
-      said +
-      `, and ${circles.length === 1 ? 'two or more of them wait' : `${circles.length} sets of them wait`} round in a circle, which nothing will free: ${circles
-        .map((circle) => circle.join(' waits on '))
-        .join('; ')}. Take one card out of one of those lists.`
-    );
+    const naming = circles.map((circle) => circle.join(' waits on ')).join('; ');
+    const tail = `${circles.length === 1 ? 'a circle' : `${circles.length} circles`}, which nothing will free: ${naming}. Take one card out of one of those lists.`;
+    // Two shapes, because "some of them" needs a them. When nothing open is
+    // waiting, the count above is not there to refer back to, and a sentence
+    // built by adding a clause to an empty one says "and some of them" about
+    // nothing at all.
+    return said === ''
+      ? `; some cards here wait round in ${tail}`
+      : `${said}, and some of them wait round in ${tail}`;
   };
   const sort = { priority: -1 as const, touchedAt: 1 as const };
 

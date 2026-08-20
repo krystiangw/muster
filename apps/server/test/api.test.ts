@@ -3822,6 +3822,40 @@ describe('cards waiting on each other', () => {
     // offer to be withheld.
     assert.match(throughParked.json().reason as string, /1 item is waiting on other cards/);
 
+    // And a circle every one of whose cards is parked on a person contributes
+    // nothing to the count, which is what hid it: when those people answer,
+    // the cards go back to open and still cannot start. The sentence has to
+    // stand on its own there, with no count in front of it to refer back to.
+    const allParked = await createProject(harness);
+    await harness.store.items.insertMany([
+      {
+        ...base,
+        projectId: allParked.id,
+        _id: 'i_stuck_a',
+        slug: 'stuck-a',
+        status: 'blocked' as const,
+        blockedBy: ['stuck-b'],
+      },
+      {
+        ...base,
+        projectId: allParked.id,
+        _id: 'i_stuck_b',
+        slug: 'stuck-b',
+        status: 'blocked' as const,
+        blockedBy: ['stuck-a'],
+      },
+    ] as never);
+    const parkedOnly = await harness.server.inject({
+      method: 'GET',
+      url: `${allParked.api}/next?agent=somebody`,
+      headers: authed(allParked),
+    });
+    assert.equal(parkedOnly.json().item, null);
+    const parkedReason = parkedOnly.json().reason as string;
+    assert.match(parkedReason, /stuck-a waits on stuck-b waits on stuck-a/);
+    assert.doesNotMatch(parkedReason, /items are waiting/, 'none of them was on offer to withhold');
+    assert.doesNotMatch(parkedReason, /some of them/, 'there is no count for "them" to mean');
+
     // And a board with no circle keeps the plain sentence, so the new half
     // does not turn every quiet board into a warning.
     const plain = await createProject(harness);

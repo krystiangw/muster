@@ -2378,3 +2378,16 @@ allowed a long dependency chain, and a long enough one turns `/next` into a
 stack now, with one path shared across the walk. Proved without a database,
 because the walk is pure: fifty thousand cards in a line, which no call stack
 here would survive, and the same line closed into a ring, found once.
+
+**Drawn too narrow a third time.** The circle lookup only ran when something
+open was waiting, so a circle every one of whose cards is parked on a person
+was invisible: none of them is on offer, so none of them is in the count, so
+the sentence returned before it looked. That is the deadlock most worth naming,
+because when those people answer the cards go back to open and still cannot
+start. It runs on every empty offer now, and the set it reads is bounded by how
+many cards use the field rather than by the size of the board: two, in the
+whole production database.
+
+Which then needed two shapes of the sentence, because "and some of them" wants
+a them. With nothing in the count to refer back to, a clause bolted onto an
+empty string says "some of them" about nothing at all.
