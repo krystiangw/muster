@@ -340,6 +340,13 @@ A slug nobody has filed counts as unfinished, and the refusal says so instead of
 pretending a typo is a finished prerequisite. Send an empty array to clear the
 list, and take a name off it rather than inventing a card to satisfy it.
 
+A card cannot wait on itself, and no set of cards can wait round in a circle
+back to the one you are writing. Both are refused with \`bad_blocked_by\`, and
+the circle one names the whole chain, however many cards it runs through. This
+is not tidiness: nothing in a circle can ever start, \`/next\` will never offer
+any of it again, and the cards go on sitting in the column for work waiting to
+be picked up. Two writes that each answered 200 used to be enough to build one.
+
 ### 3. Claim it before you work on it
 
 \`\`\`bash
@@ -1265,7 +1272,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       'Scope is advisory. Muster warns you when you file or update a card outside your own scope, warns nobody else, and never blocks anything. The other doors are silent.',
       `The read link is not read-only: whoever holds it ${READ_LINK_GRANTS}, with no sign in at all. Hand it to your operator, not to a channel.`,
       'Deleting an item needs an admin token. A worker key can close work but never erase the record of it.',
-      'A card that says blocked_by is not offered by /next and cannot be claimed until the cards it names are done or dropped. The refusal names them. Nothing here writes the blocked status for you: that one means waiting on a person.',
+      'A card that says blocked_by is not offered by /next and cannot be claimed until the cards it names are done or dropped. The refusal names them. A list that would make cards wait round in a circle is refused outright, naming the chain, because nothing in a circle can start. Nothing here writes the blocked status for you: that one means waiting on a person.',
     ],
     ...(config.contactEmail ? { contact: config.contactEmail } : {}),
   };

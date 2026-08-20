@@ -1353,6 +1353,23 @@ export async function upsertItem(
   /** Whose claim closing this item dropped, if it dropped one. */
   let releasedClaim: string | null = null;
 
+  // Before anything is written, and only when the list is being set. A card
+  // cannot wait on itself and that is refused where the field is read; two
+  // cards waiting on each other is the same impossibility one step out, and
+  // used to answer 200 twice and leave both of them in the "to do" column of a
+  // board that would never offer either again.
+  if (input.blockedBy !== undefined && input.blockedBy.length > 0) {
+    const circle = await circleBack(store, project._id, slug, input.blockedBy);
+    if (circle) {
+      throw new ServiceError(
+        400,
+        'bad_blocked_by',
+        `This would make a circle: ${circle.join(' waits on ')}. Nothing in a circle can start, so it is refused rather than stored. Take one card out of one of those lists.`,
+        { reason: 'a_circle', circle },
+      );
+    }
+  }
+
   if (!existing) {
     // A guard says "only if it still reads like this", which is a sentence
     // about a card that exists. Reaching here means it does not, and the answer
@@ -1820,6 +1837,78 @@ function takingIt(agent: string, now: Date, ttl: number, expiresAt: Date, nonce:
  * make a typo silently do nothing, and "waiting on a card that is not on this
  * board" is something an agent can fix in one write.
  */
+/**
+ * How many cards a circle check will read before it gives up.
+ *
+ * The walk is breadth first from the cards this one would wait on, and it
+ * stops the moment it reaches the card doing the waiting. Measured: one query
+ * when the cards it waits on wait on nothing, which is nearly every write, and
+ * one more per level after that. A chain eight deep costs eight, and finding
+ * the circle at the end of that chain costs seven, because it stops on the
+ * card that closes it. The budget is for the shape nobody plans, where an
+ * unbounded walk on the write path is a denial of service written by accident.
+ *
+ * Running out allows the write. Refusing on a walk that did not finish would
+ * refuse a legal card because the board is big, which is a worse failure than
+ * the one this prevents.
+ */
+const CIRCLE_BUDGET = 500;
+
+/**
+ * Whether waiting on these would put this card in a circle, and the chain that
+ * closes it.
+ *
+ * A card cannot wait on itself: that is refused where the field is read, and
+ * has been since the field existed. Two cards waiting on each other is the
+ * same impossibility one step further out, and it was not refused: both writes
+ * answered 200, both cards sat in the "to do" column looking like work, and
+ * `/next` never offered either of them again. That is the failure this whole
+ * service is named after, arrived at by two ordinary writes.
+ *
+ * Read with the same query shape as `unmetBlockers`, one level at a time, so
+ * it uses the slug index rather than a graph walk the database plans on its
+ * own. The chain comes back rather than a yes, because "this would make a
+ * circle" is not something anybody can act on without knowing which cards.
+ */
+export async function circleBack(
+  store: Store,
+  projectId: string,
+  own: string,
+  waitingOn: string[],
+): Promise<string[] | null> {
+  const parent = new Map<string, string>();
+  const seen = new Set<string>([own]);
+  let frontier = waitingOn.filter((slug) => slug !== own);
+  let budget = CIRCLE_BUDGET;
+
+  // The chain reads the way somebody would say it out loud: this card, then
+  // each card it ends up waiting on, then this card again.
+  const chainTo = (from: string): string[] => {
+    const path: string[] = [];
+    for (let at: string | undefined = from; at !== undefined; at = parent.get(at)) path.push(at);
+    return [own, ...path.reverse(), own];
+  };
+
+  while (frontier.length > 0 && budget > 0) {
+    const rows = (await store.items
+      .find({ projectId, slug: { $in: frontier } }, { projection: { slug: 1, blockedBy: 1 } })
+      .toArray()) as Array<Pick<ItemDoc, 'slug' | 'blockedBy'>>;
+    const next: string[] = [];
+    for (const row of rows) {
+      budget -= 1;
+      for (const waits of row.blockedBy ?? []) {
+        if (waits === own) return chainTo(row.slug);
+        if (seen.has(waits)) continue;
+        seen.add(waits);
+        parent.set(waits, row.slug);
+        next.push(waits);
+      }
+    }
+    frontier = next;
+  }
+  return null;
+}
+
 export async function unmetBlockers(
   store: Store,
   projectId: string,

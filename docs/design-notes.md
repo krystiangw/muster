@@ -2257,3 +2257,34 @@ routes that do not exist. Review caught it in the diff. A probe that is not a
 test belongs outside that glob, and the cheapest way to stay outside it is to
 leave `.test` out of the name: `node --import tsx --test test/probe.ts` still
 runs it on request, and the suite never picks it up.
+
+## Two writes that each answered 200 and froze both cards, 2026-08-20
+
+A card cannot wait on itself: refused where the field is read, and refused
+since the field existed. Two cards waiting on each other was not, and both
+writes answered 200. Both then sat in the column for work waiting to be picked
+up, and `/next` never offered either of them again, saying only that some items
+are waiting on other cards, which reads as somebody else will finish those.
+Nobody will. That is the founding failure of this service, built out of two
+ordinary writes.
+
+The refusal is the same one, one step further out, with the same code and a new
+reason. It names the whole chain rather than saying a circle exists, because
+"this would make a circle" is not something a caller can act on without knowing
+which cards to take out of which list. The chain reads the way somebody would
+say it: `one waits on three waits on two waits on one`.
+
+**Walked one level at a time, and measured rather than assumed.** The obvious
+implementation is `$graphLookup`, which walks the graph in the database and
+joins on `slug`; the only index on slug is compound behind `projectId`, so that
+walk would not use it. A breadth-first walk in code issues the same query shape
+`unmetBlockers` already uses, one per level, against the index that exists.
+Measured: one query when the cards it waits on wait on nothing, which is nearly
+every write; a chain eight deep costs eight; finding the circle at the end of
+that chain costs seven, because it stops on the card that closes it.
+
+**Running out of budget allows the write.** Five hundred cards is the ceiling,
+and a walk that hits it stops looking and lets the write through. Refusing a
+legal card because the board is big is a worse failure than the one this
+prevents, and it is the kind that arrives on the day somebody's board finally
+gets busy.

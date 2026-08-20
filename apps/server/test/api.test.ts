@@ -3507,6 +3507,74 @@ describe('a database that does not answer', () => {
   });
 });
 
+describe('cards waiting on each other', () => {
+  it('refuses the write that closes the circle, and names it', async () => {
+    const project = await createProject(harness);
+    for (const slug of ['a', 'b']) await post(project, '/items', { slug, title: slug, actor: 'x' });
+    const first = await post(project, '/items', { slug: 'b', blocked_by: ['a'], actor: 'x' });
+    assert.equal(first.statusCode, 200, first.body);
+
+    // A card cannot wait on itself and never could. Two cards waiting on each
+    // other is the same impossibility one step out, and it used to answer 200:
+    // both sat in the "to do" column looking like work, and /next would never
+    // offer either of them again.
+    const circle = await post(project, '/items', { slug: 'a', blocked_by: ['b'], actor: 'x' });
+    assert.equal(circle.statusCode, 400, circle.body);
+    assert.equal(circle.json().error, 'bad_blocked_by');
+    assert.equal(circle.json().reason, 'a_circle');
+    assert.deepEqual(circle.json().circle, ['a', 'b', 'a']);
+    assert.match(circle.json().message as string, /a waits on b waits on a/);
+
+    // Refused rather than stored: the card is exactly as it was.
+    const untouched = await harness.store.items.findOne({ projectId: project.id, slug: 'a' });
+    assert.deepEqual(untouched?.blockedBy ?? [], []);
+  });
+
+  it('follows the chain however long it is, and lets a chain that ends alone through', async () => {
+    const project = await createProject(harness);
+    for (const slug of ['one', 'two', 'three', 'four']) {
+      await post(project, '/items', { slug, title: slug, actor: 'x' });
+    }
+    await post(project, '/items', { slug: 'two', blocked_by: ['one'], actor: 'x' });
+    await post(project, '/items', { slug: 'three', blocked_by: ['two'], actor: 'x' });
+
+    // three waits on two waits on one, so one waiting on three closes it.
+    const closed = await post(project, '/items', { slug: 'one', blocked_by: ['three'], actor: 'x' });
+    assert.equal(closed.statusCode, 400, closed.body);
+    assert.deepEqual(closed.json().circle, ['one', 'three', 'two', 'one']);
+
+    // The same shape one card short is an ordinary dependency and goes in.
+    const fine = await post(project, '/items', { slug: 'four', blocked_by: ['three'], actor: 'x' });
+    assert.equal(fine.statusCode, 200, fine.body);
+    const stored = await harness.store.items.findOne({ projectId: project.id, slug: 'four' });
+    assert.deepEqual(stored?.blockedBy, ['three']);
+  });
+
+  it('refuses it at the MCP door in the same words', async () => {
+    const project = await createProject(harness);
+    for (const slug of ['x1', 'x2']) await post(project, '/items', { slug, title: slug, actor: 'x' });
+    await post(project, '/items', { slug: 'x2', blocked_by: ['x1'], actor: 'x' });
+
+    const called = await harness.server.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: { ...authed(project), 'content-type': 'application/json' },
+      payload: {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: {
+          name: 'upsert_item',
+          arguments: { slug: 'x1', blocked_by: ['x2'], actor: 'x' },
+        },
+      },
+    });
+    assert.match(called.body, /a_circle|would make a circle/);
+    const untouched = await harness.store.items.findOne({ projectId: project.id, slug: 'x1' });
+    assert.deepEqual(untouched?.blockedBy ?? [], []);
+  });
+});
+
 describe('a value of the wrong shape', () => {
   it('is refused rather than reshaped into the right one', async () => {
     // Fastify coerces a scalar into a list by default, which is right for a
