@@ -1884,3 +1884,34 @@ this was meant to end, because now a test says it cannot happen. The published
 `curl` examples were the same story in the other direction: `?limit=200` written
 out, so lowering the cap would have shipped a document whose own examples the
 service refuses.
+
+## Sixty visitors an hour, all of them the same open tab, 2026-08-20
+
+The board reloads itself every minute, which is deliberate: a board written to
+by loops while somebody watches it is wrong most of the time otherwise. Every
+one of those reloads was recorded as a view, and with no identity stored there
+was nothing to tell a reload from an arrival.
+
+Measured on production, not reasoned about: the gaps between consecutive
+stranger views were 61, 61, 61, 61, 47, 61, 61 seconds, all night, sixty to
+seventy an hour. One board left open in one browser was the entire traffic
+signal.
+
+**Two numbers were wrong because of it.** "Pages people opened" counted a tab,
+not people. Worse, the report divides cards moved by hand by board views to
+decide whether moving cards by hand is a thing anybody does, and that comment
+says out loud it is a decision criterion: "above roughly three moves per board
+view, the refusal is wrong". With the denominator inflated sixty times the
+answer was always no, and the feature would have stayed refused on evidence
+that was an artefact of the refresh.
+
+**The reload now names where it goes.** The meta tag carries a URL rather than
+just a number, and that URL is this page again with `refreshed=1` on it, so the
+service can recognise its own beat and not count it. Built from the URL as it
+arrived, so every filter the reader chose survives the reload; a mutation that
+drops them fails the test.
+
+Not a cookie and not an address: the marker is on the page's own reload, not on
+the reader, so nothing about who is reading is stored or needs to be. Somebody
+arriving at a link that happens to carry the marker is undercounted by one,
+which is the direction to be wrong in.

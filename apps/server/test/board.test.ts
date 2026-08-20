@@ -1135,7 +1135,9 @@ describe('moving an item into a column', () => {
     const readToken = project.readUrl.split('/r/')[1]!;
 
     const page = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
-    assert.match(page.body, /<meta http-equiv="refresh" content="60">/);
+    // Still every minute, and now naming where it goes: the reload the page
+    // asks for is marked so it is not counted as somebody arriving to read it.
+    assert.match(page.body, /<meta http-equiv="refresh" content="60; url=[^"]*refreshed=1[^"]*">/);
     assert.ok(!page.body.includes('name="live"'), 'and nothing to switch');
   });
 
@@ -2283,6 +2285,40 @@ describe('a board many agents write to', () => {
     // And the page it bounces to is, so the check above can tell them apart.
     await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board?agent=errors-loop` });
     assert.equal(await views(), before + 1, 'the page it lands on is a read');
+  });
+
+  it('does not count the reload it asked for as somebody arriving', async () => {
+    // Measured on production before it was fixed: one board left open all
+    // night was a view every sixty one seconds, sixty an hour, every one of
+    // them counted as a stranger. The report divides cards moved by hand by
+    // that number to decide whether anybody moves cards at all, so the beat
+    // made the answer no whatever people did.
+    const project = await createProject(harness, 'reloading');
+    const readToken = (await harness.store.projects.findOne({ _id: project.id }))!.readToken;
+    const views = async () => {
+      await flushEvents();
+      return harness.store.events.countDocuments({ kind: 'view', detail: 'board' });
+    };
+
+    const first = await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board?agent=errors-loop` });
+    assert.equal(first.statusCode, 200);
+    const after = await views();
+
+    // The page says where its own reload goes, and it goes somewhere marked.
+    const refresh = /<meta http-equiv="refresh" content="([^"]+)">/.exec(first.body)?.[1] ?? '';
+    assert.match(refresh, /^60; url=/, refresh);
+    const url = refresh.slice(refresh.indexOf('url=') + 4).replace(/&amp;/g, '&');
+    assert.match(url, /refreshed=1/, url);
+    assert.match(url, /agent=errors-loop/, 'and it keeps what the reader chose');
+
+    const again = await harness.server.inject({ method: 'GET', url });
+    assert.equal(again.statusCode, 200, again.body.slice(0, 120));
+    assert.equal(await views(), after, 'the reload the page asked for is not a reader');
+
+    // And the mark is not a way to read the board uncounted by accident: a
+    // person following a link without it is still counted.
+    await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board?agent=errors-loop` });
+    assert.equal(await views(), after + 1, 'somebody arriving still counts');
   });
 
   it('sends the token back the way it arrived, whatever it was', async () => {

@@ -840,6 +840,16 @@ export interface LayoutOptions {
    * a board that is a minute behind.
    */
   refreshSeconds?: number;
+  /**
+   * Where the refresh goes, when that is not simply here again.
+   *
+   * A reload the page asked for is not somebody arriving to read it, and with
+   * no identity stored there is nothing else to tell them apart: measured on
+   * production, one board left open all night was a view every sixty one
+   * seconds, and every one of them counted as a stranger. The address the
+   * refresh names carries a mark saying who asked for it.
+   */
+  refreshTo?: string;
 }
 
 export function layout(options: LayoutOptions, body: string): string {
@@ -849,7 +859,7 @@ export function layout(options: LayoutOptions, body: string): string {
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(options.title)}</title>
-${options.refreshSeconds ? `<meta http-equiv="refresh" content="${Math.round(options.refreshSeconds)}">
+${options.refreshSeconds ? `<meta http-equiv="refresh" content="${Math.round(options.refreshSeconds)}${options.refreshTo ? `; url=${escapeHtml(options.refreshTo)}` : ''}">
 ` : ''}
 ${options.description ? `<meta name="description" content="${escapeHtml(options.description)}">` : ''}
 ${(options.verification ?? siteVerification) ? `<meta name="google-site-verification" content="${escapeHtml(options.verification ?? siteVerification)}">\n` : ''}<link rel="icon" href="/favicon.svg" type="image/svg+xml">

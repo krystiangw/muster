@@ -230,6 +230,19 @@ const NOTE_MAX_CHARS = 2_000;
  */
 const BOARD_REFRESH_SECONDS = 60;
 
+/**
+ * The same address, marked as one the page asked for rather than a person.
+ *
+ * Kept relative, so nothing here has to know the public origin, and built from
+ * the URL as it arrived so every filter the reader chose survives the reload.
+ */
+function refreshUrl(url: string): string {
+  const [path, sent] = url.split('?');
+  const params = new URLSearchParams(sent ?? '');
+  params.set('refreshed', '1');
+  return `${path}?${params.toString()}`;
+}
+
 interface KeptFilter {
   from_owner?: string;
   from_agent?: string;
@@ -1371,7 +1384,16 @@ ${
     if (!limitReads(request, reply)) return reply;
     // Counted once the page is actually going to be drawn. A stale bookmark and
     // a token probe both end above this line, and neither is somebody reading.
-    recordView(store, 'board', request, ourHost);
+    //
+    // Nor is the page reloading itself. The refresh below names an address
+    // carrying `refreshed`, so the beat it makes is recognisable and does not
+    // count: measured on production, a single board left open overnight was
+    // sixty views an hour, all of them read as strangers arriving, and the
+    // report divides hand-moved cards by that number to decide whether anybody
+    // moves cards at all.
+    if ((request.query as { refreshed?: string }).refreshed === undefined) {
+      recordView(store, 'board', request, ourHost);
+    }
     void maybeExpireClaims(store, project).catch(() => undefined);
     const query = request.query as {
       moved?: string;
@@ -1633,7 +1655,9 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
             // Every minute, except while a sheet is open. A reload throws away
             // whatever is half typed in it, and the note somebody was writing
             // is the one thing on this page that nothing else can recover.
-            ...(sheetOpen ? {} : { refreshSeconds: BOARD_REFRESH_SECONDS }),
+            ...(sheetOpen
+              ? {}
+              : { refreshSeconds: BOARD_REFRESH_SECONDS, refreshTo: refreshUrl(request.url) }),
           },
           body,
         ),
