@@ -250,6 +250,53 @@ describe('items', () => {
     assert.equal(new Set(seen).size, 12, 'all twelve, none twice');
   });
 
+  it('carries the narrowing through every page, not just the first', async () => {
+    // The paging tests above walk everything. This one walks a subset, which
+    // is the case a cursor gets wrong differently: built from the unfiltered
+    // query, page two arrives with rows the caller filtered out and without
+    // the ones it asked for, and the caller has no way to tell. The column
+    // filter has been lost through a read here before.
+    const project = await createProject(harness, 'narrowed');
+    for (let n = 0; n < 30; n += 1) {
+      await post(project, '/items', {
+        slug: n % 3 === 0 ? `ops:row-${n}` : `docs:row-${n}`,
+        title: `row ${n}`,
+        actor: 'importer',
+        status: n % 5 === 0 ? 'blocked' : 'open',
+        labels: n % 2 === 0 ? ['even'] : ['odd'],
+      });
+    }
+
+    const walk = async (query: string, limit: number): Promise<string[]> => {
+      const seen: string[] = [];
+      let cursor: string | null = null;
+      let pages = 0;
+      do {
+        const page: { items: Array<{ slug: string }>; next_cursor: string | null } = (
+          await get(project, `/items?limit=${limit}${query}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`)
+        ).json();
+        seen.push(...page.items.map((item) => item.slug));
+        cursor = page.next_cursor;
+        pages += 1;
+        assert.ok(pages < 20, `the cursor has to end, not loop: ${query}`);
+      } while (cursor);
+      return seen;
+    };
+
+    for (const [query, expected] of [
+      ['&prefix=ops:', 10],
+      ['&label=even', 15],
+      ['&status=blocked', 6],
+      // Odd rows that are not every third one: fifteen minus the five that are both.
+      ['&prefix=docs:&label=odd', 10],
+      ['&order=recent&label=even', 15],
+    ] as [string, number][]) {
+      const seen = await walk(query, 4);
+      assert.equal(seen.length, expected, `${query} came back whole: ${seen.length}`);
+      assert.equal(new Set(seen).size, expected, `${query} came back once each`);
+    }
+  });
+
   it('refuses a cursor from the other order instead of quietly restarting', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'one', title: 'one', actor: 'a' });
