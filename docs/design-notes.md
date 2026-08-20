@@ -2422,3 +2422,12 @@ The lesson is older than the number: a published cost needs its units. This
 repository has now put out four performance sentences that were untrue in a way
 nobody checked, and this one was untrue by measuring a subset and naming it
 "queries".
+
+**A probe that found nothing, worth the line it takes to say so.** The document
+promises an unclaimed project is deleted with all its data. Checked against
+production by listing every collection rather than the ones remembered, finding
+the field that names a project in each, and comparing against the projects that
+exist: fourteen collections, six of them carrying a project id, zero orphaned
+rows, and no project past its expiry still present. The counters agree with the
+board too: twenty projects, and `counts.items` matches a count of the
+non-terminal items in every one of them.
