@@ -294,6 +294,16 @@ MONGODB_URI=mongodb://127.0.0.1:27017 MONGODB_DB=muster BASE_URL=http://localhos
 A self-hosted instance behind a VPN has no reason to throttle its own fleet;
 that is what the limit variables are for.
 
+One thing differs on a single `mongod`. Revoking an admin key has to count the
+others in the same breath, or two revocations arriving together each count the
+other as the key that is left and the project ends with none. On a replica set,
+which is what every Atlas cluster is, that happens in a transaction. On a
+standalone there is none to start, so the check runs first and the write after,
+and the refusal that matters is unaffected: the last admin key is still refused,
+and only two revocations overlapping to the millisecond can slip between them.
+If that matters to your deployment, start `mongod` with `--replSet` and initiate
+a one node set.
+
 ## Tests
 
 ```bash

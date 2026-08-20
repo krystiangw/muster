@@ -1740,8 +1740,18 @@ every test file on one took the suite from 55 seconds to 91. Worker keys are
 nobody's way back in, so revoking one holds no invariant and takes no
 transaction, and that alone put four of the five affected files back on a plain
 `mongod`. The one file that revokes admin keys asks for a replica set; the suite
-is back to 54 seconds. Atlas, including the free tier, is a replica set already,
-and the runbook now proves it with a read-only transaction rather than assuming.
+is back to 54 seconds.
+
+**And the deployments that have no transaction to give.** The self-hosting
+instructions in the README start a single `mongod`, and review caught what this
+did to them: every admin-key revocation answered 500, which our own suite then
+reproduced the moment a test asked that door for a 409. Refusing the call there
+would take credential rotation away from the deployments least able to spare it,
+so a standalone falls back to counting first and writing after. That loses the
+race and only the race, the refusal that matters is unchanged, and the README
+says so rather than leaving it to be found. It is also not an untested path:
+every test file but one runs on a standalone, so the fallback is the branch most
+of the suite exercises, and the file on a replica set covers the other.
 
 The race test forces its own interleaving, holding both calls at their first
 read until the other has arrived, so the two transactions are open over each

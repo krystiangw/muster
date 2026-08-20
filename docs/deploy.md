@@ -26,10 +26,12 @@ Create a free M0 cluster in an EU region, a database user for Muster only, and
 allow the Heroku egress range or `0.0.0.0/0` with a strong password. Take the
 connection string.
 
-It has to be a replica set, which every Atlas cluster including M0 already is.
-One call needs a transaction: revoking an admin key has to count the others in
-the same breath, and a standalone `mongod` refuses to start one. Verified
-against this deployment rather than assumed, with a read-only transaction:
+Every Atlas cluster including M0 is a replica set, which one call here wants:
+revoking an admin key has to count the others in the same breath, and that is a
+transaction. A standalone answers the same refusals through a fallback that
+counts first and writes after, which loses nothing except the case of two admin
+revocations overlapping. Verify this deployment has the transaction rather than
+assuming it, with a read-only one:
 
 ```bash
 node --input-type=module -e '

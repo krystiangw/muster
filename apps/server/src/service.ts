@@ -1,3 +1,4 @@
+import type { ClientSession } from 'mongodb';
 import type { Config } from './config.js';
 import type { Store } from './db.js';
 import { record, type EventDoor } from './events.js';
@@ -3358,8 +3359,7 @@ export async function revokeApiKey(
     throw new ServiceError(404, 'not_found', `No active key ${keyId} in this project.`);
   }
   // A worker key is nobody's way back in, so revoking one answers to nothing
-  // but itself: no invariant to hold, and no transaction, which is also what
-  // keeps this call working against a database that has none.
+  // but itself: no invariant to hold, and no transaction.
   if (found.role !== 'admin') {
     await store.keys.updateOne(
       { projectId, _id: keyId, revokedAt: null },
@@ -3377,38 +3377,77 @@ export async function revokeApiKey(
       if (!key) {
         throw new ServiceError(404, 'not_found', `No active key ${keyId} in this project.`);
       }
-
-      await store.projects.updateOne(
-        { _id: projectId },
-        { $inc: { adminEpoch: 1 } },
-        { session },
-      );
-      // A key that has run out is not a way back in, so it does not count as
-      // the one that is left.
-      const others = await store.keys.countDocuments(
-        {
-          projectId,
-          _id: { $ne: keyId },
-          role: 'admin',
-          revokedAt: null,
-          $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }],
-        },
-        { session },
-      );
-      if (others === 0) {
-        throw new ServiceError(
-          409,
-          'last_admin_key',
-          'That is the only admin key this project has left, and revoking it would shut every door: making a key needs an admin key, so nothing here could make the next one. Create the replacement first, then revoke this one. Nothing was changed.',
-        );
-      }
+      await store.projects.updateOne({ _id: projectId }, { $inc: { adminEpoch: 1 } }, { session });
+      await lastWayIn(store, projectId, keyId, session);
       await store.keys.updateOne(
         { projectId, _id: keyId, revokedAt: null },
         { $set: { revokedAt: new Date() } },
         { session },
       );
     });
+  } catch (error) {
+    if (!withoutTransactions(error)) throw error;
+    /**
+     * A database that cannot start one, which the self-hosting instructions
+     * describe: a single `mongod` is not a replica set.
+     *
+     * Refusing the call here would take credential rotation away from exactly
+     * the deployments least able to spare it, and answering 500 is what this
+     * did before the fallback existed, measured in our own suite. So it does
+     * the best a single document at a time allows: the count, then the write.
+     * What is lost is the race, and only the race. Two admin revocations
+     * overlapping on such a deployment can still each count the other as the
+     * key that is left, which the runbook says out loud rather than leaving it
+     * to be discovered.
+     *
+     * Not an untested path: the whole suite except one file runs on a
+     * standalone, so this is the branch most of it exercises.
+     */
+    await lastWayIn(store, projectId, keyId);
+    await store.keys.updateOne(
+      { projectId, _id: keyId, revokedAt: null },
+      { $set: { revokedAt: new Date() } },
+    );
   } finally {
     await session.endSession();
   }
+}
+
+/** What the driver says when the deployment has no transactions to give. */
+function withoutTransactions(error: unknown): boolean {
+  const said = error instanceof Error ? error.message : String(error);
+  return (
+    said.includes('Transaction numbers are only allowed on a replica set member or mongos') ||
+    said.includes('Transactions are not supported')
+  );
+}
+
+/**
+ * Refuses when this key is the only way back into the project.
+ *
+ * A key that has run out is not a way back in, so it does not count as the one
+ * that is left.
+ */
+async function lastWayIn(
+  store: Store,
+  projectId: string,
+  keyId: string,
+  session?: ClientSession,
+): Promise<void> {
+  const others = await store.keys.countDocuments(
+    {
+      projectId,
+      _id: { $ne: keyId },
+      role: 'admin',
+      revokedAt: null,
+      $or: [{ expiresAt: null }, { expiresAt: { $gt: new Date() } }],
+    },
+    session ? { session } : {},
+  );
+  if (others > 0) return;
+  throw new ServiceError(
+    409,
+    'last_admin_key',
+    'That is the only admin key this project has left, and revoking it would shut every door: making a key needs an admin key, so nothing here could make the next one. Create the replacement first, then revoke this one. Nothing was changed.',
+  );
 }

@@ -1945,6 +1945,17 @@ describe('the map every refusal points at', () => {
         code: 415,
       },
       { method: 'POST', url: '/p', path: '/p', payload: '<p/>', headers: { 'content-type': 'application/xml' }, code: 415 },
+      // The refusal that is not "somebody got there first": this project's only
+      // admin key, which cannot go because making the next one needs it. Worker
+      // keys are not refused, so this is the one pair that proves the door
+      // answers 409 at all.
+      {
+        method: 'DELETE',
+        url: `${project.api}/keys/${(await harness.server.inject({ method: 'GET', url: `${project.api}/keys`, headers: reading })).json().keys[0].id}`,
+        path: '/v1/{project}/keys/{id}',
+        headers: reading,
+        code: 409,
+      },
       // A write that declares no body schema of its own, and a DELETE. Both
       // answer 415 all the same, which is why the map derives it from the
       // method rather than from whether a body is documented.

@@ -240,6 +240,12 @@ const NOT_FOUND = new Set([
 // guarded write instead, and answers 200.
 const CONFLICTS = new Set(['post /v1/{project}/items/{slug}/claim']);
 
+// Also one, and a different kind of 409: not somebody got there first, but what
+// you asked for cannot be true. Revoking the last admin key would leave nothing
+// that can make the next one, so the answer is a plain refusal rather than the
+// lease's shape, which returns the card with it.
+const IMPOSSIBLE = new Set(['delete /v1/{project}/keys/{id}']);
+
 const REFUSAL_SAYS: Record<string, string> = {
   '400': 'The request was not understood, and the message says which part. A parameter this endpoint does not have, a value of the wrong shape, or a field outside its set.',
   '401': 'No token, or one that is unknown or revoked. Get one from POST /p.',
@@ -673,6 +679,13 @@ export async function buildApp(
             ...(NOT_FOUND.has(key) ? ['404'] : []),
           ];
           for (const code of codes) responses[code] ??= refusal(code);
+          if (IMPOSSIBLE.has(key)) {
+            responses['409'] ??= {
+              description:
+                'The last admin key this project has, which cannot go because making a key needs one; or one of two admin revocations arriving at once, since each would count the other as the key that is left.',
+              content: { 'application/json': { schema: { $ref: '#/components/schemas/Refusal' } } },
+            };
+          }
           if (CONFLICTS.has(key)) {
             // Two shapes, because there are two ways to lose a lease and they
             // are not the same news. Somebody holding it is described: the
