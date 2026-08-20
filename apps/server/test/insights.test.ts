@@ -529,6 +529,40 @@ describe('counting the people, not the agents', () => {
     assert.equal((await insights(harness.store)).pages.signup ?? 0, before + 1);
   });
 
+  it('says which form refused, and how many rows are older than the question', async () => {
+    // The count of refusals exists to tell two things apart: somebody probing
+    // our forms, and this service refusing pages it served itself. Measured on
+    // production the day this was written, it could tell neither: forty two
+    // rows, all of them from before our own morning runs were marked, none of
+    // them carrying a route.
+    await flushEvents();
+    const before = await insights(harness.store);
+    const project = await createProject(harness, 'refusing');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    const refused = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/note`,
+      payload: 'slug=whatever&note=from+somewhere+else',
+      headers: {
+        'content-type': 'application/x-www-form-urlencoded',
+        'sec-fetch-site': 'cross-site',
+      },
+    });
+    assert.equal(refused.statusCode, 403);
+    await flushEvents();
+
+    const after = await insights(harness.store);
+    assert.equal(
+      (after.refusedRoutes['/r/:readToken/board/note'] ?? 0) - (before.refusedRoutes['/r/:readToken/board/note'] ?? 0),
+      1,
+      'the pattern, which carries no token, unlike the address it came from',
+    );
+    assert.ok(
+      !Object.keys(after.refusedRoutes).some((route) => route.includes(readToken)),
+      'and nothing here is a live capability',
+    );
+  });
+
   it('counts a page an agent read beside the ones people read, not inside them', async () => {
     // The filter that was supposed to tell them apart named curl and wget and
     // nothing else, so a script written with the HTTP client agents actually

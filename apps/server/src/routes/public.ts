@@ -1733,7 +1733,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     // stays at zero until either somebody probes us or we break our own forms.
     // The reason is one of three fixed words; the origin itself is caller
     // supplied and never stored.
-    record(store, 'refused', { door: 'browser', detail: verdict.reason });
+    record(store, 'refused', { door: 'browser', detail: verdict.reason, route: request.routeOptions?.url ?? null });
     void reply
       .code(403)
       .type('text/html; charset=utf-8')

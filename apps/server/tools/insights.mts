@@ -423,8 +423,32 @@ if (answerDoorRows.length > 0) {
 // decision in docs/design-notes.md was deferred on.
 const refusedRows = Object.entries(report.behaviour.refusedForms).sort((a, b) => b[1] - a[1]);
 console.log('\nRefused, by reason');
-row('all of them', refusedRows.reduce((total, [, n]) => total + n, 0));
+const refusedTotal = refusedRows.reduce((total, [, n]) => total + n, 0);
+row('all of them', refusedTotal);
 for (const [reason, n] of refusedRows) row(`  ${reason}`, n);
+// The same shape as the board views above, and for the same reason: a number
+// that is mostly an artefact has to say so where it is read. Our own
+// walkthrough posts a form from another origin every morning to prove the
+// guard is still there, and until those runs were marked they landed here
+// looking exactly like somebody probing us.
+if (report.refusedBeforeWeMarkedOurOwn > 0) {
+  console.log(
+    `  ${' '.repeat(28)} ${String(`of those, ${report.refusedBeforeWeMarkedOurOwn} from before our own runs were marked`).padStart(7)}`,
+  );
+}
+// Which form, for the rows that carry one. The reason alone cannot tell
+// probing from this service refusing pages it served itself, and the rows
+// written before the route was recorded say so rather than being dropped:
+// leaving them out would make an old number look like a new one.
+const refusedWhere = Object.entries(report.refusedRoutes)
+  .filter(([route]) => route !== 'not recorded')
+  .sort((a, b) => b[1] - a[1]);
+if (refusedWhere.length > 0) {
+  console.log('  which form');
+  for (const [route, n] of refusedWhere.slice(0, 5)) row(`    ${route}`, n);
+  const older = report.refusedRoutes['not recorded'] ?? 0;
+  if (older > 0) row('    older than this column', older);
+}
 // Printed at zero as well, unlike the rest, because this one is a trigger
 // somebody wrote down and a row that is simply absent reads as unreported.
 // Zero here is zero in the window these rows live in, not zero ever: they

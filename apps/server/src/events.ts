@@ -238,6 +238,18 @@ export interface EventDoc {
    */
   crawler?: boolean;
   /**
+   * Which route refused, on `refused` events, as the pattern rather than the
+   * address.
+   *
+   * The count of refusals exists to tell two things apart: somebody probing
+   * our forms from outside, and this service refusing pages it served itself,
+   * which it did for a night once. Without the route it can tell them apart
+   * only in the aggregate, which is to say not at all: forty two refusals with
+   * no route is the same number either way. The pattern carries no token,
+   * unlike the address it came from, which is why it is this and not the URL.
+   */
+  route?: string;
+  /**
    * The host that sent a visitor here, on `view` events, and only ever a host:
    * no path, no query string, no full URL. It is the one thing our own
    * counting could not answer and a third-party script could, and the reason
@@ -371,6 +383,7 @@ export function record(
     crawler?: boolean;
     from?: string | null;
     ours?: boolean;
+    route?: string | null;
   } = {
     door: 'http',
   },
@@ -386,6 +399,7 @@ export function record(
     projectId: options.projectId ?? null,
     ...(options.crawler === undefined ? {} : { crawler: options.crawler }),
     ...(options.from ? { from: options.from } : {}),
+    ...(options.route ? { route: options.route } : {}),
     // Written only when true, so the field means "known to be ours" and its
     // absence is not a claim about a request nobody was watching.
     ...((options.ours ?? reader.getStore()?.ours) ? { ours: true } : {}),
@@ -617,6 +631,19 @@ export interface Insights {
    * very different explanations, and this is the number that tells them apart.
    */
   handoverRequests: number;
+  /**
+   * Refusals counted as strangers only because nothing was marked yet.
+   *
+   * Our own walkthrough posts a form from another origin every morning, on
+   * purpose, to prove the guard is still there, and each run leaves a row that
+   * reads exactly like somebody probing us. Marking those started on a day;
+   * everything before it is in the stranger column whatever it was, and on the
+   * measurement that found this the whole stranger column was older than the
+   * marking while every refusal since had been ours.
+   */
+  refusedBeforeWeMarkedOurOwn: number;
+  /** Which route refused, for the rows that carry one. */
+  refusedRoutes: Record<string, number>;
   doors: Record<string, number>;
   /**
    * Which door a human answered a question through.
@@ -831,6 +858,7 @@ export async function insights(store: Store, now = new Date()): Promise<Insights
     answered,
     hygieneClosed,
     refusedRows,
+    refusedRouteRows,
     answerDoorRows,
     busiest,
   ] = await Promise.all([
@@ -923,6 +951,17 @@ export async function insights(store: Store, now = new Date()): Promise<Insights
         { $sort: { count: -1 } },
       ])
       .toArray(),
+    // Which form, for the rows that carry one, and strangers only for the same
+    // reason. The reason on its own cannot tell probing from this service
+    // refusing pages it served itself, which is the whole question.
+    store.events
+      .aggregate<{ _id: string | null; count: number }>([
+        { $match: { kind: 'refused', ours: { $ne: true } } },
+        { $group: { _id: '$route', count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+      ])
+      .toArray(),
+
     // Owned boards only, same condition as the median above, and here it is
     // load bearing rather than tidy: this split exists to say whether people
     // answer from the link the mail sends them or from the page they sign in
@@ -942,6 +981,23 @@ export async function insights(store: Store, now = new Date()): Promise<Insights
       .limit(5)
       .toArray(),
   ]);
+
+  /**
+   * Refusals that are in the stranger column only because nothing was marked
+   * yet.
+   *
+   * A second round trip rather than a line in the batch above, because it
+   * needs the answer to one of those questions: when the first thing was
+   * marked as ours. Cheap, and this report is read by a person at a terminal.
+   */
+  const refusedEarly =
+    firstMarked === undefined || firstMarked === null
+      ? 0
+      : await store.events.countDocuments({
+          kind: 'refused',
+          ours: { $ne: true },
+          at: { $lt: firstMarked.at },
+        });
 
   // An empty database groups to no rows at all, which is a shape rather than a
   // number, so it is turned into zeroes once here instead of at every use.
@@ -978,6 +1034,8 @@ export async function insights(store: Store, now = new Date()): Promise<Insights
       since: firstMarked?.at ?? null,
     },
     handoverRequests: asked[0]?.n ?? 0,
+    refusedBeforeWeMarkedOurOwn: refusedEarly,
+    refusedRoutes: Object.fromEntries(refusedRouteRows.map((row) => [row._id ?? 'not recorded', row.count])),
     doors: Object.fromEntries(doorRows.map((row) => [row._id, row.count])),
     answerDoors: Object.fromEntries(answerDoorRows.map((row) => [row._id, row.count])),
     pages: Object.fromEntries(pageRows.map((row) => [row._id, row.count])),

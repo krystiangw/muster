@@ -82,7 +82,7 @@ export function registerOperator(app: FastifyInstance, deps: OperatorDeps): void
   const ownWrite = (request: FastifyRequest, session: OperatorSession): void => {
     const verdict = fromOurPage(request, ourOrigin);
     if (!verdict.ok) {
-      record(store, 'refused', { door: 'browser', detail: verdict.reason });
+      record(store, 'refused', { door: 'browser', detail: verdict.reason, route: request.routeOptions?.url ?? null });
       throw new ServiceError(
         403,
         'bad_origin',
