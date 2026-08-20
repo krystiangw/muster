@@ -1875,6 +1875,13 @@ export async function circleBack(
   projectId: string,
   own: string,
   waitingOn: string[],
+  /**
+   * The ceiling, as a parameter so a test can build a graph it can afford. A
+   * bound nobody can reach in a test is a bound nobody has measured, and this
+   * one has now been wrong twice: once by being checked in the wrong place,
+   * and once by throwing away candidates it had not paid for.
+   */
+  budgetStart = CIRCLE_BUDGET,
 ): Promise<string[] | null> {
   const parent = new Map<string, string>();
   // The cards this one would wait on are visited, not merely queued. Left out
@@ -1887,7 +1894,7 @@ export async function circleBack(
   // a circle, which is exactly the data this walk is asked about.
   const seen = new Set<string>([own, ...waitingOn]);
   let frontier = waitingOn.filter((slug) => slug !== own);
-  let budget = CIRCLE_BUDGET;
+  let budget = budgetStart;
 
   // The chain reads the way somebody would say it out loud: this card, then
   // each card it ends up waiting on, then this card again.
@@ -1912,7 +1919,15 @@ export async function circleBack(
     // Bounded on the way in as well as on the way out. A level wider than the
     // budget would otherwise be read whole and walked whole, which is the
     // ceiling this constant exists to hold not being held.
+    //
+    // What is not asked this round is carried rather than dropped. The budget
+    // counts cards read, and a slug nobody ever filed costs nothing to ask
+    // about: cutting the level at the slice threw away candidates the walk had
+    // the budget for, and a circle sitting behind one of them was allowed
+    // through while the ceiling went unspent. Carried in front of the level
+    // below, so the order is still breadth first.
     const asking = frontier.slice(0, budget);
+    const carried = frontier.slice(budget);
     const rows = (await store.items
       .find({ projectId, slug: { $in: asking } }, { projection: { slug: 1, blockedBy: 1 } })
       .toArray()) as Array<Pick<ItemDoc, 'slug' | 'blockedBy'>>;
@@ -1928,7 +1943,7 @@ export async function circleBack(
         next.push(waits);
       }
     }
-    frontier = next;
+    frontier = [...carried, ...next];
   }
   return null;
 }

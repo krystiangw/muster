@@ -2321,3 +2321,17 @@ pair of cards. The way circles actually arise is two agents minutes apart, and
 those are refused. What covers the rest is detection rather than prevention:
 the repair pass already reads every card that waits on anything, and there are
 two of them in the whole production database. That is filed as its own card.
+
+**The ceiling was wrong a second time, in the other direction.** Cutting the
+level at the budget threw away candidates the walk had not paid for: a slug
+nobody ever filed costs no card to ask about, so a wide level of mostly missing
+names could return nothing, drop everything behind them, and let a circle
+through while the ceiling went unspent. What is not asked is now carried in
+front of the level below, so the order stays breadth first and the budget is
+spent on cards that exist.
+
+The bound is a parameter now, defaulting to the constant, because a ceiling
+nobody can reach in a test is a ceiling nobody has measured: the earlier test
+built eight hundred and twenty cards to touch it once, and could say nothing
+about what happens at the edge. Three cards of budget against a level of five,
+four of them missing, says it in a line.

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { circleBack } from '../src/service.js';
 import { after, before, describe, it } from 'node:test';
 import { RATE_LIMIT_SCOPES } from '../src/config.js';
 import { agentAccessJson } from '../src/content.js';
@@ -3586,6 +3587,45 @@ describe('cards waiting on each other', () => {
     const refused = await post(project, '/items', { slug: 'c', blocked_by: ['a'], actor: 'x' });
     assert.equal(refused.statusCode, 400, refused.body);
     assert.deepEqual(refused.json().circle, ['c', 'a', 'b', 'c']);
+  });
+
+  it('spends its whole budget before giving up, however many names are missing', async () => {
+    const project = await createProject(harness);
+    // A level wider than the budget, mostly made of slugs nobody ever filed.
+    // Asking about a name that is not there costs no card, so cutting the
+    // level at the budget threw away candidates the walk could still afford,
+    // and a circle sitting behind one of them went in while the ceiling went
+    // unspent. The budget is a parameter here for exactly this: a bound
+    // nobody can reach in a test is a bound nobody has measured.
+    await post(project, '/items', { slug: 'far', title: 'far', actor: 'x' });
+    await post(project, '/items', { slug: 'own', title: 'own', actor: 'x' });
+    await post(project, '/items', { slug: 'far', blocked_by: ['own'], actor: 'x' });
+
+    const frontier = ['gone-1', 'gone-2', 'gone-3', 'gone-4', 'far'];
+    const found = await circleBack(harness.store, project.id, 'own', frontier, 3);
+    assert.deepEqual(found, ['own', 'far', 'own'], 'the fifth name was still worth asking about');
+
+    // And the ceiling is still a ceiling: cards that exist do cost budget.
+    for (const [slug, waits] of [
+      ['c1', ['c2']],
+      ['c2', ['c3']],
+      ['c3', ['own']],
+    ] as [string, string[]][]) {
+      await post(project, '/items', { slug, title: slug, actor: 'x' });
+      await post(project, '/items', { slug, blocked_by: waits, actor: 'x' });
+    }
+    assert.equal(
+      await circleBack(harness.store, project.id, 'own', ['c1'], 2),
+      null,
+      'two cards of budget does not reach a circle three cards away',
+    );
+    assert.deepEqual(await circleBack(harness.store, project.id, 'own', ['c1'], 3), [
+      'own',
+      'c1',
+      'c2',
+      'c3',
+      'own',
+    ]);
   });
 
   it('stops walking a wide graph rather than reading all of it', { timeout: 30_000 }, async () => {
