@@ -192,9 +192,11 @@ async function readableBy(
 function noSuchProject(request: FastifyRequest): string {
   return page(request, { title: 'No such project' },
     `<h1>No such project</h1>
-     <p>That link is wrong, or the project expired and was deleted.</p>
-     <p>If you believe it is yours, <a href="/operator">sign in</a>: a project can be narrowed to
-     its owner, and then the link alone no longer opens it.</p>`,
+     <p>That link is wrong, or the project expired and was deleted, or it is private. All three
+     read the same from here, on purpose.</p>
+     <p>If you believe it is yours, <a href="/operator">sign in</a>: a board is private from the
+     moment somebody claims it, and then the link alone opens it for nobody but its owner and the
+     addresses they named.</p>`,
   );
 }
 
