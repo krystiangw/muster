@@ -25,7 +25,7 @@
  */
 import { MongoClient } from 'mongodb';
 import { MongoMemoryServer } from 'mongodb-memory-server';
-import { createStore } from '../src/db.js';
+import { createStore, indexShape } from '../src/db.js';
 
 const uri = process.env.MONGODB_URI;
 const dbName = process.env.MONGODB_DB || 'muster';
@@ -35,32 +35,13 @@ if (!uri) {
 }
 
 /**
- * Everything about an index that a promise can rest on.
+ * Everything about an index that a promise can rest on, asked of the same
+ * function the boot asks.
  *
- * The name is deliberately not part of it: a renamed index keeps every promise,
- * and comparing names would report a difference nobody has to act on. That is
- * only true because `ensure` in db.ts drops the index it finds by the name it
- * is actually under rather than the one being asked for; before that it was
- * false, and a rename left a database the next boot could not start against.
- * What matters is the keys, and the flags that turn keys into a guarantee.
+ * Two answers to "is this the same index" is exactly how a checker certifies a
+ * database that the next start cannot come up against, so there is one.
  */
-const shape = (index: Record<string, unknown>): string =>
-  [
-    JSON.stringify(index.key),
-    index.unique ? 'unique' : '',
-    index.expireAfterSeconds === undefined ? '' : `ttl=${String(index.expireAfterSeconds)}`,
-    index.partialFilterExpression ? `partial=${JSON.stringify(index.partialFilterExpression)}` : '',
-    index.sparse ? 'sparse' : '',
-    // Two that a comparison on keys alone would call identical while the
-    // database treats them as different things. A hidden index is invisible to
-    // the planner, so every query it was built for goes back to a scan; a
-    // collation changes what counts as a duplicate, which is the whole content
-    // of a unique index.
-    index.hidden ? 'hidden' : '',
-    index.collation ? `collation=${JSON.stringify(index.collation)}` : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
+const shape = indexShape;
 
 async function indexesOf(connection: string, database: string): Promise<Map<string, Set<string>>> {
   const client = await MongoClient.connect(connection);

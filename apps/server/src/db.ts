@@ -419,6 +419,33 @@ export async function runMigrations(store: Store): Promise<void> {
 /** The two ways MongoDB says "that name is taken by a different index". */
 const INDEX_CONFLICT = new Set([85, 86]);
 
+/**
+ * What makes two indexes the same index, for the one purpose of deciding
+ * whether one stands in the way of the other.
+ *
+ * The name is not part of it, and everything the database treats as a
+ * difference is: a hidden index is invisible to the planner, a collation
+ * changes what counts as a duplicate, and two indexes on one key with
+ * different partial filters are two indexes MongoDB is happy to hold at once.
+ *
+ * Exported because `tools/index-drift.mts` asks the same question of a running
+ * deployment, and two answers to "is this the same index" is how a checker ends
+ * up certifying a database the boot cannot start against.
+ */
+export function indexShape(index: Record<string, unknown>): string {
+  return [
+    JSON.stringify(index.key),
+    index.unique ? 'unique' : '',
+    index.expireAfterSeconds === undefined ? '' : `ttl=${String(index.expireAfterSeconds)}`,
+    index.partialFilterExpression ? `partial=${JSON.stringify(index.partialFilterExpression)}` : '',
+    index.sparse ? 'sparse' : '',
+    index.hidden ? 'hidden' : '',
+    index.collation ? `collation=${JSON.stringify(index.collation)}` : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+}
+
 interface IndexedCollection {
   createIndexes: (specs: IndexDescription[]) => Promise<unknown>;
   dropIndex: (name: string) => Promise<unknown>;
@@ -457,12 +484,18 @@ async function ensure(collection: IndexedCollection, specs: IndexDescription[]):
       // Either way the process never finishes booting, which is the failure
       // this whole function exists to prevent.
       const live = await collection.indexes().catch(() => []);
-      const wanted = JSON.stringify(spec.key);
+      const wanted = indexShape(spec as unknown as Record<string, unknown>);
       const blocking = new Set<string>();
       for (const one of live) {
         const name = typeof one.name === 'string' ? one.name : '';
         if (!name || name === '_id_') continue;
-        if (name === spec.name || JSON.stringify(one.key) === wanted) blocking.add(name);
+        // The name being asked for, whatever is under it, and an index that is
+        // already this one under another name. Not every index on the same
+        // key: MongoDB is content to hold two of those when their options
+        // differ, so a partial index somebody built by hand for a slow query
+        // is theirs to keep, and dropping it here would be this function
+        // helping itself to the database on the way past.
+        if (name === spec.name || indexShape(one) === wanted) blocking.add(name);
       }
       for (const name of blocking) await collection.dropIndex(name).catch(() => undefined);
       await collection.createIndexes([spec]);

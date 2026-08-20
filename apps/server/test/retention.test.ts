@@ -254,6 +254,40 @@ describe('starting against a database that has run another version', () => {
     assert.equal((byKey[0] as { unique?: boolean }).unique, true, 'and it is still the unique one');
   });
 
+  it('leaves alone an index somebody built by hand that the database is happy to keep', async () => {
+    // Two indexes on one key coexist when their options differ, so a partial
+    // one built for a slow query is not in anybody's way. The recovery drops
+    // what blocks it, and helping itself to the rest on the way past would be
+    // this function quietly undoing somebody's work in production.
+    const { createStore } = await import('../src/db.js');
+    const items = harness.store.items;
+    const declared = (await items.indexes()).find(
+      (one) => JSON.stringify(one.key) === '{"projectId":1,"slug":1}',
+    ) as { name: string };
+
+    await items.createIndex(
+      { projectId: 1, slug: 1 },
+      { name: 'by_hand_for_a_slow_query', partialFilterExpression: { status: 'open' } },
+    );
+    // And a rename, so the recovery path actually runs.
+    await items.dropIndex(declared.name);
+    await items.createIndex({ projectId: 1, slug: 1 }, { name: 'renamed', unique: true });
+
+    const second = await createStore(harness.config.mongoUri, harness.config.mongoDb);
+    await second.client.close();
+
+    const after = await items.indexes();
+    assert.ok(
+      after.some((one) => one.name === 'by_hand_for_a_slow_query'),
+      'the hand-built one is still there',
+    );
+    assert.ok(
+      after.some((one) => one.name === declared.name && (one as { unique?: boolean }).unique),
+      'and the declared one is back under its own name',
+    );
+    await items.dropIndex('by_hand_for_a_slow_query');
+  });
+
   it('starts when the name and the key are blocked by different indexes at once', async () => {
     // The harder half. Something else holds the name being asked for, and the
     // key being asked for sits under another name. Resolving only one of them
