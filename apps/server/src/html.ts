@@ -284,6 +284,26 @@ button, .btn { font:inherit; font-size:14.5px; font-weight:560; padding:9px 16px
 .btn:hover { color:var(--bg); text-decoration:none; }
 button.ghost, .btn.ghost { background:transparent; color:var(--accent); }
 .btn.ghost:hover { color:var(--accent); }
+/* A row of a list, rather than a thing to press on a page. The operator's
+   project list stacked four block level actions per project and spent a
+   screenful on two boards; at ten it is a scroll before the first number.
+   Same appearance, less of it. */
+button.tight, .btn.tight { font-size:13px; padding:2px 8px; font-weight:500; }
+.doing { display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; }
+.doing form { display:inline; margin:0; }
+/* One line, whatever somebody wrote. A description is worth showing and is
+   never worth three lines of a list: the whole of it is in the title. */
+/* Folded away until wanted. A control that is empty on most rows still costs
+   the width of its own word, so it costs one word. */
+.sharing > summary { cursor:pointer; color:var(--accent); font-size:13px; list-style:none; }
+.sharing > summary::-webkit-details-marker { display:none; }
+.shared-with { display:flex; flex-direction:column; gap:4px; margin-top:6px; }
+.shared-with form { display:flex; align-items:center; gap:6px; }
+.shared-with input { font:inherit; font-size:13px; padding:2px 6px; border:1px solid var(--rule);
+  border-radius:3px; background:var(--bg); color:var(--ink); }
+.shared-with .note { color:var(--muted); font-size:12.5px; margin:0; }
+.one-line { display:block; max-width:52ch; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  color:var(--ink-2); font-size:13.5px; }
 /* board */
 /* Prose wants 66 characters, a board wants room, so a board page widens the
    whole column (see .wrap.wide) rather than escaping it with viewport-width

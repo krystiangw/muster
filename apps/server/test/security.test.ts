@@ -418,13 +418,22 @@ describe('what the link says about itself', () => {
     }
     // And it is true only while the board is open by link, which is the state
     // the sentence is about.
-    assert.match(docs.body, /Narrowing the project to its owner ends all of that/);
+    assert.match(docs.body, /Claiming a board ends all of that/);
+    assert.match(docs.body, /names the addresses that may read it beside/, 'and says what replaces it');
   });
 
   it('tells the reader what the address in their hand can do', async () => {
     const project = await createProject(harness, 'open by link');
     const readToken = project.readUrl.split('/r/')[1]!;
     await claimForEmail(project, 'owner@example.com');
+    // Opened back up on purpose. A claimed board is private now, and this test
+    // is about what each of the two states says about itself.
+    await harness.server.inject({
+      method: 'PATCH',
+      url: project.api,
+      headers: authed(project),
+      payload: { visibility: 'link' },
+    });
 
     const open = await harness.server.inject({ method: 'GET', url: `/r/${readToken}` });
     assert.equal(open.statusCode, 200);
@@ -524,18 +533,29 @@ describe('a project narrowed to its owner', () => {
     assert.equal(agent.statusCode, 200);
   });
 
-  it('refuses to close a project that nobody owns', async () => {
+  it('lets a board nobody owns be private without locking anybody out of it', async () => {
+    // This used to be refused, on the grounds that narrowing a board to an
+    // owner it does not have would lock out everybody including the agent that
+    // made it. That is no longer what happens: a board with no owner has
+    // nobody to be private from, so the read link keeps working until somebody
+    // claims it and the privacy starts there. Which is also what every new
+    // board now says about itself, and one door refusing what the other does
+    // at creation would be two answers to one question.
     const project = await createProject(harness, 'ownerless');
+    const readToken = project.readUrl.split('/r/')[1]!;
     const attempt = await harness.server.inject({
       method: 'PATCH',
       url: project.api,
       headers: authed(project),
       payload: { visibility: 'owner' },
     });
-    // Closing it to an owner it does not have would lock out everybody,
-    // including the agent that just created it.
-    assert.equal(attempt.statusCode, 400);
-    assert.equal(attempt.json().error, 'not_claimed');
+    assert.equal(attempt.statusCode, 200);
+    assert.equal((await harness.store.projects.findOne({ _id: project.id }))?.visibility, 'owner');
+    assert.equal(
+      (await harness.server.inject({ method: 'GET', url: `/r/${readToken}` })).statusCode,
+      200,
+      'and the one way anybody could claim it still opens',
+    );
   });
 });
 
@@ -992,6 +1012,14 @@ describe('a read link can ask for a project and never take one', () => {
     const project = await createProject(harness);
     const readToken = project.readUrl.split('/r/')[1]!;
     await claimForEmail(project, 'first@example.com');
+    // Open by link, which is the state where somebody else can see the board
+    // at all. The private state is the case below.
+    await harness.server.inject({
+      method: 'PATCH',
+      url: project.api,
+      headers: authed(project),
+      payload: { visibility: 'link' },
+    });
 
     const session = await signIn(harness, 'second@example.com');
     const asked = await harness.server.inject({
@@ -1001,6 +1029,25 @@ describe('a read link can ask for a project and never take one', () => {
       headers: session.headers,
     });
     assert.equal(asked.statusCode, 409);
+    assert.equal(await harness.store.handovers.countDocuments({ projectId: project.id }), 0);
+  });
+
+  it('does not admit that a private board exists to somebody asking for it', async () => {
+    // A claimed board is private, and privacy is not a different refusal on
+    // the same door: 409 says "this exists and it is somebody else's", which
+    // is the one thing a stranger holding a link is not entitled to learn.
+    const project = await createProject(harness);
+    const readToken = project.readUrl.split('/r/')[1]!;
+    await claimForEmail(project, 'first@example.com');
+
+    const session = await signIn(harness, 'second@example.com');
+    const asked = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/handover`,
+      payload: session.form({}),
+      headers: session.headers,
+    });
+    assert.equal(asked.statusCode, 404);
     assert.equal(await harness.store.handovers.countDocuments({ projectId: project.id }), 0);
   });
 });

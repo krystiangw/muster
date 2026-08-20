@@ -187,6 +187,99 @@ describe('the operator view', () => {
     );
   });
 
+  it('makes a new board private the moment somebody owns it', async () => {
+    // A board nobody owns opens for whoever holds the link, because that link
+    // is the only way anybody could ever claim it. Claiming is what gives it
+    // somebody to be private from, and privacy starts exactly there rather
+    // than at a switch the owner has to find.
+    const project = await createProject(harness, 'fresh');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    assert.equal(
+      (await harness.store.projects.findOne({ _id: project.id }))?.visibility,
+      'owner',
+      'the board says what it is from the start',
+    );
+    const beforeAnyone = await harness.server.inject({ method: 'GET', url: `/r/${readToken}` });
+    assert.equal(beforeAnyone.statusCode, 200, 'and the link still works, or nobody could claim it');
+
+    await claimFor(project, 'owner@example.com');
+    const stranger = await harness.server.inject({ method: 'GET', url: `/r/${readToken}` });
+    assert.equal(stranger.statusCode, 404, 'and the moment it has an owner, it is theirs');
+
+    const owner = await signIn(harness, 'owner@example.com');
+    const mine = await harness.server.inject({ method: 'GET', url: `/r/${readToken}`, headers: owner.headers });
+    assert.equal(mine.statusCode, 200);
+  });
+
+  it('lets the owner name who else may read it, one address at a time', async () => {
+    const project = await createProject(harness, 'shared');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    await claimFor(project, 'owner@example.com');
+    const owner = await signIn(harness, 'owner@example.com');
+
+    const colleague = await signIn(harness, 'colleague@example.com');
+    assert.equal(
+      (await harness.server.inject({ method: 'GET', url: `/r/${readToken}`, headers: colleague.headers })).statusCode,
+      404,
+      'signed in is not the same as invited',
+    );
+
+    await harness.server.inject({
+      method: 'POST',
+      url: `/operator/projects/${project.id}/shared`,
+      payload: owner.form({ add: 'Colleague@Example.com ' }),
+      headers: owner.headers,
+    });
+    assert.deepEqual(
+      (await harness.store.projects.findOne({ _id: project.id }))?.sharedWith,
+      ['colleague@example.com'],
+      'stored the way a sign in stores it, or the same person would be two people',
+    );
+    assert.equal(
+      (await harness.server.inject({ method: 'GET', url: `/r/${readToken}`, headers: colleague.headers })).statusCode,
+      200,
+      'and now they can read it',
+    );
+    // Still nobody else, and still not the link on its own.
+    assert.equal((await harness.server.inject({ method: 'GET', url: `/r/${readToken}` })).statusCode, 404);
+
+    await harness.server.inject({
+      method: 'POST',
+      url: `/operator/projects/${project.id}/shared`,
+      payload: owner.form({ remove: 'colleague@example.com' }),
+      headers: owner.headers,
+    });
+    assert.equal(
+      (await harness.server.inject({ method: 'GET', url: `/r/${readToken}`, headers: colleague.headers })).statusCode,
+      404,
+      'and taking it back takes it back',
+    );
+  });
+
+  it('refuses to share a board with something that is not an address, or with somebody else\u2019s board', async () => {
+    const project = await createProject(harness, 'guarded');
+    await claimFor(project, 'owner@example.com');
+    const owner = await signIn(harness, 'owner@example.com');
+
+    const nonsense = await harness.server.inject({
+      method: 'POST',
+      url: `/operator/projects/${project.id}/shared`,
+      payload: owner.form({ add: 'not an address' }),
+      headers: owner.headers,
+    });
+    assert.equal(nonsense.statusCode, 400);
+    assert.deepEqual((await harness.store.projects.findOne({ _id: project.id }))?.sharedWith, []);
+
+    const somebodyElse = await signIn(harness, 'nobody@example.com');
+    const theirs = await harness.server.inject({
+      method: 'POST',
+      url: `/operator/projects/${project.id}/shared`,
+      payload: somebodyElse.form({ add: 'friend@example.com' }),
+      headers: somebodyElse.headers,
+    });
+    assert.equal(theirs.statusCode, 404, 'a board you do not own is a board that does not exist here');
+  });
+
   it('forgets a cookie that opens nothing, so the navigation stops lying', async () => {
     // The navigation is drawn from the cookie's presence and nothing else, on
     // purpose: no page reads the database to decide one word. The cost is a
@@ -252,7 +345,14 @@ describe('the operator view', () => {
     )?.[0];
     assert.ok(href, view.body.slice(view.body.indexOf('Your work'), 2000));
 
-    const board = await harness.server.inject({ method: 'GET', url: href.split('#')[0]! });
+    // With their session, which is what following a link from this page is: a
+    // claimed board is private, so the link opens for its owner and for
+    // nobody else holding it.
+    const board = await harness.server.inject({
+      method: 'GET',
+      url: href.split('#')[0]!,
+      headers: { cookie: session.cookie },
+    });
     assert.match(board.body, /class="peeked open"/, 'and the card is open when they arrive');
     assert.match(board.body, /Bridge it, or wait\?/);
   });
@@ -295,7 +395,7 @@ describe('the operator view', () => {
     )?.[0];
     assert.ok(href, view.body.slice(view.body.indexOf('Bridge it'), 1200));
 
-    const board = await harness.server.inject({ method: 'GET', url: href });
+    const board = await harness.server.inject({ method: 'GET', url: href, headers: { cookie: session.cookie } });
     assert.match(board.body, /class="peeked open"/, 'and the card is open when they arrive');
     assert.match(board.body, /Withdraws stuck/);
   });

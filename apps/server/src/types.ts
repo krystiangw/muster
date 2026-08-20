@@ -495,6 +495,16 @@ export const DEFAULT_BOARD: BoardConfig = {
  */
 export type ProjectVisibility = 'link' | 'owner';
 
+/**
+ * How many addresses one board can be shared with.
+ *
+ * A number rather than no limit, because the list lives in the project
+ * document and is read on every request to a private board. Well above a team
+ * and well below anything that would make that read expensive; a board that
+ * needs more than this wants an owner change, not another address.
+ */
+export const SHARED_WITH_MAX = 25;
+
 export type ProjectTier = 'demo' | 'free' | 'pro';
 
 export interface ProjectLimits {
@@ -528,6 +538,15 @@ export interface ProjectDoc {
   readToken: string;
   /** Absent on projects created before this existed; `link` applies. */
   visibility?: ProjectVisibility;
+  /**
+   * Addresses that may read a private board besides its owner.
+   *
+   * Lowercased, because that is what a sign in stores and comparing anything
+   * else here would make the same person two people. Empty rather than absent
+   * on anything created after sharing existed, so "nobody" and "before this
+   * was a feature" stay different states.
+   */
+  sharedWith?: string[];
   /**
    * Incremented by every admin-key revocation, and read by nothing.
    *

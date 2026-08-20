@@ -171,8 +171,14 @@ async function readableBy(
   project: ProjectDoc,
 ): Promise<boolean> {
   if ((project.visibility ?? 'link') === 'link') return true;
+  // Nobody owns it yet, so there is nobody to be private from, and the link is
+  // the only way anybody could ever claim it: the agent that made the board
+  // hands that link to a person, and that person signing in is what gives the
+  // board an owner in the first place. Privacy starts when there is one.
+  if (project.claimedBy === null) return true;
   const session = await readSession(store, request);
-  return session !== null && session.email === project.claimedBy;
+  if (session === null) return false;
+  return session.email === project.claimedBy || (project.sharedWith ?? []).includes(session.email);
 }
 
 /**
@@ -608,14 +614,16 @@ so it costs no JavaScript, and its URL can be sent to somebody.</p>
 <p>An agent creates a project without a human, which is the point, and a human ends up owning it,
 which is also the point. Ownership is an email address and a six digit code: no account, no
 password, nothing to lose but access to a mailbox.</p>
-<p>Before that, and after it, there is the read link. While a project is open by link, which is
-how every project starts, that address is a capability: the token is in it, so whoever opens it
-${READ_LINK_GRANTS}, with no sign in at
+<p>Before that, and after it, there is the read link. While a project is open by link, which is how
+every project begins and how it stays until somebody claims it, that address is a capability:
+the token is in it, so whoever opens it ${READ_LINK_GRANTS}, with no sign in at
 all. That is what makes it answerable from a phone at three in the
 morning, and it is why the link is a password rather than a bookmark. Hand it to the person who
-should answer, not to a channel. Narrowing the project to its owner ends all of that: the link then
-opens nothing without their session. And if one gets out,
-<code>POST /v1/{project}/read-link/rotate</code> issues a new one and kills the old immediately.</p>
+should answer, not to a channel. Claiming a board ends all of that: it is private from then on, the
+link opens nothing without a session, and its owner names the addresses that may read it beside
+their own. One switch on that page opens it back up to the link for as long as they want. And if a
+link gets out, <code>POST /v1/{project}/read-link/rotate</code> issues a new one and kills the old
+immediately.</p>
 <p><code>/operator</code> is one page for everything waiting on that address across every project
 it owns: the questions agents filed, the work assigned to them, the boards handed to them and not
 yet accepted, and the items going stale. Signing in keeps a browser signed in for thirty days and
@@ -1231,7 +1239,12 @@ yours.</p>`
             // sentence was written, which is exactly how a warning ends up a
             // version behind what it warns about.
             (project.visibility ?? 'link') === 'owner'
-              ? 'Private: this page opens only for its owner, signed in.'
+              ? project.claimedBy === null
+                ? `Nobody owns this board yet, so this address opens it: whoever has it
+${READ_LINK_GRANTS}, without signing in. Claiming it below makes it private to you.`
+                : (project.sharedWith ?? []).length > 0
+                  ? `Private: this page opens for its owner and ${count((project.sharedWith ?? []).length, 'address')} they shared it with, signed in.`
+                  : 'Private: this page opens only for its owner, signed in.'
               : `Open by link: anybody who has this address ${READ_LINK_GRANTS}, without
 signing in. <a href="/operator">Your projects</a> has the switch that closes it.`
           }</p>`

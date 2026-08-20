@@ -677,4 +677,20 @@ export async function ensureIndexes(store: Store): Promise<void> {
       { key: { expiresAt: 1 }, expireAfterSeconds: 0, name: 'ttl' },
     ]),
   ]);
+
+  /**
+   * Boards made before a board said what it was.
+   *
+   * New projects are private now, and they say so in the document rather than
+   * by leaving the field out. The ones that already existed left it out and
+   * were read as open by link, which is what their owners have been living
+   * with: flipping the meaning of an absent field would make every one of them
+   * private overnight, and the read links people have already handed out would
+   * stop working with nobody told.
+   *
+   * So the absent field is written down as what it already meant. Idempotent
+   * by construction, and it can never touch a board made after this, because
+   * those carry the field from their first millisecond.
+   */
+  await store.projects.updateMany({ visibility: { $exists: false } }, { $set: { visibility: 'link' } });
 }

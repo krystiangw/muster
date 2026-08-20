@@ -303,6 +303,13 @@ export async function createProject(
     createdAt: now,
     lastSweptAt: null,
     sweptAt: null,
+    // Private from the moment it has somebody to be private from. Written
+    // explicitly rather than left to a default, so the boards that existed
+    // before this decision keep the behaviour they were created with instead
+    // of changing meaning under their owner: the fallback below still reads
+    // `link`, and every board made from here on says what it is.
+    visibility: 'owner',
+    sharedWith: [],
     counts: { items: 0, agents: 0, escalations: 0 },
   };
   await store.projects.insertOne(project);
@@ -367,7 +374,7 @@ export async function authenticate(store: Store, token: string): Promise<AuthCon
 export async function updateProject(
   store: Store,
   projectId: string,
-  input: { name?: string; description?: string; visibility?: ProjectVisibility },
+  input: { name?: string; description?: string; visibility?: ProjectVisibility; sharedWith?: string[] },
 ): Promise<ProjectDoc> {
   const set: Record<string, unknown> = {};
   if (input.name !== undefined) {
@@ -376,21 +383,18 @@ export async function updateProject(
     set.name = name.slice(0, 120);
   }
   if (input.description !== undefined) set.description = input.description.slice(0, 500);
+  if (input.sharedWith !== undefined) set.sharedWith = input.sharedWith;
   if (input.visibility !== undefined) {
     if (input.visibility !== 'link' && input.visibility !== 'owner') {
       throw badRequest('bad_visibility', 'Visibility is "link" or "owner".');
     }
-    if (input.visibility === 'owner') {
-      const project = await store.projects.findOne({ _id: projectId });
-      if (!project?.claimedBy) {
-        // Closing a project to an owner it does not have would lock everybody
-        // out of it, including the agent that just created it.
-        throw badRequest(
-          'not_claimed',
-          'Only a project somebody owns can be narrowed to its owner. Claim it by email first, or hand it over with /share.',
-        );
-      }
-    }
+    // Narrowing a board nobody owns used to be refused, because it would have
+    // locked everybody out of it, the agent that made it included. It no
+    // longer does: a board with no owner has nobody to be private from, so the
+    // read link keeps working until somebody claims it and privacy begins
+    // there. That is also what a new board now says about itself the moment it
+    // is created, and one door refusing what the other one does at creation is
+    // two answers to one question.
     set.visibility = input.visibility;
   }
 

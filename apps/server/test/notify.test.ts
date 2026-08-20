@@ -86,6 +86,28 @@ describe('the mail an escalation sends', () => {
       assert.equal(sent[0]!.notice.question, 'Bridge it, or wait for the direct route?');
       assert.equal(sent[0]!.notice.agent, 'errors-loop');
       assert.equal(sent[0]!.notice.waiting, 1);
+      // A claimed board is private, and a private board answers the read link
+      // with a 404 to every browser without its owner's session, which is
+      // every phone they have not signed in on. So the way in is the door they
+      // can open: the operator page, and a six digit code.
+      assert.match(sent[0]!.notice.readUrl, /\/operator$/);
+    });
+  });
+
+  it('sends the link itself when the board is open by link', async () => {
+    // The other state, and the reason the mail asks rather than assumes. A
+    // board its owner opened back up is answerable from a phone with no
+    // session at all, which is the thing the read link is for.
+    await withMailer(async (harness, sent) => {
+      const project = await claimedProject(harness, 'owner@example.com');
+      await harness.server.inject({
+        method: 'PATCH',
+        url: project.api,
+        headers: authed(project),
+        payload: { visibility: 'link' },
+      });
+      await ask(harness, project, 'Bridge it, or wait?');
+      assert.equal(sent.length, 1);
       assert.match(sent[0]!.notice.readUrl, /\/r\//);
     });
   });

@@ -13,6 +13,7 @@ import {
   acceptShare,
   answerEscalation,
   createApiKey,
+  looksLikeEmail,
   updateProject,
 } from '../service.js';
 import {
@@ -24,7 +25,8 @@ import {
   startSession,
   type OperatorSession,
 } from '../session.js';
-import {
+import { SHARED_WITH_MAX,
+  type ProjectVisibility,
   ESCALATION_STATUSES,
   type EscalationDoc,
   type EscalationStatus,
@@ -427,6 +429,56 @@ function either(names: string[]): string {
   return `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
 }
 
+/**
+ * Who else can read this board, folded away until somebody wants it.
+ *
+ * A `details` rather than a row of its own or a page of its own: the list is
+ * empty on most boards and this page is a list of boards, so the control has
+ * to cost one word of width until it is opened. Closed, it says how many
+ * people can see the board, which is the thing worth noticing from across the
+ * page; open, it is the addresses and one field.
+ */
+function sharing(
+  project: { _id: string; sharedWith?: string[]; visibility?: ProjectVisibility },
+  session: OperatorSession,
+): string {
+  const shared = project.sharedWith ?? [];
+  const open = (project.visibility ?? 'link') === 'link';
+  return `<details class="sharing"><summary title="${
+    open
+      ? 'Anybody with the read link can open this board, so sharing changes nothing until it is private.'
+      : 'Only you and these addresses can open this board.'
+  }">shared${shared.length > 0 ? ` (${shared.length})` : ''}</summary>
+    <div class="shared-with">
+      ${
+        shared.length > 0
+          ? shared
+              .map(
+                (email) =>
+                  `<form method="post" action="/operator/projects/${escapeHtml(project._id)}/shared">
+                     ${csrfField(session)}
+                     <input type="hidden" name="remove" value="${escapeHtml(email)}">
+                     <span class="mono">${escapeHtml(email)}</span>
+                     <button class="ghost tight" type="submit" title="Stop this address reading the board">remove</button>
+                   </form>`,
+              )
+              .join('\n')
+          : '<p class="note">Nobody yet. Only you.</p>'
+      }
+      <form method="post" action="/operator/projects/${escapeHtml(project._id)}/shared">
+        ${csrfField(session)}
+        <input name="add" type="email" placeholder="colleague@example.com" required>
+        <button class="ghost tight" type="submit">share</button>
+      </form>
+      ${
+        open
+          ? `<p class="note">This board is open by link, so these addresses are not what is letting
+             anybody in. Press <em>make private</em> to narrow it to this list.</p>`
+          : ''
+      }
+    </div></details>`;
+}
+
   // --------------------------------------------------------------- the view
 
   async function renderView(session: OperatorSession): Promise<string> {
@@ -791,34 +843,35 @@ ${
 ${projects
   .map(
     (project) =>
-      `<tr><td data-label="Project">${escapeHtml(project.name)}${
-        project.description
-          ? `<br><span style="color:var(--ink-2);font-size:13.5px">${escapeHtml(project.description)}</span>`
-          : ''
-      }<br><span class="mono" style="color:var(--muted)">${escapeHtml(project._id)}</span></td>
+      `<tr><td data-label="Project"><strong>${escapeHtml(project.name)}</strong>
+       <span class="mono" style="color:var(--muted);font-size:13px">${escapeHtml(project._id)}</span>${
+         project.description
+           ? `<span class="one-line" title="${escapeHtml(project.description)}">${escapeHtml(project.description)}</span>`
+           : ''
+       }</td>
        <td class="mono" data-label="Open items">${project.counts.items}</td>
        <td class="mono" data-label="Agents">${project.counts.agents}</td>
        <td class="mono" data-label="Waiting">${waitingByProject.get(project._id) ?? 0}</td>
-       <td data-label="Go to"><a href="/r/${escapeHtml(project.readToken)}/board">board</a><br>
+       <td data-label="Go to"><div class="doing">
+           <a href="/r/${escapeHtml(project.readToken)}/board">board</a>
            <a href="/r/${escapeHtml(project.readToken)}">questions</a>
-           <form method="post" action="/operator/projects/${escapeHtml(project._id)}/keys"
-                 style="margin-top:6px">
+           <form method="post" action="/operator/projects/${escapeHtml(project._id)}/keys">
              ${csrfField(session)}
-             <button class="ghost" type="submit"
+             <button class="ghost tight" type="submit"
                      title="For an agent that lost its token">new token</button>
            </form>
-           <form method="post" action="/operator/projects/${escapeHtml(project._id)}/visibility"
-                 style="margin-top:6px">
+           <form method="post" action="/operator/projects/${escapeHtml(project._id)}/visibility">
              ${csrfField(session)}
              <input type="hidden" name="visibility"
                     value="${(project.visibility ?? 'link') === 'owner' ? 'link' : 'owner'}">
-             <button class="ghost" type="submit"
+             <button class="ghost tight" type="submit"
                      title="${
                        (project.visibility ?? 'link') === 'owner'
                          ? 'Private now. Pressing this lets anybody holding the read link open it again.'
                          : 'Open by link now. Pressing this stops the link working for everybody but you.'
                      }">${(project.visibility ?? 'link') === 'owner' ? 'open it up' : 'make private'}</button>
-           </form></td></tr>`,
+           </form>
+           ${sharing(project, session)}</div></td></tr>`,
   )
   .join('\n')}
 </tbody></table></div>
@@ -972,6 +1025,52 @@ curl -sX DELETE ${escapeHtml(config.baseUrl)}/v1/${escapeHtml(project._id)}/keys
       );
     }
     await updateProject(store, project._id, { visibility: form.visibility });
+    return reply.redirect('/operator', 303);
+  });
+
+  /**
+   * Letting somebody else read a board without handing it over.
+   *
+   * The switch beside this has two positions and both of them were blunt: open
+   * to anybody holding a link, or open to one person. Handing the board over
+   * with `POST /share` is the other thing that exists and it moves ownership,
+   * which is not what somebody wants when a colleague needs to see what the
+   * agents are doing. This is the middle: named addresses, read the same board
+   * the owner reads, nothing about who owns it changes.
+   *
+   * One address at a time, and removal by the same route: two forms on one row
+   * of a list, rather than a page of its own for a list that is usually empty.
+   */
+  app.post('/operator/projects/:id/shared', { schema: { hide: true } }, async (request, reply) => {
+    const session = await requireSession(request, reply);
+    if (!session) return reply;
+    ownWrite(request, session);
+
+    const { id } = request.params as { id: string };
+    const form = (request.body ?? {}) as { add?: string; remove?: string };
+    const project = await store.projects.findOne({ _id: id, claimedBy: session.email });
+    if (!project) throw new ServiceError(404, 'not_found', 'No project of yours with that id.');
+
+    const shared = new Set(project.sharedWith ?? []);
+    if (form.remove !== undefined) {
+      shared.delete(form.remove.trim().toLowerCase());
+    } else {
+      const email = (form.add ?? '').trim().toLowerCase();
+      if (!looksLikeEmail(email)) {
+        throw new ServiceError(400, 'bad_email', 'That does not look like an email address.');
+      }
+      // The owner is already in, and listing them twice would offer a remove
+      // button that takes nothing away.
+      if (email !== project.claimedBy) shared.add(email);
+      if (shared.size > SHARED_WITH_MAX) {
+        throw new ServiceError(
+          400,
+          'too_many_shares',
+          `A board can be shared with ${SHARED_WITH_MAX} addresses. Hand it over with the API if it needs more than that.`,
+        );
+      }
+    }
+    await updateProject(store, project._id, { sharedWith: [...shared].sort() });
     return reply.redirect('/operator', 303);
   });
 

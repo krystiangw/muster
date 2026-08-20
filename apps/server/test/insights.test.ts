@@ -652,6 +652,16 @@ describe('counting the people, not the agents', () => {
   it('says which door a human answered through, and counts one decision once', async () => {
     const project = await createProject(harness, 'doors');
     const readToken = project.readUrl.split('/r/')[1]!;
+    // Open by link, because that is the door being counted here: a claimed
+    // board is private now, and the link answers a stranger with a 404. The
+    // mail knows that and sends the owner to the operator page instead, which
+    // is the door beside this one.
+    await harness.server.inject({
+      method: 'PATCH',
+      url: project.api,
+      headers: authed(project),
+      payload: { visibility: 'link' },
+    });
     // Records are batched now, so a reading taken before they are written
     // measures the buffer rather than the board.
     await flushEvents();
