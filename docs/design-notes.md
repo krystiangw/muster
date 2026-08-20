@@ -2559,3 +2559,11 @@ move, reopening is what the column is supposed to do for you, and the reason it
 did not is the column. The move now says which column refused and what its
 `apply` would need. Every fixture in the suite used the default layout, which
 is why nothing here had ever met it.
+
+**A sentence built from a stale read argues with itself.** Review, on the
+message written one commit earlier: it took the status from the move's own read
+of the card, which is a moment older than the refusal. A close landing in that
+gap makes the answer say a card is open while refusing it for being finished.
+The status now comes from the refusal that saw it, and the race is staged in a
+test by closing the card inside the move's first read.
+

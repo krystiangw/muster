@@ -856,11 +856,18 @@ export async function moveItem(
       // layout derives the status from the column's own filter and works,
       // which is why no test saw it.
       if (error instanceof ServiceError && error.code === 'already_finished') {
+        // The status comes from the refusal, not from the read above it. That
+        // read is a moment old and a close can land in the gap: taking the
+        // status from it would answer "this card is open" while refusing the
+        // card for being finished, which is a sentence that argues with
+        // itself.
+        const status =
+          (error.details as { status?: string } | undefined)?.status ?? before.status;
         throw new ServiceError(
           409,
           'already_finished',
-          `"${slug}" is ${before.status}, and moving it into "${column.key}" would take a lease on finished work. That column does not put anything back in play: give its "apply" a "status" of "open" if a move into it should, or reopen the card first.`,
-          { status: before.status, column: column.key },
+          `"${slug}" is ${status}, and moving it into "${column.key}" would take a lease on finished work. That column does not put anything back in play: give its "apply" a "status" of "open" if a move into it should, or reopen the card first.`,
+          { status, column: column.key },
         );
       }
       throw error;

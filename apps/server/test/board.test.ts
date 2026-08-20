@@ -680,6 +680,54 @@ describe('moving an item into a column', () => {
     });
   }
 
+  it('names the status the refusal saw, not the one the move read first', async () => {
+    const project = await createProject(harness);
+    await harness.server.inject({
+      method: 'PUT',
+      url: `${project.api}/board`,
+      headers: authed(project),
+      payload: {
+        columns: [
+          { key: 'busy', title: 'Somebody is on it', match: { claimed: true } },
+          { key: 'rest', title: 'The rest', match: { status: ['open'] } },
+        ],
+      },
+    });
+    await post(project, '/items', { slug: 'work', title: 'work', actor: 'a' });
+
+    // The move reads the card, and a close lands in the gap before the lease
+    // is asked for. The read says open and the refusal says done, and a
+    // sentence built from the read would refuse a card for being finished
+    // while calling it open.
+    const items = harness.store.items as unknown as { findOne: (...args: unknown[]) => Promise<unknown> };
+    const real = items.findOne.bind(items);
+    let armed = true;
+    items.findOne = async (...args: unknown[]) => {
+      const row = await real(...args);
+      if (armed) {
+        armed = false;
+        await post(project, '/items', { slug: 'work', status: 'done', actor: 'a' });
+      }
+      return row;
+    };
+    let raced;
+    try {
+      raced = await harness.server.inject({
+        method: 'POST',
+        url: `${project.api}/items/work/move`,
+        headers: authed(project),
+        payload: { column: 'busy', actor: 'worker' },
+      });
+    } finally {
+      items.findOne = real;
+    }
+    assert.equal(armed, false, 'the close never landed, so this proves nothing');
+    assert.equal(raced.statusCode, 409, raced.body);
+    assert.equal(raced.json().error, 'already_finished');
+    assert.equal(raced.json().status, 'done', 'the status the refusal saw');
+    assert.match(raced.json().message as string, /is done/);
+  });
+
   it('takes a finished card back into progress, which is one operation', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'work', title: 'work', actor: 'a' });
