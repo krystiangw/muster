@@ -2613,3 +2613,11 @@ It says up to, says why, and points at `expires_in`, which is the number that
 was right all along. Taking the ceiling out of the code fails the test, and so
 does taking the words back to a flat hour.
 
+**A shared sentence cannot carry the syntax of one of its surfaces.** The same
+string is rendered by an HTML page and by a JSON description, and the backticks
+that read as code in one of them arrived as backticks in the other: the page
+was showing them. Stripped, and a test forbids backticks, tags and asterisks in
+it. Not the underscore, which the first version of that guard also forbade and
+which is half of `expires_in`: a rule against markup that forbids naming a
+field is a rule that stops the sentence saying the useful thing.
+

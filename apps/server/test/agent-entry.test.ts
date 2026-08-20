@@ -819,6 +819,11 @@ describe('B. agent entry', () => {
       `a board with ten minutes left handed out ${shortened.json().expires_in} seconds`,
     );
     assert.match(OAUTH_TOKEN_IS, /expires_in/);
+    // No markup: this sentence is rendered by an HTML page and by a JSON
+    // description, and the syntax of either arrives verbatim in the other.
+    // Backticks, tags and asterisks. Not the underscore: `expires_in` is the
+    // name of a field, and forbidding it forbids saying which field to read.
+    assert.doesNotMatch(OAUTH_TOKEN_IS, /[`<>*]/);
   });
 
   it('publishes every call an agent needs, including the ones added last', async () => {
