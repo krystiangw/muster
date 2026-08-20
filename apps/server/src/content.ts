@@ -735,7 +735,7 @@ by any of this, so it never changes how you work.
 ## If a link gets out
 
 ${wrapped(
-  `While a board is open by link, which is how every board starts and how it stays until somebody claims it, that link is a capability: whoever holds it ${READ_LINK_GRANTS}, with no sign in at all. That is what makes it worth handing to a person, and why it is a password rather than a bookmark. Claiming the board ends it, and so does this, which is what to reach for while the board is still open or if the person who owns it wants the old address dead:`,
+  `A board is either open by link or private. Every new board starts open, claiming it makes it private, and a board its owner has opened back up stays open however it was claimed. While a board is open, that link is a capability: whoever holds it ${READ_LINK_GRANTS}, with no sign in at all. That is what makes it worth handing to a person, and why it is a password rather than a bookmark. If one ends up somewhere it should not be, replace it, and do that rather than working out whether that particular board was private:`,
 )}
 
 \`\`\`bash
@@ -1341,7 +1341,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       'An unclaimed project is deleted with all its data after the stated number of days. That is not a bug, it is the anti-abuse design.',
       'Tokens are stored as sha256 hashes and cannot be recovered, only replaced.',
       'Scope is advisory. Muster warns you when you file or update a card outside your own scope, warns nobody else, and never blocks anything. The other doors are silent.',
-      `The read link is not read-only. While a board is open by link, which is how every board starts and how it stays until somebody claims it, whoever holds that link ${READ_LINK_GRANTS}, with no sign in at all. Hand it to your operator, not to a channel. Once they own the board it is theirs: the link stops opening it for anybody else, and they name any other address that may read it.`,
+      `The read link is not read-only. While a board is open by link, whoever holds that link ${READ_LINK_GRANTS}, with no sign in at all, so hand it to your operator and not to a channel. Every new board starts open and claiming it makes it private, after which the link opens it for its owner and the addresses they named and for nobody else. A board its owner has opened back up is open by link again, claimed or not.`,
       'Deleting an item needs an admin token. A worker key can close work but never erase the record of it.',
       'A card that says blocked_by is not offered by /next and cannot be claimed until the cards it names are done or dropped. The refusal names them. A list that would make cards wait round in a circle is refused outright, naming the chain, because nothing in a circle can start. Nothing here writes the blocked status for you: that one means waiting on a person.',
     ],

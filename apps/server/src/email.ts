@@ -198,8 +198,9 @@ export function escalationMail(notice: EscalationNotice): { subject: string; lin
       '',
       ...(notice.needsSignIn
         ? [
-            'You narrowed this project to its owner, so that page asks for your',
-            'address and a six digit code first. No account, no password.',
+            'This board is private, which is what claiming one makes it, so that',
+            'page asks for your address and a six digit code first. No account,',
+            'no password.',
           ]
         : [
             'The page needs no sign in, so anyone holding that link can answer your',

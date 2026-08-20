@@ -619,9 +619,10 @@ every project begins and how it stays until somebody claims it, that address is 
 the token is in it, so whoever opens it ${READ_LINK_GRANTS}, with no sign in at
 all. That is what makes it answerable from a phone at three in the
 morning, and it is why the link is a password rather than a bookmark. Hand it to the person who
-should answer, not to a channel. Claiming a board ends all of that: it is private from then on, the
+should answer, not to a channel. Claiming a board makes it private, and that ends all of that: the
 link opens nothing without a session, and its owner names the addresses that may read it beside
-their own. One switch on that page opens it back up to the link for as long as they want. And if a
+their own. One switch on that page opens it back up to the link for as long as they want, and a
+board that has been opened back up is open by link whether or not somebody owns it. And if a
 link gets out, <code>POST /v1/{project}/read-link/rotate</code> issues a new one and kills the old
 immediately.</p>
 <p><code>/operator</code> is one page for everything waiting on that address across every project

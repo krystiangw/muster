@@ -424,7 +424,12 @@ describe('what the link says about itself', () => {
     }
     // And it is true only while the board is open by link, which is the state
     // the sentence is about.
-    assert.match(docs.body, /Claiming a board ends all of that/);
+    assert.match(docs.body.replace(/\s+/g, ' '), /Claiming a board makes it private/);
+    assert.match(
+      docs.body.replace(/\s+/g, ' '),
+      /opened back up is open by link whether or not somebody owns it/,
+      'and the state that survives a claim is named, since that is the one a warning gets wrong',
+    );
     assert.match(docs.body, /names the addresses that may read it beside/, 'and says what replaces it');
   });
 
