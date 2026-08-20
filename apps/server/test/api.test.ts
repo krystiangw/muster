@@ -1040,6 +1040,11 @@ describe('next', () => {
     // second one on top of it.
     const said = (await harness.server.inject({ method: 'GET', url: '/skill.md' })).body.replace(/\s+/g, ' ');
     assert.match(said, /you get that same item back/);
+    // And it promises the field the door beside it returns, not the one this
+    // door returns. The looking door answers item and reason; only the taking
+    // door adds `claimed`, and the first draft of this paragraph told a
+    // restarting agent to read a field that is not in the answer it gets.
+    assert.match(said, /taking door below answers.{0,12}claimed.{0,12}beside it; this one, which takes nothing, does not/);
   });
 
   it('skips items another agent already holds', async () => {

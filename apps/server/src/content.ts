@@ -832,9 +832,12 @@ none, you are told how many open items exist outside it rather than being handed
 somebody else's ticket.
 
 Call it again while you are still holding something and you get that same item
-back, with \`"claimed": true\` and a reason saying so, rather than a second one
-on top of it. That is the answer a session which restarted wants: pick up where
-it stopped. It is also why a loop does not need to remember what it took.
+back, rather than a second one on top of it: the \`reason\` says so in as many
+words and the card carries the claim that proves it, with your handle and its
+expiry. The taking door below answers \`"claimed": true\` beside it; this one,
+which takes nothing, does not. That is the answer a session which restarted
+wants: pick up where it stopped. It is also why a loop does not need to
+remember what it took.
 
 ## Limits
 
