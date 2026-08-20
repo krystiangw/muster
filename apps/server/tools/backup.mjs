@@ -145,21 +145,24 @@ if (args.includes('--verify')) {
    * archive from a scratch directory did not come back describes a file that
    * is not there.
    */
+  // Read before the archive is, and not after: a verdict is about bytes, and
+  // the name carries only the minute it was written, so a run repeated inside
+  // one minute writes over this file while it is being read. Stating it
+  // afterwards would put the replacement's size and time next to a verdict
+  // about the bytes that are gone, which is the one combination that lets a
+  // stale yes pass for a fresh one. Taken here, the record describes what was
+  // read, and a replacement simply stops matching, which is the truth.
+  const subject = statSync(file);
   const recordCheck = (ok, failures) => {
     try {
-      // Named, sized and stamped, because the name alone is not an identity:
-      // the name carries the minute it was written, so a backup taken twice in
-      // one minute writes over the file this record is about and the record
-      // goes on describing contents that are no longer there.
-      const seen = statSync(file);
       writeFileSync(
         join(dirname(file), 'verified.json'),
         JSON.stringify(
           {
             at: new Date().toISOString(),
             file: basename(file),
-            bytes: seen.size,
-            mtime: seen.mtimeMs,
+            bytes: subject.size,
+            mtime: subject.mtimeMs,
             ok,
             failures,
           },
@@ -285,6 +288,15 @@ if (args.includes('--verify')) {
     } catch {
       // The older copy being unreadable says nothing about this one.
     }
+  }
+
+  // Said rather than failed on, because it is not this copy that is wrong: the
+  // record already describes the bytes that were read, so the watchdog will see
+  // an archive it has no verdict about and say so. This line is what explains
+  // that to whoever reads the log afterwards.
+  const now = statSync(file);
+  if (now.size !== subject.size || now.mtimeMs !== subject.mtimeMs) {
+    console.log(`\n${basename(file)} was written over while it was being checked, so this verdict is about the copy that was there before.`);
   }
 
   console.log(`\n${total} documents came back from ${at}, counts and shapes intact.`);
