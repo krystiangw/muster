@@ -283,6 +283,32 @@ describe('what we publish about ourselves', () => {
     assert.equal('timeline' in bare, false, 'history comes only where the call says it does');
   });
 
+  it('gives the client on npm the same card the document describes', () => {
+    // Two published surfaces describing one thing, which is the shape this
+    // file exists for. The client is hand written and the schema is generated,
+    // so they drift in the quiet direction: a field arrives, the serializer
+    // and the document learn about it, and the type a caller compiles against
+    // does not. Found exactly that way: `then` was on the wire and in the
+    // document and not in the interface.
+    const source = readFileSync(`${ROOT}/packages/sdk/src/index.ts`, 'utf8');
+    const block = /export interface Item \{([\s\S]*?)\n\}/.exec(source);
+    assert.ok(block, 'the client still declares an Item');
+    const declared = new Set([...block[1]!.matchAll(/^\s{2}([a-z_]+)\??:/gm)].map((hit) => hit[1]!));
+    const published = new Set(
+      Object.keys((openapi.components.schemas.Item as { properties: object }).properties),
+    );
+    assert.deepEqual(
+      [...published].filter((field) => !declared.has(field)).sort(),
+      [],
+      'the document describes a field the client does not declare',
+    );
+    assert.deepEqual(
+      [...declared].filter((field) => !published.has(field)).sort(),
+      [],
+      'the client declares a field the document does not describe',
+    );
+  });
+
   it('sends an agent to addresses that exist', async () => {
     // The catalogue is the map. A renamed route leaves it pointing at nothing,
     // and the agent reading it has no second source to check against.

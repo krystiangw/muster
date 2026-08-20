@@ -33,6 +33,21 @@ export interface Item {
    * naming what is unfinished.
    */
   blocked_by?: string[];
+  /**
+   * What this card files when it finishes, if it files anything.
+   *
+   * A pipeline written on the work itself: the server creates it on the write
+   * that closes this one, once, and hands it back as `chained`. Absent when
+   * the card ends nothing.
+   */
+  then?: {
+    slug: string;
+    title?: string;
+    body?: string;
+    priority?: number;
+    labels?: string[];
+    owner?: string | null;
+  };
   created_at: string;
   updated_at: string;
   touched_at: string;

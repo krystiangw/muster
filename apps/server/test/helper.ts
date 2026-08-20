@@ -115,9 +115,26 @@ export async function startHarness(
       // written, so whatever the suite provokes is read instead: a 2xx that
       // carried a card from a door the document does not say carries one is
       // the drift this catches.
-      if (status >= 200 && status < 300 && typeof payload === 'string' && payload.startsWith('{')) {
+      // Every JSON success, not only the ones that parse into an object. A
+      // route promising a card and answering an empty body, a bare array or
+      // something that is not JSON at all is exactly the regression this is
+      // for, and the first version of it read only bodies starting with a
+      // brace, so all three walked through. A payload that is not a string is
+      // left alone: a compressed body says nothing either way, and guessing
+      // there would report a miss that never happened.
+      const json = String(reply.getHeader('content-type') ?? '').includes('application/json');
+      if (status >= 200 && status < 300 && json && typeof payload === 'string') {
+        let top: Record<string, unknown> = {};
         try {
-          const body = JSON.parse(payload) as Record<string, unknown>;
+          const parsed: unknown = JSON.parse(payload);
+          if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
+            top = parsed as Record<string, unknown>;
+          }
+        } catch {
+          // Not JSON after all, which is itself an answer carrying no card.
+        }
+        {
+          const body = top;
           // A card, not a field named after one. Renaming a handle answers
           // with `items: 4`, meaning it moved four of them, and reading the
           // key alone would have had the document promise a page of cards
@@ -143,8 +160,6 @@ export async function startHarness(
             missing.add(field);
             lacked.set(key, missing);
           }
-        } catch {
-          // Not JSON after all. Nothing to compare.
         }
       }
     }

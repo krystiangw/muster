@@ -2494,3 +2494,20 @@ is there, so the field is required and its type is `Item` or null. Optional
 would have said something different and weaker, and it would have been the
 easier thing to write.
 
+
+**And the guard read only the bodies it liked.** It parsed a payload only when
+it began with a brace, so a route promising a card and answering an empty body,
+a bare array, or something that is not JSON at all walked straight through the
+invariant it was there to hold. Every JSON success is read now, and a body that
+does not parse into an object counts as carrying nothing, which is what it is.
+A payload that is not a string is left alone: a compressed body says nothing
+either way, and guessing there would report a miss that never happened. Two
+mutations, an empty answer and a bare array, both named by the door.
+
+**One more pair of published surfaces disagreeing.** With the card's shape in
+the document, the client on npm could be compared with it field by field, and
+it was missing `then`: the field was on the wire and in the document and not in
+the type a caller compiles against. Added, and a test now reads the interface
+out of the client's source and the properties out of the document and fails
+either way round. Two hand-kept surfaces describing one thing drift in the
+quiet direction, which is the one nobody is looking at.
