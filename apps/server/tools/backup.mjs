@@ -121,32 +121,108 @@ if (args.includes('--verify')) {
   }
   const mongod = await MemoryServer.create();
   const scratch = new MongoClient(mongod.getUri());
-  await scratch.connect();
-  const into = scratch.db('verify');
-  console.log(`checking ${file}`);
-  const { archive, written } = await restoreInto(into, file, (line) => console.log(line));
-
   const wrong = [];
   let total = 0;
-  for (const [name, count] of Object.entries(written)) {
-    const found = await into.collection(name).countDocuments({});
-    total += found;
-    if (found !== count) wrong.push(`${name}: archive says ${count}, ${found} came back`);
-  }
-  // One document read all the way, because a count says the rows arrived and
-  // nothing about whether they are usable: dates that stayed strings would
-  // make every query in this service quietly wrong.
-  const card = await into.collection('items').findOne({});
-  if (card && !(card.createdAt instanceof Date)) wrong.push('dates came back as text, not dates');
-  if (card && !Array.isArray(card.timeline)) wrong.push('a timeline came back as something other than a list');
+  let at = 'an unreadable archive';
+  let written = {};
+  try {
+    await scratch.connect();
+    const into = scratch.db('verify');
+    console.log(`checking ${file}`);
+    const restored = await restoreInto(into, file, (line) => console.log(line));
+    const archive = restored.archive;
+    written = restored.written;
+    at = archive.at;
 
-  await scratch.close();
-  await mongod.stop();
+    for (const [name, count] of Object.entries(written)) {
+      const found = await into.collection(name).countDocuments({});
+      total += found;
+      if (found !== count) wrong.push(`${name}: archive says ${count}, ${found} came back`);
+    }
+
+    // An archive of nothing passes every count it has, which is the shape this
+    // command exists to catch: losing a collection and keeping the file.
+    if (total === 0) wrong.push('the archive holds no documents at all, which is not a copy of anything');
+    if (total > 0 && (written.projects ?? 0) === 0) {
+      wrong.push('the archive holds no projects, and everything else here belongs to one');
+    }
+
+    // Counts say the rows arrived and nothing about whether they are usable.
+    // Compared against the archive's own text rather than against a guess at
+    // which fields are dates: whatever was written as an ISO string has to
+    // come back as a Date, or every query in this service that compares one is
+    // quietly wrong.
+    //
+    // Every collection, not one. Sampling a single collection put this check
+    // on whichever name sorted first, and a date that rotted in `items` sat
+    // behind `agents` where nothing looked at it. One document each is enough
+    // for the rot this format actually grows, which is a format change that
+    // takes a whole collection with it rather than one row in the middle.
+    for (const [name, count] of Object.entries(written)) {
+      if (count === 0) continue;
+      const raw = archive.collections[name][0];
+      const back = await into.collection(name).findOne({ _id: raw._id });
+      if (!back) {
+        wrong.push(`${name}: the first document did not come back at all`);
+        continue;
+      }
+      // Two rules, and the narrow one is the one that bites. The general rule
+      // compares the archive with what came back: an ISO string in the file
+      // has to be a Date in the database. It cannot see a date that was
+      // already text in the file, because then the two agree and both are
+      // wrong: that is what happens when the thing that wrote the archive
+      // broke rather than the thing that reads it. So `createdAt` is named.
+      // Every document this service writes has one, whatever else it holds.
+      if ('createdAt' in raw && !(back.createdAt instanceof Date)) {
+        wrong.push(`dates came back as text, not dates (${name}.createdAt)`);
+      }
+      for (const [key, value] of Object.entries(raw)) {
+        if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) {
+          if (!(back[key] instanceof Date)) wrong.push(`dates came back as text, not dates (${name}.${key})`);
+        }
+        if (Array.isArray(value) && !Array.isArray(back[key])) {
+          wrong.push(`a list came back as something else (${name}.${key})`);
+        }
+      }
+    }
+  } catch (error) {
+    wrong.push(`the archive could not be read back: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    // Whatever happened above, the scratch database goes away. A corrupt
+    // archive is an expected input here, so the failing path is the one that
+    // would otherwise leave a mongod and its directory behind every night.
+    await scratch.close().catch(() => {});
+    await mongod.stop().catch(() => {});
+  }
+
   if (wrong.length > 0) {
     console.error(`\nThis copy does not come back cleanly:\n  ${wrong.join('\n  ')}`);
     process.exit(1);
   }
-  console.log(`\n${total} documents came back from ${archive.at}, counts and shapes intact.`);
+
+  // Said, never failed on. A collection that had rows and now has none is
+  // worth an eyebrow and is not by itself wrong: emptying one is what a purge
+  // looks like, and refusing to verify the copy taken after a deliberate one
+  // would be the tool arguing with the operator. The line is the artefact; a
+  // schedule keeps it in the log next to the exit code.
+  const older = listBackups().filter((b) => b.path !== file).at(-1);
+  if (older) {
+    try {
+      const chunks = [];
+      await pipeline(createReadStream(older.path), createGunzip(), async function* (source) {
+        for await (const chunk of source) chunks.push(chunk);
+      });
+      const before = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      const emptied = Object.entries(before.collections)
+        .filter(([name, docs]) => docs.length > 0 && (written[name] ?? 0) === 0)
+        .map(([name, docs]) => `${name} had ${docs.length} in ${older.name} and has none here`);
+      if (emptied.length > 0) console.log(`\nworth a look:\n  ${emptied.join('\n  ')}`);
+    } catch {
+      // The older copy being unreadable says nothing about this one.
+    }
+  }
+
+  console.log(`\n${total} documents came back from ${at}, counts and shapes intact.`);
   process.exit(0);
 }
 

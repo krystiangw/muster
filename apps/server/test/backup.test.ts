@@ -173,6 +173,45 @@ describe('the nightly backup', () => {
     }
     assert.equal(code, 1, 'a copy that does not come back has to fail, or a schedule cannot read it');
     assert.match(said, /dates came back as text/);
+
+    const check = (archive: string): { code: number; said: string } => {
+      try {
+        return {
+          code: 0,
+          said: execFileSync('node', ['tools/backup.mjs', '--verify', archive], {
+            cwd: HERE,
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: clean,
+          }),
+        };
+      } catch (error) {
+        const failed = error as { status?: number; stdout?: string; stderr?: string };
+        return { code: failed.status ?? 1, said: `${failed.stdout ?? ''}${failed.stderr ?? ''}` };
+      }
+    };
+
+    // An archive of nothing passes every count it has, which is the shape this
+    // command exists to catch: losing a collection and keeping the file.
+    const hollow = JSON.parse(gunzipSync(readFileSync(join(dir, file))).toString('utf8')) as {
+      collections: Record<string, unknown[]>;
+    };
+    for (const name of Object.keys(hollow.collections)) hollow.collections[name] = [];
+    const nothing = join(dir, 'nothing.json.gz');
+    writeFileSync(nothing, gzipSync(Buffer.from(JSON.stringify(hollow))));
+    const empty = check(nothing);
+    assert.equal(empty.code, 1);
+    assert.match(empty.said, /no documents at all/);
+
+    // Not gzip at all, which is the other thing a file on disk can become. It
+    // has to fail rather than throw its way out, and it has to put the scratch
+    // database away on the way: a corrupt archive is an expected input here,
+    // so the failing path is the one a schedule walks every night.
+    const rubbish = join(dir, 'rubbish.json.gz');
+    writeFileSync(rubbish, Buffer.from('this is not gzip'));
+    const unreadable = check(rubbish);
+    assert.equal(unreadable.code, 1);
+    assert.match(unreadable.said, /could not be read back/);
   });
 
   it('refuses the two restores that are somebody having a bad day', async () => {

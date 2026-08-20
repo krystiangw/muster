@@ -2647,3 +2647,25 @@ The date check is the one worth having. A count says the rows arrived and
 nothing about whether they are usable: a timestamp that came back as text
 passes every count and breaks every query that compares it. Taking that check
 out fails the test; so does letting a bad copy exit zero.
+
+**Review then found the check checking almost nothing.** An archive with an
+absent or empty `items` passed as "counts and shapes intact", because the shape
+check read one card and skipped itself when there was no card to read: losing a
+whole collection verified clean. And a corrupt archive threw its way out of the
+command before the scratch database was put away, which is the path a schedule
+would walk every night it mattered.
+
+Both fixed, and then the fix was wrong in a way only a mutation showed. Reading
+one collection put the check on whichever name sorted first, so a rotted date in
+`items` sat behind `agents` where nothing looked at it. Every collection's first
+document is read now.
+
+**And the test was corrupting the wrong thing.** It rewrote a date in the
+archive to text, which makes the archive and the restore *agree*: both hold
+text, the comparison sees no discrepancy, and the copy passes. That case is
+real, and it is what a broken writer produces rather than a broken reader, so
+the rule for it has to be named rather than derived: every document this
+service writes has a `createdAt`, and it comes back as a Date whatever the file
+says. The general rule stays beside it for everything else, comparing the
+archive's own ISO strings with what arrived.
+
