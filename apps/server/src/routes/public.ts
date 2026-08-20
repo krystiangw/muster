@@ -1963,7 +1963,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     // Absent or nonsense reads as ordinary work, which is what an agent filing
     // without a priority gets, so the two doors agree on the same silence.
     const asked = wholeNumber(one(form.priority));
-    const priority = asked === null ? 0 : Math.max(-10, Math.min(10, asked));
+    const priority = asked === null ? 0 : Math.max(PRIORITY_MIN, Math.min(PRIORITY_MAX, asked));
 
     // Two steps, and each one answers a different question. The lookup handles
     // the ordinary case, a name already in use, and picks the next one along.
@@ -2033,7 +2033,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     if (!form.slug) throw new ServiceError(400, 'bad_request', 'Which item?');
 
     const priority = wholeNumber(one(form.priority));
-    if (priority === null || priority < -10 || priority > 10) {
+    if (priority === null || priority < PRIORITY_MIN || priority > PRIORITY_MAX) {
       throw new ServiceError(400, 'bad_priority', `Priority is a whole number from ${PRIORITY_MIN} to ${PRIORITY_MAX}.`);
     }
     await upsertItem(store, project, {

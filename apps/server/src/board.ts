@@ -22,6 +22,8 @@ import {
   type ItemDoc,
   type ItemStatus,
   type ProjectDoc,
+  PRIORITY_MAX,
+  PRIORITY_MIN,
 } from './types.js';
 
 /**
@@ -1060,7 +1062,7 @@ function parseMatch(raw: unknown, columnKey: string): BoardMatch {
     if (typeof priorityMin !== 'number' || !Number.isInteger(priorityMin)) {
       throw bad('priority_min must be an integer.');
     }
-    match.priorityMin = Math.max(-10, Math.min(10, priorityMin));
+    match.priorityMin = Math.max(PRIORITY_MIN, Math.min(PRIORITY_MAX, priorityMin));
   }
   const withinDays = source.within_days ?? source.withinDays;
   if (withinDays !== undefined) {
@@ -1115,7 +1117,7 @@ function parseApply(raw: unknown, columnKey: string): BoardApply {
     if (typeof source.priority !== 'number' || !Number.isInteger(source.priority)) {
       throw bad('apply.priority must be an integer.');
     }
-    apply.priority = Math.max(-10, Math.min(10, source.priority));
+    apply.priority = Math.max(PRIORITY_MIN, Math.min(PRIORITY_MAX, source.priority));
   }
   if (source.claim !== undefined) {
     if (typeof source.claim !== 'boolean') throw bad('apply.claim must be true or false.');

@@ -1870,5 +1870,17 @@ and fails on the literal in any of the shapes it is actually written in: `1440`,
 
 Not a bare `200`, because in this codebase that is usually a status code, and a
 guard with a false positive on every second file gets deleted rather than
-obeyed. Two comments were rewritten instead of exempted: a sentence about the
-scale reads better without the numbers in it anyway.
+obeyed. Four comments were reworded instead of exempted: a sentence about the
+scale reads better without the numbers in it anyway, and an example in a comment
+is a copy like any other.
+
+**The first version of the guard certified the wrong thing**, which review
+caught and is the failure mode worth naming: it read a bound in two of the three
+shapes bounds are written in. A schema says `minimum`, a sentence says the
+range, and a guard says it as a comparison or a clamp, and the third shape was
+still sitting in two files. They would have gone on enforcing the old numbers
+while the schema advertised the new ones, which is worse than the duplication
+this was meant to end, because now a test says it cannot happen. The published
+`curl` examples were the same story in the other direction: `?limit=200` written
+out, so lowering the cap would have shipped a document whose own examples the
+service refuses.

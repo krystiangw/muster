@@ -57,12 +57,22 @@ describe('a number this service publishes as a rule', () => {
       for (const [pattern, name] of [
         [/\b1440\b/, 'CLAIM_TTL_MAX'],
         [/-10 (to|and) 10\b/, 'PRIORITY_SCALE'],
+        // A bound is written three ways and review found the third: a schema
+        // says `minimum`, a sentence says the range, and a guard says it as a
+        // comparison or a clamp. The first version of this test read the first
+        // two, so it passed while two files still clamped to the old numbers
+        // and would have gone on enforcing them after the constant moved.
         [/minimum: -10/, 'PRIORITY_MIN'],
-        // Two forms and not a bare number: in this codebase 200 is usually a
-        // status code, so the pattern names the two shapes the page cap is
-        // actually written in, a schema bound and the sentence about it.
+        [/[<>]=? -10\b|Math\.max\(-10/, 'PRIORITY_MIN'],
+        [/[<>]=? 10\b|Math\.min\(10,/, 'PRIORITY_MAX'],
+        // Not a bare number: in this codebase 200 is usually a status code, so
+        // the pattern names the shapes the page cap is actually written in. The
+        // published curl examples are one of them, which review also found: an
+        // example asking for more than the schema allows is a document that
+        // fails when a reader runs it.
         [/maximum: 200\b/, 'PAGE_MAX'],
         [/at most 200\b/, 'PAGE_MAX'],
+        [/limit=200\b/, 'PAGE_MAX'],
       ] as [RegExp, string][]) {
         if (pattern.test(text)) written.push(`${where} spells out ${name}`);
       }

@@ -558,8 +558,8 @@ curl -sX POST $MUSTER/observe -H "authorization: Bearer $TOKEN" \\
 Pass it back to walk the whole list; \`null\` means that was the last page.
 
 \`\`\`bash
-curl -s "$MUSTER/items?limit=200&order=id" -H "authorization: Bearer $TOKEN"
-curl -s "$MUSTER/items?limit=200&order=id&cursor=<next_cursor>" -H "authorization: Bearer $TOKEN"
+curl -s "$MUSTER/items?limit=${PAGE_MAX}&order=id" -H "authorization: Bearer $TOKEN"
+curl -s "$MUSTER/items?limit=${PAGE_MAX}&order=id&cursor=<next_cursor>" -H "authorization: Bearer $TOKEN"
 \`\`\`
 
 Looking for one card rather than all of them, \`q=\` searches the slug and the
@@ -1212,14 +1212,14 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
       {
         name: 'list_items',
         method: 'GET',
-        url: `${base}/v1/{project}/items?order=id&limit=200`,
+        url: `${base}/v1/{project}/items?order=id&limit=${PAGE_MAX}`,
         notes:
           `Filter by status, owner, label, source, namespace, staleness or claim state, or search the slug and title with q=. prefix=ops: is one area of a board that names its cards area:thing. A search cannot be answered from an index, so put ${SEARCH_NARROWING} beside it to read less; label= and another word narrow the answer and not the read. Add &cursor=<next_cursor> for the page after this one, in the same order. order=id is the stable order for reading everything back; order=recent with &since=<as_of> is the change feed, and every page of one walk reports the same as_of.`,
       },
       {
         name: 'list_escalations',
         method: 'GET',
-        url: `${base}/v1/{project}/escalations?limit=200`,
+        url: `${base}/v1/{project}/escalations?limit=${PAGE_MAX}`,
         notes:
           'Paged: add &cursor=<next_cursor> for the page after this one. The cursor carries a timestamp and an id, because several questions can be filed in the same millisecond.',
       },

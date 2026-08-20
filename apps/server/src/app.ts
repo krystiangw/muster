@@ -70,8 +70,8 @@ const COMPRESS_MIN_BYTES = 1400;
 /**
  * What the schema already says about the field that was refused.
  *
- * A validator answers in its own language: "body/priority must be <= 10" is
- * true and teaches nothing, and it was the one refusal here that did not name
+ * A validator answers in its own language: "body/priority must be an integer"
+ * is true and teaches nothing, and it was the one refusal here that did not name
  * the fix. The field's description is written already, for the OpenAPI
  * document, so the refusal says it too: "Higher is more urgent. 0 is ordinary
  * work and the default." Generic on purpose, so writing a description is the
@@ -405,7 +405,7 @@ export async function buildApp(
          * service refuses in as many words and publishes a promise about.
          *
          * `true` rather than `false`, because the query strings do depend on
-         * coercion: `?limit=200` and `?include_closed=true` arrive as text and
+         * coercion: `?limit=25` and `?include_closed=true` arrive as text and
          * the schemas say number and boolean. Nothing here declares an array
          * in a query string, so the only behaviour this gives up is the one
          * that was hiding a mistake.
