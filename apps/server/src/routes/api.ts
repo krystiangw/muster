@@ -1812,7 +1812,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
                 type: 'string',
                 enum: ['link', 'owner'],
                 description:
-                  'Who may open the read link. "link" is the default and is what makes a handover possible. "owner" needs a project somebody owns, after which the link alone stops working and the reader has to be signed in as that person.',
+                  'Who may open the read link. "owner" is what a new project is, and it means the board is readable by the person who claimed it, by the addresses they shared it with, and by nobody else: the link alone stops working the moment the board has an owner. Before that it opens for whoever holds the link whatever this says, because that link is the only way anybody could claim it. "link" is the other state, and it is what makes a handover possible: anybody holding the address reads the board and answers on it, signed in or not. Boards created before this became a choice are "link" and were left that way.',
               },
             },
             additionalProperties: false,

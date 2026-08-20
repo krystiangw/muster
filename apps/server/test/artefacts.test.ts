@@ -606,6 +606,27 @@ describe('what we publish about ourselves', () => {
     }
   });
 
+  it('says what a new board is, in the words a new board is made with', async () => {
+    // The description of this field said "link is the default" for as long as
+    // link was the default, and went on saying it afterwards, because nothing
+    // compared the sentence with a board. It also promised that narrowing to
+    // an owner needs a board somebody owns, which was a refusal that has since
+    // been removed. Both were published, in a document agents read to decide
+    // what a call does.
+    const project = await createProject(harness);
+    const made = await harness.store.projects.findOne({ _id: project.id });
+    const described = (
+      openapi.paths['/v1/{project}']?.patch?.requestBody?.content['application/json']?.schema
+        ?.properties?.visibility?.description ?? ''
+    ) as string;
+    assert.ok(described.length > 0, 'the field is described at all');
+    assert.match(
+      described,
+      new RegExp(`"${made!.visibility}" is what a new project is`),
+      `a board is created as ${made!.visibility}, and the document has to be the one saying so`,
+    );
+  });
+
   it('publishes the caps it actually enforces, for both kinds of project', async () => {
     // The numbers on the page are the ones a stranger plans around, and the
     // two kinds are a tenth apart: a board nobody has claimed gets fifty
