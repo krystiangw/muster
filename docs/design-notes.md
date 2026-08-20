@@ -2775,3 +2775,17 @@ Deriving it instead of writing it would have been better and is not available:
 list back without a cycle. Hand-kept and machine-checked is the same trade the
 refusal map makes, and it is checked on every run rather than on the day
 somebody remembers.
+
+**And the guard for it could not see the thing it was guarding.** Review, one
+run later: the check asked whether each named tool exists, so the one entry that
+names a tool other than itself could have pointed anywhere. Swapping
+`take_next_item` from `next_item` to `read_item` passed, because `next_item`
+was still covered by the GET entry beside it and `read_item` is a real tool.
+The alias is now named rather than counted: the set of entries whose tool has a
+different name has to be exactly `{take_next_item: next_item}`. Pointing it
+elsewhere fails, and so does a second alias arriving without a reason.
+
+Which is the third question from this morning, asked of a guard written this
+afternoon, by somebody else. That is the useful shape of it: the question is
+easy to ask of other people's code and hard to ask of the thing you just wrote.
+

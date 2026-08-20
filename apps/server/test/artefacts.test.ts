@@ -438,6 +438,21 @@ describe('what we publish about ourselves', () => {
       [],
       'a tool nobody points at is a tool an agent finds by luck',
     );
+
+    // The aliases, named rather than counted. Everything else on this list
+    // carries the tool of its own name, and checking only that a tool exists
+    // let the one exception point anywhere: swapping take_next_item to any
+    // other live tool passed, because the tool it should name is covered by
+    // the GET entry beside it. An alias is a claim about which call does what,
+    // and it is worth exactly as much as the check behind it.
+    const aliased = Object.fromEntries(
+      endpoints.filter((e) => e.mcp !== null && e.mcp !== e.name).map((e) => [e.name, e.mcp]),
+    );
+    assert.deepEqual(
+      aliased,
+      { take_next_item: 'next_item' },
+      'one call is taken over MCP under another name, and this is which',
+    );
   });
 
   it('sends an agent to addresses that exist', async () => {
