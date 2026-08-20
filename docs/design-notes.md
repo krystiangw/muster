@@ -2004,3 +2004,23 @@ door was already safe: it declares a body schema, and the schema refused every
 crafted shape before the handler saw it. That is the argument for the schema
 where one is possible, and this endpoint is why the check has to exist in the
 handler where one is not.
+
+## Walking past a door is not walking through it, 2026-08-20
+
+The token endpoint was fixed and then the fix was given a guard that walks every
+write door the document names and sends a crafted shape into each declared
+field, asserting only that nothing answers 5xx. Derived from the published
+document rather than a list somebody keeps, because the list is what failed: the
+first pass at refusing a query where a name belongs covered the doors where MCP
+arguments land in a filter, and the OAuth endpoint was added later without it.
+
+**The guard was green with the fix reverted.** No OAuth client existed in the
+fixture, so the lookup found nothing and refused before the hash was ever
+reached. The walk arrived at the door, was told no for an unrelated reason, and
+counted that as the door being safe.
+
+The fixture now registers a client first, and the same mutation fails. That is
+the difference between a test that reaches a line and a test that visits the
+route the line is on, and it is worth writing down because the green version
+looked more thorough than the fix it was guarding: twenty four operations, a
+hundred requests, no assertion that any of them got past the front desk.

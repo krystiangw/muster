@@ -1509,6 +1509,103 @@ describe('every form these pages render', () => {
   });
 });
 
+describe('a shape where a name belongs, at every door the document names', () => {
+  /**
+   * Derived from the published document rather than from a list somebody keeps,
+   * because the list is what failed. Refusing a query where a name belongs was
+   * done once, at the doors where MCP arguments land in a filter, and the OAuth
+   * token endpoint was added without it: `client_secret` as an object reached
+   * the hash and answered 500, which is the one class this protocol tells an
+   * agent to retry.
+   *
+   * The assertion is deliberately weak. Whether a crafted value is refused with
+   * 400, ignored, or lands somewhere harmless is each door's own business; what
+   * none of them may do is break. A door added tomorrow appears in the document
+   * and is walked here without anybody remembering to add it.
+   */
+  it('never breaks on one, whatever it decides to do with it', async () => {
+    const harness = await startHarness({
+      LIMIT_WRITES_PER_MINUTE: '100000',
+      LIMIT_READS_PER_MINUTE: '100000',
+      LIMIT_CREATE_PROJECTS_PER_HOUR: '10000',
+      LIMIT_CLAIM_EMAILS_PER_HOUR: '10000',
+    });
+    try {
+      const project = await createProject(harness, 'crafted');
+      await harness.server.inject({
+        method: 'POST',
+        url: `${project.api}/items`,
+        headers: { ...authed(project), 'content-type': 'application/json' },
+        payload: { slug: 'a-card', title: 'a card', actor: 'somebody' },
+      });
+
+      // A registered client, so the token endpoint has something to look up.
+      // Without one it refuses at the lookup and never reaches the hash, which
+      // is where it broke: the walk went past the door rather than through it,
+      // and reverting the fix left this test green.
+      const registered = (
+        await harness.server.inject({
+          method: 'POST',
+          url: '/oauth/register',
+          headers: { 'content-type': 'application/json' },
+          payload: { client_name: 'crafted', redirect_uris: [] },
+        })
+      ).json() as { client_id: string };
+
+      const doc = (await harness.server.inject({ method: 'GET', url: '/openapi.json' })).json() as {
+        paths: Record<
+          string,
+          Record<
+            string,
+            { requestBody?: { content?: Record<string, { schema?: { properties?: Record<string, unknown> } }> } }
+          >
+        >;
+      };
+
+      const crafted = { $ne: null };
+      const broke: string[] = [];
+      for (const [path, operations] of Object.entries(doc.paths)) {
+        for (const [method, operation] of Object.entries(operations)) {
+          if (!['post', 'put', 'patch', 'delete'].includes(method)) continue;
+          const url = path
+            .replace('{project}', project.id)
+            .replace('{slug}', 'a-card')
+            .replace('{id}', 'nothing-by-that-name')
+            .replace('{handle}', 'nobody');
+          const fields = Object.keys(
+            operation.requestBody?.content?.['application/json']?.schema?.properties ?? {},
+          );
+          // A door the document gives no fields is either one that reads no
+          // body at all or one whose body it does not describe, and the second
+          // is exactly where this went wrong. Both get a body anyway.
+          const bodies =
+            fields.length > 0
+              ? fields.map((field) => ({ [field]: crafted }))
+              : [
+                  { client_id: registered.client_id, client_secret: crafted, grant_type: 'client_credentials' },
+                  { client_id: crafted, client_secret: 'whatever', grant_type: 'client_credentials' },
+                ];
+          for (const payload of bodies) {
+            const answer = await harness.server.inject({
+              method: method.toUpperCase() as 'POST',
+              url,
+              headers: { ...authed(project), 'content-type': 'application/json' },
+              payload,
+            });
+            if (answer.statusCode >= 500) {
+              broke.push(`${method.toUpperCase()} ${path} on ${Object.keys(payload)[0]}: ${answer.statusCode}`);
+            }
+          }
+        }
+      }
+
+      assert.deepEqual(broke.sort(), [], 'a crafted value is refused or ignored, never answered with a 5xx');
+    } finally {
+      await harness.stop();
+    }
+  });
+});
+
 describe('a project cannot revoke its own way in', () => {
   /**
    * Measured before it was guarded: the call answered `{"ok":true}` and shut
