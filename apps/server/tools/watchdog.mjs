@@ -73,6 +73,7 @@ const state = {
   noticeAlerted: saved.noticeAlerted === true,
   backupMisses: Number(saved.backupMisses) || 0,
   backupAlerted: saved.backupAlerted === true,
+  restoreAlerted: saved.restoreAlerted === true,
   lastNote: typeof saved.lastNote === 'string' ? saved.lastNote : null,
   keyCheckedAt: typeof saved.keyCheckedAt === 'string' ? saved.keyCheckedAt : null,
   keyAlerted: saved.keyAlerted === true,
@@ -242,14 +243,20 @@ if (readUrl) {
 const BACKUP_MAX_AGE_HOURS = 48;
 let backupAge = null;
 let backupsFresh = false;
+let restoreFailed = false;
+let restoreSaidForAlert = 'no reason recorded';
 {
   const dir = join(HOME, 'backups');
   let newest = null;
+  let newestName = null;
   if (existsSync(dir)) {
     for (const name of readdirSync(dir)) {
       if (!name.endsWith('.json.gz')) continue;
       const at = statSync(join(dir, name)).mtimeMs;
-      if (newest === null || at > newest) newest = at;
+      if (newest === null || at > newest) {
+        newest = at;
+        newestName = name;
+      }
     }
   }
   // Compared raw and rounded only to say it out loud. Rounding first moves the
@@ -274,6 +281,48 @@ let backupsFresh = false;
         ? 'no archive in ~/.muster/backups'
         : `newest is ${Math.round(backupAge)}h old`,
   });
+
+  /**
+   * The other half: an archive exists, but does it come back?
+   *
+   * The check above answers whether anything is still writing files, which is
+   * the cheap half and the one that catches a laptop asleep at three. It says
+   * nothing about whether the newest file restores, and a file that gzips
+   * cleanly and holds an empty collection passes it. `backup.mjs --verify`
+   * answers that question by restoring into a scratch database, and it runs
+   * from the same cron line as the backup, at an hour nobody is reading a log.
+   * So it leaves its answer beside the archives and this reads it.
+   *
+   * Two states, deliberately not one. A record that says `false` about the
+   * newest copy is the archive failing to come back, and it is worth waking
+   * somebody. A record that is missing, or about some other copy, means the
+   * check has not run for this one, which is what every machine looks like
+   * until the schedule is installed: that belongs in the hourly line, not in
+   * the mail.
+   */
+  let restoreSaid = 'not checked';
+  const record = join(dir, 'verified.json');
+  if (existsSync(record)) {
+    try {
+      const seen = JSON.parse(readFileSync(record, 'utf8'));
+      const forNewest = newestName !== null && seen.file === newestName;
+      const ageH = (Date.now() - Date.parse(seen.at)) / 3_600_000;
+      if (seen.ok !== true) {
+        restoreFailed = forNewest;
+        restoreSaid = forNewest
+          ? `the newest copy did not come back: ${(seen.failures ?? []).join('; ') || 'no reason recorded'}`
+          : `an older copy did not come back (${seen.file})`;
+      } else if (forNewest) {
+        restoreSaid = `newest came back ${Math.round(ageH)}h ago`;
+      } else {
+        restoreSaid = `checked ${seen.file}, not the newest`;
+      }
+    } catch {
+      restoreSaid = 'the record of the last check is unreadable';
+    }
+  }
+  restoreSaidForAlert = restoreSaid;
+  checks.push({ name: 'restores', ok: !restoreFailed, local: true, status: restoreSaid });
 }
 
 // Production only. The backup check reports beside these and is answered on its
@@ -516,6 +565,45 @@ if (broken.length > 0) {
   } else {
     say(`backup miss ${state.backupMisses}: newest ${since}`);
   }
+}
+
+/**
+ * A copy that exists and does not come back.
+ *
+ * Latched rather than counted, and counted nowhere: the miss counter above
+ * exists because one missing archive is a closed laptop and two is a broken
+ * schedule, which is a guess about a machine. This is not a guess. The check
+ * restored the newest archive into a scratch database and it did not come
+ * back, and running it again fifteen minutes later reads the same record and
+ * reaches the same answer. Waiting for a second identical failure only buys
+ * another quarter of an hour of not knowing.
+ */
+if (broken.length > 0) {
+  // Same reason as above: an outage says nothing about the archives.
+} else if (restoreFailed && !state.restoreAlerted) {
+  const filed = await fileOnTheBoard(
+    'The newest backup does not restore. Every copy we have may be unreadable.',
+    `\`node tools/backup.mjs --verify\` restored the newest archive into a scratch database and `
+      + `it did not come back: ${restoreSaidForAlert}. The free Atlas tier takes no snapshots, so `
+      + 'these files are the only copy that exists, and an archive that does not restore is not one. '
+      + 'The record is ~/.muster/backups/verified.json; run the command by hand to see it fail.',
+  );
+  const delivery = filed === 'filed' ? 'not needed' : await mail('A Muster backup does not restore', [
+    `The newest archive in ~/.muster/backups did not come back: ${restoreSaidForAlert}.`,
+    '',
+    'The free Atlas tier takes no snapshots, so these files are the only copy that exists.',
+    `Filing this on the board was refused: ${filed}.`,
+    '',
+    'cd ~/projects/muster/apps/server && node tools/backup.mjs --verify',
+  ]);
+  state.restoreAlerted = filed === 'filed' || delivery === 'sent';
+  say(
+    `backup does not restore: ${restoreSaidForAlert} | board ${filed} | email ${delivery}`
+      + (state.restoreAlerted ? '' : ' | nothing landed, will try again'),
+  );
+} else if (!restoreFailed && state.restoreAlerted) {
+  say('the newest backup comes back again');
+  state.restoreAlerted = false;
 }
 
 /**

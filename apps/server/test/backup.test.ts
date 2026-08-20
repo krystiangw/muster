@@ -147,6 +147,18 @@ describe('the nightly backup', () => {
     assert.match(checked, /documents came back/);
     assert.match(checked, /counts and shapes intact/);
 
+    // The check runs at three in the morning from a cron line, so its answer
+    // has to outlive the log nobody opens: it leaves a record beside the
+    // archive, and the watchdog reads that record every quarter of an hour.
+    const record = () =>
+      JSON.parse(readFileSync(join(dir, 'verified.json'), 'utf8')) as {
+        ok: boolean;
+        file: string;
+        failures: string[];
+      };
+    assert.equal(record().ok, true);
+    assert.equal(record().file, file, 'named, so a record about an older copy cannot pass for this one');
+
     // And it says no when the copy is not one. A date turned back into text is
     // the rot this format is most likely to grow, and a count would never see
     // it: the rows all arrive, and every query that compares a date stops
@@ -173,6 +185,12 @@ describe('the nightly backup', () => {
     }
     assert.equal(code, 1, 'a copy that does not come back has to fail, or a schedule cannot read it');
     assert.match(said, /dates came back as text/);
+    // Written on the failing path too, and this is the path that matters: the
+    // night the archive stops restoring is the night something has to be able
+    // to read that it did.
+    assert.equal(record().ok, false);
+    assert.equal(record().file, 'broken.json.gz');
+    assert.match(record().failures.join(' '), /dates came back as text/);
 
     const check = (archive: string): { code: number; said: string } => {
       try {

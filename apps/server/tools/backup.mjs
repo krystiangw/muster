@@ -21,10 +21,18 @@
  * accident is restoring into production instead of a scratch copy.
  */
 import { createGzip, createGunzip } from 'node:zlib';
-import { createReadStream, createWriteStream, mkdirSync, readdirSync, statSync, unlinkSync } from 'node:fs';
+import {
+  createReadStream,
+  createWriteStream,
+  mkdirSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { MongoClient } from 'mongodb';
 
 const args = process.argv.slice(2);
@@ -119,6 +127,38 @@ if (args.includes('--verify')) {
     );
     process.exit(1);
   }
+  /**
+   * What the check found, left where something else can read it.
+   *
+   * A check nobody reads is a check that has already failed: this one runs at
+   * three in the morning from a cron line, and its only reader would otherwise
+   * be a log file. The watchdog reads this record every quarter of an hour and
+   * says so out loud, which is the difference between knowing the copy comes
+   * back and hoping it does. Written on the failing path too, and first,
+   * because the night the archive stops restoring is the night this file has
+   * to exist and say `false`.
+   *
+   * Beside the archive it is about, rather than in this tool's own default
+   * directory: the two are the same directory on the machine that runs the
+   * schedule, and they are not the same when somebody checks a copy from
+   * anywhere else. A record dropped into the operator's backups saying an
+   * archive from a scratch directory did not come back describes a file that
+   * is not there.
+   */
+  const recordCheck = (ok, failures) => {
+    try {
+      writeFileSync(
+        join(dirname(file), 'verified.json'),
+        JSON.stringify({ at: new Date().toISOString(), file: basename(file), ok, failures }, null, 2),
+      );
+    } catch (error) {
+      // The check itself still answers with its exit code. A directory that
+      // cannot be written to is worth saying and is not worth failing a good
+      // archive over.
+      console.error(`could not write the check's own record: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
   const mongod = await MemoryServer.create();
   const scratch = new MongoClient(mongod.getUri());
   const wrong = [];
@@ -196,9 +236,11 @@ if (args.includes('--verify')) {
   }
 
   if (wrong.length > 0) {
+    recordCheck(false, wrong);
     console.error(`\nThis copy does not come back cleanly:\n  ${wrong.join('\n  ')}`);
     process.exit(1);
   }
+  recordCheck(true, []);
 
   // Said, never failed on. A collection that had rows and now has none is
   // worth an eyebrow and is not by itself wrong: emptying one is what a purge

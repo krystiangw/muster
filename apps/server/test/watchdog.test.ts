@@ -172,6 +172,55 @@ describe('the watchdog, watched', () => {
     assert.equal(saved().failures, 0);
   });
 
+  /** The record `backup.mjs --verify` leaves beside the archive it checked. */
+  const restoreRecorded = (ok: boolean, file = 'muster-test.json.gz', failures: string[] = []): void => {
+    writeFileSync(
+      join(home, 'backups', 'verified.json'),
+      JSON.stringify({ at: new Date().toISOString(), file, ok, failures }),
+    );
+  };
+
+  it('says nothing checked the copy, rather than saying it came back', async () => {
+    await round();
+    assert.match(await round(), /restores not checked/, 'an unchecked copy is not a checked one');
+  });
+
+  it('says the newest copy came back when the check left its record', async () => {
+    await round();
+    restoreRecorded(true);
+    // The hourly line, and only the second round can print one: the first
+    // spends the hour saying the alerting key is not on this machine.
+    assert.match(await round(), /restores newest came back/);
+  });
+
+  it('pages once when the newest copy does not come back', async () => {
+    await round();
+    restoreRecorded(false, 'muster-test.json.gz', ['dates came back as text, not dates (items.createdAt)']);
+    const out = await round();
+    assert.match(out, /backup does not restore: .*dates came back as text.* \| board/,
+      'the line a person reads at three in the morning says which copy and why');
+    assert.equal(saved().restoreAlerted, true);
+
+    // Latched, not counted: reading the same file again reaches the same
+    // answer, so a second alert would be the same news twice.
+    assert.doesNotMatch(await round(), /backup does not restore/);
+
+    restoreRecorded(true);
+    assert.match(await round(), /the newest backup comes back again/);
+    assert.equal(saved().restoreAlerted, false);
+  });
+
+  it('does not read a record about some other copy as a verdict on this one', async () => {
+    await round();
+    // The archive was replaced after the check ran, which is what every night
+    // looks like between the backup and the check. Silence, not an alarm.
+    restoreRecorded(false, 'muster-yesterday.json.gz', ['whatever went wrong with that one']);
+    const out = await round();
+    assert.match(out, /an older copy did not come back/);
+    assert.doesNotMatch(out, /backup does not restore/);
+    assert.equal(saved().restoreAlerted, false);
+  });
+
   it('notices that nothing has written a backup for two nights', async () => {
     // The failure that leaves every other check green, because the cron for it
     // runs on the operator's machine and not on the dyno. Two rounds, like an
