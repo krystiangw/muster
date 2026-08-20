@@ -1580,6 +1580,8 @@ ${
             ? `Nothing was written to "${touched.slug}": one of the names you typed is not a slug. It is still waiting on ${(touched.blockedBy ?? []).length > 0 ? (touched.blockedBy ?? []).join(', ') : 'nothing'}.`
             : query.what === 'waiting_itself'
             ? `Nothing was written to "${touched.slug}": a card cannot wait on itself.`
+            : query.what === 'waiting_circle'
+            ? `Nothing was written to "${touched.slug}": one of those cards is already waiting on "${touched.slug}", directly or through others, so they would wait round in a circle and none of them could ever start.`
             : query.what === 'waiting_too_many'
             ? `Nothing was written to "${touched.slug}": a card waits on at most ${MAX_BLOCKERS} others, and more than that is a plan rather than a dependency. It belongs in the description.`
             : query.what === 'waiting'
@@ -1875,7 +1877,9 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
           ? 'waiting_itself'
           : reason === 'too_many'
             ? 'waiting_too_many'
-            : 'waiting_refused';
+            : reason === 'a_circle'
+              ? 'waiting_circle'
+              : 'waiting_refused';
     }
     const params = new URLSearchParams({
       done: form.slug,

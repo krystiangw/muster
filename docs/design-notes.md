@@ -2434,3 +2434,11 @@ exist: fourteen collections, six of them carrying a project id, zero orphaned
 rows, and no project past its expiry still present. The counters agree with the
 board too: twenty projects, and `counts.items` matches a count of the
 non-terminal items in every one of them.
+
+**The fourth reason arrived and the page was still saying three.** The browser
+form that sets what a card waits on carries a `reason` beside the refusal code
+for one purpose, written in a comment above it: telling somebody who typed the
+card's own slug that their name is not a slug sends them looking for a spelling
+mistake that is not there. A circle is the fourth reason and it landed in the
+generic branch, which says exactly that sentence. It has its own now, naming
+what is wrong rather than what is not.

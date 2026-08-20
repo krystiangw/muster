@@ -3502,6 +3502,36 @@ describe('a card that waits on another', () => {
     assert.match(page.body, /cannot wait on itself/);
   });
 
+  it('says a circle is a circle, rather than sending somebody after a typo', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'front', title: 't', body: 'b', actor: 'a' });
+    await post(project, '/items', { slug: 'back', title: 't', body: 'b', actor: 'a' });
+    await post(project, '/items', { slug: 'back', blocked_by: ['front'], actor: 'a' });
+    const readToken = project.readUrl.split('/r/')[1]!;
+
+    // The generic refusal on this form says one of the names is not a slug,
+    // which is the one thing that is definitely not wrong here. The service
+    // carries the reason beside the code precisely so the page can say the
+    // true one; a fourth reason arrived and the page was still saying three.
+    const refused = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/waiting`,
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: new URLSearchParams({ slug: 'front', waiting: 'back' }).toString(),
+    });
+    assert.match(refused.headers.location as string, /what=waiting_circle/);
+    const page = await harness.server.inject({
+      method: 'GET',
+      url: refused.headers.location as string,
+    });
+    assert.match(page.body, /wait round in a circle/);
+    assert.doesNotMatch(page.body, /is not a slug/);
+
+    // And nothing was written, which is what "nothing was written" has to mean.
+    const stored = await harness.store.items.findOne({ projectId: project.id, slug: 'front' });
+    assert.deepEqual(stored?.blockedBy ?? [], []);
+  });
+
   it('takes a list a person typed with commas, spaces or both', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'one', title: 't', body: 'b', actor: 'a' });
