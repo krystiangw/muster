@@ -2789,3 +2789,71 @@ Which is the third question from this morning, asked of a guard written this
 afternoon, by somebody else. That is the useful shape of it: the question is
 easy to ask of other people's code and hard to ask of the thing you just wrote.
 
+## Three answers nobody was reading
+
+2026-08-20. Three things shipped today and they turned out to be one thing
+wearing three coats: a statement about the world with nothing checking it
+against the world.
+
+**The check that ran at three in the morning into a log file.** `backup.mjs
+--verify` restores the newest archive into a scratch database and says whether
+it comes back. It was written yesterday, it was correct, and it was useless in
+the place it mattered: the only caller anybody would ever add is a cron line,
+and a cron line's output goes to a log nobody opens. So the check leaves a
+record beside the archive it checked, and the watchdog reads it every quarter
+of an hour and says it in the hourly line. The rule underneath: a check is
+finished when something reads its answer, not when it produces one.
+
+Review found three ways the first version of that was wrong, and all three are
+the same mistake in different clothes. The alarm cleared itself on "not
+failing", which the next night's archive achieves merely by existing: the old
+record stops being about the newest file, so the failure stops being reported,
+and if the check never runs again the latch is gone with nobody told. An alarm
+that goes quiet because the evidence moved is worse than one that never fired.
+Then the record matched the archive by name, and the name carries only the
+minute it was written, so a run repeated inside one minute writes over the file
+the record describes. Then the stat that captures that identity ran *after* the
+restore, which puts the replacement's numbers beside a verdict about bytes that
+are gone. Each fix is the same sentence: bind the answer to what was actually
+read, and do not let an absence of evidence read as evidence.
+
+**The number that claimed a person.** The answer doors count how a question got
+answered, and the field exists to settle one question: do people answer from a
+browser at all. The form on the capability link takes a post from anything
+holding the link, and every one of those was counted as `browser`. So an agent
+closing the question it filed itself pushed up the number that was supposed to
+say whether humans do. A post with no `Sec-Fetch-Site`, no `Origin` and nobody
+signed in is a program, and it is counted as `link` now. The behaviour of the
+route is untouched, on purpose: whether that door should exist is a decision
+with an owner, and this is only the number telling the truth about itself. It
+is also the cheapest possible instrument for that decision, since a week of it
+says whether the door is walked in real traffic or only in our own tests.
+
+**The inventory that was missing one.** `READ_LINK_GRANTS` is the sentence five
+documents share about what somebody holding a read link can do. It is written
+as an inventory rather than a summary, down to consolidating two spellings of
+one agent, because a warning that undersells the authority gets believed. It
+never said that the holder can hold a card behind other cards. That is the one
+power on the list that stops work instead of changing it: a card waiting on
+another is offered to nobody until the other is done. The test guarding the
+sentence checked eight phrases against the rendered page, which is the sentence
+checked against itself, so the gap was invisible from inside.
+
+The guard now reads the write routes on the link and requires each one to be
+either named in the sentence or gated by more than the link. The first version
+of that read the *source* and matched one spelling of `app.post('...')`, and
+review asked the obvious question: what about double quotes, two lines,
+`app.route`, a path in a constant. Every one of those would have been invisible
+while the `>= 12` floor kept the test green. So the server keeps the routes it
+registered and the test reads those. The mutation is the proof and it is worth
+writing down as a habit: add the thing the guard is supposed to catch, in the
+form the guard is least likely to see, and watch it go red.
+
+**What the three had in common.** Yesterday's second question was whether a
+published sentence is narrower or wider than the code, and it found the third
+of these. It did not find the first two, because they are not sentences: they
+are a check with no reader and a counter with no definition. So the question
+generalises, and the general form is better: *who reads this answer, and what
+would they conclude if the thing it describes had changed underneath it?* A
+check nobody reads, a count that merges two populations, and an inventory
+nobody compares with the doors all fail that question the same way.
