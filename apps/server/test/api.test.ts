@@ -257,15 +257,14 @@ describe('items', () => {
     // the ones it asked for, and the caller has no way to tell. The column
     // filter has been lost through a read here before.
     const project = await createProject(harness, 'narrowed');
-    for (let n = 0; n < 30; n += 1) {
-      await post(project, '/items', {
-        slug: n % 3 === 0 ? `ops:row-${n}` : `docs:row-${n}`,
-        title: `row ${n}`,
-        actor: 'importer',
-        status: n % 5 === 0 ? 'blocked' : 'open',
-        labels: n % 2 === 0 ? ['even'] : ['odd'],
-      });
-    }
+    const rows = Array.from({ length: 30 }, (_, n) => ({
+      slug: n % 3 === 0 ? `ops:row-${n}` : `docs:row-${n}`,
+      title: `row ${n}`,
+      actor: 'importer',
+      status: n % 5 === 0 ? 'blocked' : 'open',
+      labels: n % 2 === 0 ? ['even'] : ['odd'],
+    }));
+    for (const row of rows) await post(project, '/items', row);
 
     const walk = async (query: string, limit: number): Promise<string[]> => {
       const seen: string[] = [];
@@ -283,17 +282,24 @@ describe('items', () => {
       return seen;
     };
 
-    for (const [query, expected] of [
-      ['&prefix=ops:', 10],
-      ['&label=even', 15],
-      ['&status=blocked', 6],
-      // Odd rows that are not every third one: fifteen minus the five that are both.
-      ['&prefix=docs:&label=odd', 10],
-      ['&order=recent&label=even', 15],
-    ] as [string, number][]) {
+    // Which rows, and not how many. Counting passes while page two swaps the
+    // rows that were asked for with the same number of rows that were not,
+    // which is the shape this is about: the caller sees a full page and has no
+    // way to know it is the wrong one.
+    for (const [query, belongs] of [
+      ['&prefix=ops:', (row: (typeof rows)[number]) => row.slug.startsWith('ops:')],
+      ['&label=even', (row: (typeof rows)[number]) => row.labels.includes('even')],
+      ['&status=blocked', (row: (typeof rows)[number]) => row.status === 'blocked'],
+      [
+        '&prefix=docs:&label=odd',
+        (row: (typeof rows)[number]) => row.slug.startsWith('docs:') && row.labels.includes('odd'),
+      ],
+      ['&order=recent&label=even', (row: (typeof rows)[number]) => row.labels.includes('even')],
+    ] as [string, (row: (typeof rows)[number]) => boolean][]) {
+      const wanted = rows.filter(belongs).map((row) => row.slug).sort();
       const seen = await walk(query, 4);
-      assert.equal(seen.length, expected, `${query} came back whole: ${seen.length}`);
-      assert.equal(new Set(seen).size, expected, `${query} came back once each`);
+      assert.deepEqual(seen.slice().sort(), wanted, `${query} came back, and nothing else did`);
+      assert.equal(new Set(seen).size, seen.length, `${query} came back once each`);
     }
   });
 
