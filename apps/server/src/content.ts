@@ -503,7 +503,9 @@ claim, so ownership cannot drift away from status. Closing an item releases
 whatever claim it carried, for the same reason: finished work is not work in
 progress, whoever closed it. The rule holds from the other side too, and a
 claim on a card that is \`done\` or \`dropped\` is refused rather than granted:
-reopen it first if the work needs doing again.
+reopen it first if the work needs doing again. Moving it into a column that
+puts it back in play does both halves in one call, which is what the board
+does when somebody drags a finished card into the in-progress column.
 
 **\`blocked\` means waiting on somebody who is not an agent.** Use it the moment
 you file the escalation, not later: \`/next\` offers open items, so anything

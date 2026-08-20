@@ -1953,13 +1953,24 @@ export async function claimItem(
   agent: string,
   ttlMinutes?: number,
   /**
-   * Internal: this is the second attempt after the blocker guard lost a race
+   * Internal, and only ever set by this module and the move beside it.
+   *
+   * `retried`: this is the second attempt after the blocker guard lost a race
    * to a change that does not block anything. Once, never in a loop, because
    * two callers editing the same list forever is a livelock and the honest
    * answer at that point is the ordinary "somebody else is writing here".
+   *
+   * `reopening`: the caller is a board move that is about to write a status
+   * putting this card back in play, and it takes the lease first because that
+   * is the step most likely to fail on somebody else's account. Dragging a
+   * finished card into the in-progress column is one operation, and refusing
+   * its first half would break a move the board offers. Narrow on purpose: it
+   * says a reopen is coming in the same call, not that finished work may be
+   * claimed, and a move into a column that only claims does not set it.
    */
-  retried = false,
+  internal: { retried?: boolean; reopening?: boolean } = {},
 ): Promise<ClaimResult> {
+  const { retried = false, reopening = false } = internal;
   // The handle is matched against a live claim and then written into one. An
   // object here reads as an operator on the way in and is stored as the holder
   // on the way out, which is a lease nobody can release by name.
@@ -1989,7 +2000,7 @@ export async function claimItem(
   // column that asks only for claimed items shows it as moving. Refused
   // before the blockers below, because what a finished card waits on is not
   // news anybody can act on.
-  if (before && TERMINAL_STATUSES.includes(before.status)) {
+  if (!reopening && before && TERMINAL_STATUSES.includes(before.status)) {
     throw finishedAlready(normalized, before.status);
   }
   if (before) {
@@ -2012,8 +2023,9 @@ export async function claimItem(
       slug: normalized,
       // The read above is a moment old, and closing a card is one write away.
       // Stated again in the filter so a close landing in that gap takes the
-      // lease off the table rather than losing to it.
-      status: { $nin: [...TERMINAL_STATUSES] },
+      // lease off the table rather than losing to it. Left out for a reopening
+      // move, which read the terminal status itself and is about to change it.
+      ...(reopening ? {} : { status: { $nin: [...TERMINAL_STATUSES] } }),
       $and: [
         {
           $or: [
@@ -2066,7 +2078,7 @@ export async function claimItem(
   // The half of the fence above that has to speak. A card closed while this
   // call was in flight has no holder to name and nothing left waiting, so
   // both answers below would describe a card that no longer exists.
-  if (TERMINAL_STATUSES.includes(current.status)) {
+  if (!reopening && TERMINAL_STATUSES.includes(current.status)) {
     throw finishedAlready(normalized, current.status);
   }
   // The lease may have been refused by the guard rather than by another
@@ -2084,7 +2096,7 @@ export async function claimItem(
   const guardLost =
     JSON.stringify(current.blockedBy ?? null) !== JSON.stringify(snapshot ?? null);
   if (guardLost && !retried) {
-    return claimItem(store, project, slug, agent, ttlMinutes, true);
+    return claimItem(store, project, slug, agent, ttlMinutes, { ...internal, retried: true });
   }
   return { ok: false, item: current as ItemDoc, heldBy: current.claim?.agent ?? 'unknown' };
 }

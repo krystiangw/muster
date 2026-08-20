@@ -2133,3 +2133,19 @@ not filter on status and clears any expired lease it finds; it is throttled per
 project and only runs when somebody touches the project. That project is an
 abandoned probe, untouched since the row was written, which is why the lease is
 still sitting there and why it will be gone the moment anything reads it.
+
+**And the review found the half the measurement missed.** Four closing doors
+were walked before the guard went in, and none of them was the door that
+breaks: dragging a *finished* card into the in-progress column. That move is a
+reopen and a claim in one, and it takes the claim first, deliberately, because
+that is the half most likely to fail on somebody else's account and everything
+after it hands the lease back. The new refusal turned a supported board
+operation into a 409.
+
+The way through is as narrow as the operation: the move already computes
+whether it is reopening, from its own read of the card and of what the column
+will write, and it says so when it asks for the lease. A move into a column
+that only claims does not say it, and meets the refusal like anybody else,
+because that column is precisely the one that would show finished work as
+somebody's work in progress. Both directions are pinned: forcing the hatch open
+fails the three refusal tests, and taking it away fails the reopen.

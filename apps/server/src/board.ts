@@ -840,7 +840,11 @@ export async function moveItem(
   let ourClaimAt: Date | null = null;
 
   if (apply.claim) {
-    const claimed = await claimItem(store, project, slug, options.actor);
+    // `reopens` is this move's own read of the card and of what the column
+    // will write to it. A move that reopens carries the finished card through
+    // its own guard; every other claim, this one included when the column only
+    // claims, meets the refusal like anybody else.
+    const claimed = await claimItem(store, project, slug, options.actor, undefined, { reopening: reopens });
     if (!claimed.ok) {
       throw new ServiceError(
         409,

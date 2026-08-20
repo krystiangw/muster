@@ -680,6 +680,51 @@ describe('moving an item into a column', () => {
     });
   }
 
+  it('takes a finished card back into progress, which is one operation', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'work', title: 'work', actor: 'a' });
+    await post(project, '/items', { slug: 'work', status: 'done', actor: 'a' });
+
+    // Dragging a done card into the in-progress column reopens it and claims
+    // it, and the claim goes first because it is the half most likely to fail
+    // on somebody else's account. Finished work refuses a lease, and this is
+    // the one caller that carries the card through that refusal: the same call
+    // is about to write the status that ends it.
+    const back = await move(project, 'work', 'doing', 'worker');
+    assert.equal(back.statusCode, 200, back.body);
+    assert.equal(back.json().landed_in, 'doing');
+    assert.equal(back.json().item.status, 'open');
+    assert.equal(back.json().item.claim.agent, 'worker');
+  });
+
+  it('refuses it into a column that claims without reopening anything', async () => {
+    const project = await createProject(harness);
+    const laid = await harness.server.inject({
+      method: 'PUT',
+      url: `${project.api}/board`,
+      headers: authed(project),
+      payload: {
+        columns: [
+          { key: 'busy', title: 'Somebody is on it', match: { claimed: true } },
+          { key: 'rest', title: 'The rest', match: { status: ['open'] } },
+        ],
+      },
+    });
+    assert.equal(laid.statusCode, 200, laid.body);
+    await post(project, '/items', { slug: 'work', title: 'work', actor: 'a' });
+    await post(project, '/items', { slug: 'work', status: 'done', actor: 'a' });
+
+    // The escape hatch above is exactly as wide as the reopen. A column that
+    // only claims would show finished work as somebody's work in progress,
+    // which is the thing the refusal exists to stop.
+    const refused = await move(project, 'work', 'busy', 'worker');
+    assert.equal(refused.statusCode, 409);
+    assert.equal(refused.json().error, 'already_finished');
+    const after = await harness.store.items.findOne({ projectId: project.id, slug: 'work' });
+    assert.equal(after?.claim, null, 'and the refused move holds nothing');
+    assert.equal(after?.status, 'done');
+  });
+
   it('reads the default board as claim, release and status', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'work', title: 'work', actor: 'a' });
@@ -864,6 +909,10 @@ describe('moving an item into a column', () => {
       // 409, like every other way of meeting this cap: it is a conflict with
       // what the board holds, not a request to slow down.
       assert.equal(refused.statusCode, 409, 'reopening at the cap is refused');
+      // Which 409, because a second one now answers this door: a lease is not
+      // handed out over finished work, and a test reading only the status
+      // would pass on the wrong refusal.
+      assert.equal(refused.json().error, 'limit_reached');
 
       const item = await isolated.store.items.findOne({ projectId: project.id, slug: 'fill-0' });
       assert.equal(item!.claim, null, 'and the refused move holds nothing');
