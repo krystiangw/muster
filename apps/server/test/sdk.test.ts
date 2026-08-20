@@ -625,6 +625,31 @@ describe('the package a fleet installs', () => {
     }
   });
 
+  it('puts the files its manifest names into the tarball it would publish', async () => {
+    // The tests around this one read the working directory, which is not what
+    // anybody installs. A `files` list that stopped naming `dist` would leave
+    // every one of them green and publish a package whose entry point is not
+    // in it. `npm pack --dry-run` answers that without publishing and without
+    // an install: it is the same list the tarball would carry.
+    const packed = JSON.parse(
+      execFileSync('npm', ['pack', '--dry-run', '--json'], { cwd: sdk, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }),
+    ) as Array<{ files: Array<{ path: string }> }>;
+    const inside = new Set(packed[0]!.files.map((file) => file.path));
+    const manifest = JSON.parse(readFileSync(join(sdk, 'package.json'), 'utf8')) as {
+      main: string;
+      types: string;
+      exports: Record<string, Record<string, string>>;
+    };
+    for (const named of [
+      manifest.main,
+      manifest.types,
+      ...Object.values(manifest.exports).flatMap((entry) => Object.values(entry)),
+    ]) {
+      const path = named.replace(/^\.\//, '');
+      assert.ok(inside.has(path), `${path} is what the manifest points at and it is not in the tarball`);
+    }
+  });
+
   it('drives a session through the built entry point, the way an install would', async () => {
     // The file the manifest points at, not the one I expect it to point at.
     // An exports map moved to some other file that happens to exist passes
