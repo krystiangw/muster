@@ -499,8 +499,18 @@ const run = async () => {
   );
 
   const keys = await json(`${api}/keys`, { headers: { authorization: `Bearer ${token}` } });
-  const live = (keys.body?.keys ?? []).filter((one) => !one.revoked_at && one.role === 'admin');
-  const onlyOne = live.length === 1 ? live[0] : null;
+  // Asked before anything is concluded from it. An unreadable list gives an
+  // empty one, an empty one has no last admin key in it, and the branch below
+  // would then record the skip as a pass: the walk would say all clear exactly
+  // when the door it was about to try had stopped opening.
+  const listed = keys.status === 200 && Array.isArray(keys.body?.keys) ? keys.body.keys : null;
+  check(
+    'the keys this project has can be read',
+    listed !== null,
+    `${keys.status} ${JSON.stringify(keys.body).slice(0, 120)}`,
+  );
+  const live = (listed ?? []).filter((one) => !one.revoked_at && one.role === 'admin');
+  const onlyOne = listed !== null && live.length === 1 ? live[0] : null;
   if (onlyOne) {
     const refused = await json(`${api}/keys/${onlyOne.id}`, {
       method: 'DELETE',
@@ -513,7 +523,7 @@ const run = async () => {
     );
     const still = await json(api, { headers: { authorization: `Bearer ${token}` } });
     check('the refusal left the key working', still.status === 200, still.status);
-  } else {
+  } else if (listed !== null) {
     // Not a failure: this project has been given a second admin key by hand,
     // and the refusal is only about the last one. Said out loud rather than
     // skipped silently, because a step that quietly stops running is the
