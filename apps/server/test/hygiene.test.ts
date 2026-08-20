@@ -359,23 +359,37 @@ describe('contentless items', () => {
     assert.equal((await itemDoc(project, 'affirmed')).status, 'dropped');
   });
 
-  it('loses the reopening to somebody affirming the close at the same moment', async () => {
-    // Two writes arriving together: one saying the card stays dropped, one
-    // describing it. Whichever reads first, the card must not end up open,
-    // and that only holds if the undo is guarded on the marker it read rather
-    // than on the status alone: affirming a close clears the marker and
-    // leaves the status where it is, so a status guard sees no change at all.
+  it('loses the reopening to an affirmation that already landed', async () => {
+    // Ordered on purpose, because the two orderings do not answer the same
+    // way and pretending otherwise is what a raced test would do. This is the
+    // one the marker exists for: affirming a close clears the marker and
+    // leaves the status exactly where it was, so a reopening guarded on the
+    // status alone would have seen nothing changed and won anyway.
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'raced', title: 't', actor: 'a' });
     await backdate(project, 'raced', { createdAt: hoursAgo(48) });
     await sweepProject(harness.store, await projectDoc(project));
-    assert.equal((await itemDoc(project, 'raced')).status, 'dropped');
 
-    await Promise.all([
-      post(project, '/items', { slug: 'raced', status: 'dropped', actor: 'a' }),
-      post(project, '/items', { slug: 'raced', body: 'described', actor: 'a' }),
-    ]);
+    await post(project, '/items', { slug: 'raced', status: 'dropped', actor: 'a' });
+    await post(project, '/items', { slug: 'raced', body: 'described', actor: 'a' });
     assert.equal((await itemDoc(project, 'raced')).status, 'dropped');
+  });
+
+  it('is an ordinary write when the description gets there first', async () => {
+    // The other ordering, written down rather than claimed away. A caller
+    // naming the status a card already has is making no change, so it cannot
+    // defend that card against a write that arrives after its read: that is
+    // true of any two writes here and it is not special to the undo. The undo
+    // is the weaker write only against an affirmation that has already
+    // landed, which is the case above.
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'ordering', title: 't', actor: 'a' });
+    await backdate(project, 'ordering', { createdAt: hoursAgo(48) });
+    await sweepProject(harness.store, await projectDoc(project));
+
+    await post(project, '/items', { slug: 'ordering', body: 'described', actor: 'a' });
+    await post(project, '/items', { slug: 'ordering', status: 'dropped', actor: 'a' });
+    assert.equal((await itemDoc(project, 'ordering')).status, 'dropped', 'and a status that does move, moves it');
   });
 
   it('does not reopen on a write that is guarded on what the caller last saw', async () => {

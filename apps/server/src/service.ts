@@ -1460,10 +1460,25 @@ export async function upsertItem(
         status: existing.status,
         // A synthesized undo is guarded on the marker it read, not only on the
         // status. Both are the same value in the moment it was read, and they
-        // stop being the same the instant somebody else affirms the close:
-        // that write clears the marker and leaves the status alone, so a
-        // transition guarded on status alone would still win and put back work
-        // that had just been kept closed, in that order.
+        // stop being the same the instant somebody affirms the close: that
+        // write clears the marker and leaves the status alone, so a transition
+        // guarded on status alone would see nothing changed and put back work
+        // that had just been kept closed.
+        //
+        // Only against an affirmation that has already landed. A caller naming
+        // the status a card already has is making no change, so it cannot
+        // defend that card against a write that arrives after its read, and
+        // that is true of any two writes here rather than anything about this
+        // one. Both sequential orderings are written down in the tests.
+        //
+        // No test reaches this line, and that is said rather than hidden: once
+        // an affirmation has landed the marker is already gone, so the undo
+        // never starts and this filter is not what refuses it. What it covers
+        // is the interleaving where both writes read the card first and the
+        // affirmation commits in between, which a test can only reproduce by
+        // racing and would then pass or fail on timing. Removing it therefore
+        // breaks nothing that runs, which is exactly the kind of line that
+        // gets deleted by somebody tidying up.
         ...(undoesTheMachine ? { closedBy: closedByTheMachine } : {}),
       },
       {
