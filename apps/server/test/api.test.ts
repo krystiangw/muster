@@ -1033,6 +1033,13 @@ describe('next', () => {
     const next = await get(project, '/next?agent=agent-a');
     assert.equal(next.json().item.slug, 'mine');
     assert.match(next.json().reason, /you already hold this claim/);
+    // And the protocol says so where an agent looks for it. The paragraph
+    // about this door described the first call and stopped, which leaves the
+    // behaviour a restarting session depends on to be discovered by trying:
+    // ask again while holding something and you get that same item, not a
+    // second one on top of it.
+    const said = (await harness.server.inject({ method: 'GET', url: '/skill.md' })).body.replace(/\s+/g, ' ');
+    assert.match(said, /you get that same item back/);
   });
 
   it('skips items another agent already holds', async () => {
