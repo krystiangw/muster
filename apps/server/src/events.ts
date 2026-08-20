@@ -584,7 +584,14 @@ function median(values: number[]): number | null {
  * operator of the service looking at their own service, not a feature of it,
  * and adding a URL for it would mean adding a credential to protect it.
  */
-export async function insights(store: Store): Promise<Insights> {
+/**
+ * @param now The instant every window here is measured back from. Passed in so
+ *   a caller printing a second number about the same week cuts it at the same
+ *   millisecond: two readings of the clock a query apart put an event on
+ *   opposite sides of the boundary, and the smaller number then explains a
+ *   larger one it is not part of.
+ */
+export async function insights(store: Store, now = new Date()): Promise<Insights> {
   /**
    * The two questions below that are about people rather than about traffic
    * share one condition: the answer has to have been given on a board that had
@@ -758,7 +765,7 @@ export async function insights(store: Store): Promise<Insights> {
       .toArray(),
     store.events.countDocuments({
       kind: 'view',
-      at: { $gte: new Date(Date.now() - 7 * 86_400_000) },
+      at: { $gte: new Date(now.getTime() - 7 * 86_400_000) },
     }),
     store.projects.countDocuments({}),
     store.projects.countDocuments({ claimedBy: { $ne: null } }),

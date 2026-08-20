@@ -41,7 +41,9 @@ if (!uri) {
 // server starting up rather than a report being read.
 const store = await connectStore(uri, dbName);
 const { events, projects, items } = store;
-const since = (days: number) => new Date(Date.now() - days * 86_400_000);
+/** One reading of the clock for every window in this report. */
+const now = new Date();
+const since = (days: number) => new Date(now.getTime() - days * 86_400_000);
 
 /**
  * When a board view stopped meaning somebody arrived.
@@ -76,7 +78,7 @@ const [
   oldestSweep,
 ] =
   await Promise.all([
-    insights(store),
+    insights(store, now),
     events
       .aggregate<{ _id: string | null; n: number }>([
         { $match: { kind: 'discover' } },
