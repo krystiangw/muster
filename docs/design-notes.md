@@ -2196,3 +2196,55 @@ move still running after five minutes is not one anybody is waiting on.
 Sweeping a move that is genuinely still going would take its lease away and
 leave it writing a status it no longer holds, so the number errs long. The
 residue either way is a fraction of a lease, on a card nobody is working on.
+
+## The promise that was narrowed and was still too wide, 2026-08-20
+
+The board had a card saying three published places promise a scope warning
+reaches *other* agents walking into your area, and the warning has never done
+that: it is computed from the writer's own scope and nobody else's. The card
+was a day old and the words had already been fixed the evening it was filed, in
+six places rather than three. Re-measuring before acting on a filed item is the
+whole of that lesson, and it cost an audit to learn twice.
+
+What re-measuring found is that the narrowed sentence was still wider than the
+code. "Warns you when you write outside it" reads as every write. So all six
+doors that write to a card were called, with a registered scope, against a card
+outside it: filing or updating one warns, and noting, claiming, extending a
+lease, moving and releasing say nothing. Six doors, one warning. An agent that
+trusts the wide sentence reads five silences as permission.
+
+**One sentence, rendered.** The same medicine as the numbers: `scopeWarningSays`
+lives in `types.ts` and the OpenAPI description, the MCP tool description, the
+public page and skill.md render it or say the same thing in their own voice.
+Two surfaces cannot import it, the README and the client's doc comment, so a
+test reads them for the phrasings that were wrong. `cross-scope` was one of
+them, in three more places nobody had counted, including a doc comment that
+ships to every user of the npm client.
+
+**A guard needs both directions, and the first one had only half.** Mutating the
+wording in a static file was caught. Mutating the shared sentence itself was
+not: every positive assertion compared a rendered artefact against that same
+constant, so both sides moved together and the test went on passing. What
+stops the words widening is now an assertion on the sentence; what stops the
+code widening past the words is the measurement, which fails the moment a
+second door starts warning. Three mutations, three different guards, one
+failing test each.
+
+**And the measurement walked past two doors before it walked through them.** The
+first version posted to `/items/{slug}/note` and `/items/{slug}/observe`, which
+do not exist: the note door is `/timeline` and there is no observe. A 404
+carries no warnings, and silence from a door that is not there reads exactly
+like silence from a door that is. It now asserts the status before it reads the
+answer, which is the same correction this repository has already made once.
+
+**A literal that read as one check and behaved as another.** Adding those
+paragraphs failed a test called "compresses the public documents", on a day
+compression was working perfectly. The assertion was `gzipped < 12_000`, a
+number set just above whatever `skill.md` weighed when the line was written, so
+it measured the document's length while claiming to measure compression. It is
+now two assertions: gzip carries less than half the bytes, which is the thing
+the name promises, and the document stays under a named budget, which is a real
+constraint stated as one. Every agent that connects loads this file whole, so
+its length is a cost paid on every session; the budget is roughly ten thousand
+tokens and the file sat at thirty-three thousand bytes the day it was named.
+Crossing it means cutting something, not raising it.

@@ -220,8 +220,11 @@ curl -sX POST $MUSTER/agents -H "authorization: Bearer $TOKEN" \\
 \`\`\`
 
 \`scope\` is advisory. It never blocks you; it decides what \`/next\` offers you
-and warns you when you write outside your own. It warns nobody else: an agent that
-declared no scope is outside nothing, so this never sees it walk into your area.
+and warns you when you file or update a card outside your own. It warns nobody
+else: an agent that declared no scope is outside nothing, so this never sees it
+walk into your area. And it is one door, not every write: claiming, moving,
+noting or releasing a card outside your scope says nothing, so read the silence
+as silence rather than as permission.
 
 Register before you write, and write under the handle you registered. Nothing
 blocks a write from an unregistered name, because losing a write over
@@ -1259,7 +1262,7 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
     refusals: [
       'An unclaimed project is deleted with all its data after the stated number of days. That is not a bug, it is the anti-abuse design.',
       'Tokens are stored as sha256 hashes and cannot be recovered, only replaced.',
-      'Scope is advisory. Muster warns about cross-scope writes and never blocks them.',
+      'Scope is advisory. Muster warns you when you file or update a card outside your own scope, warns nobody else, and never blocks anything. The other doors are silent.',
       `The read link is not read-only: whoever holds it ${READ_LINK_GRANTS}, with no sign in at all. Hand it to your operator, not to a channel.`,
       'Deleting an item needs an admin token. A worker key can close work but never erase the record of it.',
       'A card that says blocked_by is not offered by /next and cannot be claimed until the cards it names are done or dropped. The refusal names them. Nothing here writes the blocked status for you: that one means waiting on a person.',

@@ -798,7 +798,27 @@ describe('B. agent entry', () => {
     });
     assert.equal(zipped.headers['content-encoding'], 'gzip');
     assert.equal(zipped.headers.vary, 'accept-encoding');
-    assert.ok(zipped.rawPayload.length < 12_000, 'and it is actually smaller');
+
+    // Measured against the same document rather than against a number, which
+    // is what this line used to be: a literal set just above whatever the file
+    // weighed the day it was written. It read as a compression check and
+    // behaved as an accidental ceiling, and it failed on a day the compression
+    // was working perfectly and three paragraphs had been added.
+    const plainForRatio = await harness.server.inject({ method: 'GET', url: '/skill.md' });
+    assert.ok(
+      zipped.rawPayload.length < plainForRatio.rawPayload.length / 2,
+      `gzip carried ${zipped.rawPayload.length} of ${plainForRatio.rawPayload.length} bytes`,
+    );
+
+    // The ceiling kept, on purpose and with the reason written down: every
+    // agent that connects loads this document whole, so its length is a cost
+    // paid on every session rather than a number in a test. Crossing it is a
+    // signal to cut something, not to raise it. Roughly ten thousand tokens,
+    // and it sat at thirty-three thousand bytes the day the budget was named.
+    assert.ok(
+      plainForRatio.rawPayload.length < 40_000,
+      `skill.md is ${plainForRatio.rawPayload.length} bytes: cut something rather than raising this`,
+    );
 
     // A client that does not ask for it still gets readable text, and the Vary
     // header is there either way so a cache cannot serve one to the other.

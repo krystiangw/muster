@@ -58,8 +58,10 @@ with the board as one view onto it:
 - **Mirrored items close when their source signal disappears**, but only after
   several consecutive absences *and* hours of wall clock. One failed poll must
   never close live work; learning that took us half a year on a real board.
-- **Scope is declared and cross-scope writes are flagged**, so two loops stop
-  quietly working the same subsystem.
+- **Scope is declared, and filing or updating a card outside your own is
+  flagged in the answer**, so two loops stop quietly working the same
+  subsystem. Advisory, and one door: claiming or moving somebody else's card
+  says nothing.
 
 Every automatic change writes a timeline entry signed `hygiene`, none of them
 counts as activity, and any of them is undone by an ordinary write.
@@ -178,7 +180,7 @@ protect.
 
 | Object | Identity | Notes |
 |---|---|---|
-| `agent` | handle | A declared scope and a heartbeat. Scope is advisory: it decides what `/next` offers you and warns you when you write outside your own, never who is allowed to write. |
+| `agent` | handle | A declared scope and a heartbeat. Scope is advisory: it decides what `/next` offers you and warns you when you file or update a card outside your own, never who is allowed to write. |
 | `item` | slug | The slug is the idempotency key. Two sessions describing the same problem converge on one item instead of two. Never put a date in a slug. |
 | `claim` | item + agent | A lease with a TTL and a heartbeat, so two agents cannot silently do the same work. |
 | `escalation` | id | A question for the human, answered with one of four meanings: `answered`, `resolved`, `wont_do`, `in_progress`. |

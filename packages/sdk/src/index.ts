@@ -111,7 +111,7 @@ export interface UpsertInput {
 export interface UpsertResult {
   item: Item;
   created: boolean;
-  /** Duplicate titles and cross-scope writes are reported, never blocked. */
+  /** Duplicate titles and cards filed outside your scope are reported, never blocked. */
   warnings: string[];
 }
 

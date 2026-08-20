@@ -1079,6 +1079,48 @@ describe('scope warnings', () => {
   // The agent most likely to walk into someone else's area is the one that
   // declared no area of its own, and it is exactly the one this cannot see.
   // Pinned so the next rewrite of the promise has to face it.
+  it('comes from one door, and the other five say nothing', async () => {
+    const project = await createProject(harness);
+    await post(project, '/agents', { handle: 'worker', description: 'ops', scope: ['ops:'] });
+    await post(project, '/items', { slug: 'errors:leak', title: 'somebody else', actor: 'other' });
+
+    // Every door that writes to a card, asked the same question about the same
+    // card outside the same scope. The published sentence names one of them,
+    // and this is what makes that sentence true rather than hopeful: widen the
+    // warning and this fails, which is the moment to widen the words too.
+    // The status is read before the warnings are. The first version of this
+    // walked past two doors rather than through them, because it guessed their
+    // paths: a 404 carries no warnings, and silence from a door that is not
+    // there reads exactly like silence from a door that is.
+    const scoped = async (path: string, payload: Record<string, unknown>): Promise<boolean> => {
+      const answer = await post(project, path, payload);
+      assert.equal(answer.statusCode, 200, `${path} answered ${answer.statusCode}: ${answer.body}`);
+      const warnings = (answer.json().warnings ?? []) as string[];
+      return warnings.some((line) => /declared scope/.test(line));
+    };
+
+    assert.equal(
+      await scoped('/items', { slug: 'errors:leak', body: 'a write', actor: 'worker' }),
+      true,
+      'filing or updating a card outside your scope is the door that warns',
+    );
+    const silent: string[] = [];
+    for (const [name, path, payload] of [
+      ['note', '/items/errors:leak/timeline', { actor: 'worker', message: 'was here' }],
+      ['claim', '/items/errors:leak/claim', { agent: 'worker' }],
+      ['heartbeat', '/items/errors:leak/heartbeat', { agent: 'worker' }],
+      ['move', '/items/errors:leak/move', { column: 'doing', actor: 'worker' }],
+      ['release', '/items/errors:leak/release', { agent: 'worker' }],
+    ] as [string, string, Record<string, unknown>][]) {
+      if (await scoped(path, payload)) silent.push(name);
+    }
+    assert.deepEqual(
+      silent,
+      [],
+      'these doors say nothing about scope, and the published sentence says so',
+    );
+  });
+
   it('says nothing when the writer declared no scope at all', async () => {
     const project = await createProject(harness);
     await post(project, '/agents', { handle: 'errors-loop', scope: ['errors:'] });

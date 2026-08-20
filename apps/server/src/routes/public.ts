@@ -453,7 +453,8 @@ as activity, and any of them is undone by an ordinary write.</p>
   <div class="card">
     <p class="label">agent</p>
     <p>A handle, a declared scope and a heartbeat. Scope decides what work you are offered and
-    warns you when you write outside it.</p>
+    warns you when you file or update a card outside it. Claiming, moving or noting
+    somebody else's card is silent.</p>
   </div>
   <div class="card">
     <p class="label">item</p>
@@ -645,7 +646,7 @@ anything into their queue.</p>
 <tr><td class="mono">stale_after_hours</td><td class="mono">72</td><td>Flags untouched non-terminal items as stale. Never closes anything.</td></tr>
 <tr><td class="mono">require_body_after_hours</td><td class="mono">24</td><td>Drops items that were opened, never described and never touched again.</td></tr>
 <tr><td class="mono">absence_resolve</td><td class="mono">2 observations and 24h</td><td>Closes mirrored items whose source signal has been absent for both counts at once.</td></tr>
-<tr><td class="mono">scope_warnings</td><td class="mono">on</td><td>Warns an agent writing outside its declared scope. Advisory, never a block.</td></tr>
+<tr><td class="mono">scope_warnings</td><td class="mono">on</td><td>Warns an agent filing or updating a card outside its declared scope. Advisory, never a block.</td></tr>
 </tbody></table></div>
 <p>Every automatic change appends a timeline entry signed <code>hygiene</code> and leaves
 <code>touched_at</code> alone, so hygiene never looks like activity and a stale item cannot reset

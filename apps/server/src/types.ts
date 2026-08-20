@@ -398,6 +398,31 @@ export function narrowingList(wrap = ''): string {
 }
 
 /** Plain, for a JSON description. */
+/**
+ * What a declared scope actually does, in one sentence that every surface
+ * renders rather than rewrites.
+ *
+ * Six documents used to describe this and five said it warned *other* agents
+ * walking into your area, which it has never done: the warning is computed
+ * from the writer's own scope and nobody else's. Those were narrowed, and the
+ * narrowed sentence was still wider than the code. Measured at every door that
+ * writes to a card, by calling all six and reading what came back: filing or
+ * updating one warns, and noting, claiming, extending a lease, moving and
+ * releasing are silent. Six doors, one warning.
+ *
+ * So the door is named here rather than left to the reader to assume, and the
+ * silence is stated, because an agent that trusts "any write outside your
+ * scope warns you" reads silence as permission.
+ */
+export function scopeWarningSays(next = '/next'): string {
+  return (
+    `Scope is advisory: it decides what ${next} offers you, and warns you when you file or ` +
+    'update a card outside it. It never blocks a write and it never warns anybody else. No ' +
+    "other door says it either: claiming, moving, noting or releasing somebody else's card is " +
+    'silent.'
+  );
+}
+
 export const SEARCH_NARROWING = narrowingList();
 /** With backticks, for the documents that are markdown. */
 export const SEARCH_NARROWING_MD = narrowingList('`');

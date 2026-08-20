@@ -52,6 +52,7 @@ import {
   PAGE_MAX,
   PRIORITY_MAX,
   PRIORITY_MIN,
+  scopeWarningSays,
 } from '../types.js';
 
 /**
@@ -337,7 +338,7 @@ const TOOLS: ToolDefinition[] = [
     name: 'register_agent',
     title: 'Register an agent',
     description:
-      'Declare who you are and what you own. Scope is advisory: it decides what next_item offers you and warns you when you write outside it. It never blocks a write, and it never warns anyone else.',
+      `Declare who you are and what you own. ${scopeWarningSays('next_item')}`,
     inputSchema: {
       type: 'object',
       additionalProperties: false,

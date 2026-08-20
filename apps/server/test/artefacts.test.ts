@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
+import { scopeWarningSays } from '../src/types.js';
 import { startHarness, type Harness } from './helper.js';
 
 /**
@@ -82,6 +83,108 @@ describe('a number this service publishes as a rule', () => {
       [],
       'every one of these is exported from types.ts; import it rather than writing the number again',
     );
+  });
+});
+
+describe('what a declared scope is said to do', () => {
+  /**
+   * The same medicine as the numbers above, for a sentence.
+   *
+   * This promise has now been wrong twice in the same direction. Six documents
+   * said a scope warns *other* agents walking into your area, which it has
+   * never done. Those were narrowed, and the narrowed sentence was still wider
+   * than the code: measured at every door that writes to a card, filing or
+   * updating one warns and the other five are silent.
+   *
+   * Prose cannot be imported the way a number can, so this reads the sources
+   * for the phrasings that were wrong, and then reads the rendered artefacts
+   * for the one that is right. Absence alone would pass a document that stopped
+   * describing scope at all.
+   */
+  const files = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory()
+        ? files(`${dir}/${entry.name}`)
+        : entry.name.endsWith('.ts')
+          ? [`${dir}/${entry.name}`]
+          : [],
+    );
+
+  it('never describes it more widely than the one door that does it', () => {
+    const wide: string[] = [];
+    const surfaces = [
+      ...files(`${ROOT}/apps/server/src`),
+      `${ROOT}/packages/sdk/src/index.ts`,
+      `${ROOT}/README.md`,
+    ];
+    for (const file of surfaces) {
+      // types.ts is where the sentence lives, the way types.ts is where the
+      // numbers live.
+      if (file.endsWith('/types.ts')) continue;
+      const text = readFileSync(file, 'utf8');
+      const where = file.slice(ROOT.length);
+      for (const [pattern, why] of [
+        [/cross-scope/i, 'calls it a cross-scope write, which reads as the thing it does not do'],
+        [
+          // The negation is the sentence we want; only the promise is refused.
+          /(?<!never )warns? (others|other agents|anyone else|anybody else)/i,
+          'says it warns somebody other than the writer',
+        ],
+        [/when you write outside/i, 'promises every write, and six of the seven doors are silent'],
+        [/agent writing outside its declared scope/i, 'names writing rather than the door'],
+      ] as [RegExp, string][]) {
+        if (pattern.test(text)) wide.push(`${where} ${why}`);
+      }
+    }
+    assert.deepEqual(
+      wide.sort(),
+      [],
+      'scopeWarningSays in types.ts is the sentence; render it rather than describing it again',
+    );
+  });
+
+  it('says which door it is, everywhere an agent reads before calling', async () => {
+    const harness = await startHarness();
+    try {
+      const said = scopeWarningSays();
+      // The sentence itself, because everything below compares a rendered
+      // artefact against it: widen this and both sides of that comparison move
+      // together, which a mutation of exactly this shape walked through. What
+      // stops the code widening past the words is the measurement in
+      // api.test.ts; this is the half that stops the words widening past the
+      // code.
+      assert.match(said, /file or update a card outside/);
+      assert.match(said, /never warns anybody else/);
+      const openapi = (await harness.server.inject({ method: 'GET', url: '/openapi.json' })).json();
+      const register = openapi.paths['/v1/{project}/agents'].post.description as string;
+      assert.ok(register.includes(said), `the OpenAPI description renders it: ${register}`);
+
+      const skill = (await harness.server.inject({ method: 'GET', url: '/skill.md' })).body;
+      assert.match(skill, /file or update a card outside/);
+
+      const page = (await harness.server.inject({ method: 'GET', url: '/' })).body;
+      assert.match(page, /file or update a card outside/);
+
+      const listed = await harness.server.inject({
+        method: 'POST',
+        url: '/mcp',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+        },
+        payload: { jsonrpc: '2.0', id: 1, method: 'tools/list' },
+      });
+      let body = listed.body;
+      for (const line of body.split('\n')) if (line.startsWith('data: ')) body = line.slice(6);
+      const tool = (JSON.parse(body).result.tools as Array<{ name: string; description: string }>)
+        .find((one) => one.name === 'register_agent');
+      assert.ok(
+        tool?.description.includes(scopeWarningSays('next_item')),
+        `the tool description renders it: ${tool?.description}`,
+      );
+    } finally {
+      await harness.stop();
+    }
   });
 });
 
