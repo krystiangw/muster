@@ -261,6 +261,30 @@ describe('the watchdog, watched', () => {
     assert.match(rehearsed, /^\[rehearsal, nothing sent\] ok /);
   });
 
+  it('says what it found even when the hourly line is not due', async () => {
+    // The heartbeat is hourly on a real round, because a log carrying four
+    // identical lines an hour is a log nobody reads. A rehearsal inherits that
+    // clock unless it is told not to, and then a rehearsal run any time in the
+    // fifty nine minutes after a quiet round prints nothing at all and exits
+    // zero: the one answer that cannot be told apart from a tool that fell
+    // over before it ran a check. Measured on a healthy afternoon before this
+    // line existed.
+    await round();
+    await round();
+    const quietRound = await round();
+    assert.equal(quietRound.trim(), '', 'a real round inside the hour says nothing, which is the point of the hour');
+
+    const rehearsed = (
+      await run(process.execPath, ['tools/watchdog.mjs', '--dry-run'], {
+        cwd: HERE,
+        encoding: 'utf8',
+        env: { ...process.env, MUSTER_HOME: home, MUSTER_RESEND_KEY: 'test-key', MUSTER_ALERT_TO: 'nobody@example.com' },
+      })
+    ).stdout;
+    assert.match(rehearsed, /^\[rehearsal, nothing sent\] ok /);
+    assert.match(rehearsed, /landing 200/, 'and it says what each check answered');
+  });
+
   it('rehearses a bad night without filing, mailing or remembering it', async () => {
     backupWritten(Date.now() - 72 * 3_600_000);
     state.landing = 500;

@@ -2683,3 +2683,27 @@ between those two. The bug only speaks when a collection is *added* later,
 which is why the case that proves it is the oldest archive rather than the one
 next door.
 
+## The rehearsal that said nothing, 2026-08-20
+
+`watchdog.mjs --dry-run` exists so somebody can see what the monitor does
+without the monitor doing it: deploy.md points at it as the way to check the
+thing that checks production. Run on a healthy afternoon, it printed nothing at
+all and exited zero.
+
+The reason is sound and the result was not. The heartbeat line is hourly on a
+real round, because a log carrying four identical lines an hour is a log nobody
+reads, and a rehearsal inherited that clock. So a rehearsal run in the fifty
+nine minutes after a quiet round produced silence, which is the one answer that
+cannot be told apart from a tool that fell over before it ran a single check,
+and ruling that out is what somebody runs a rehearsal for.
+
+A rehearsal says what it found now, whatever the clock says, and a real round
+keeps its hour. Both halves are pinned: making the rehearsal quiet again fails
+the test, and so does letting a real round say it every fifteen minutes.
+
+The existing test did not cover it, which is worth its own line. It ran one
+round and then rehearsed, and that arrangement happens to leave the heartbeat
+due. The case that bites is the second rehearsal, inside the hour, which is
+also the only way anybody would ever run it: twice, because the first time
+printed nothing.
+

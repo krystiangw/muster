@@ -639,8 +639,21 @@ if (broken.length === 0 && keyCheckIsDue()) {
   }
 }
 
-if (broken.length === 0 && !hygieneBehind && !noticesStuck && !backupsStale && !said && noteIsDue()) {
-  state.lastNote = now;
+// A rehearsal always says what it found. On a real round this line is hourly,
+// because a log carrying four identical lines an hour is a log nobody reads.
+// On a rehearsal, silence is the one answer that teaches nothing: it reads
+// exactly like a tool that fell over before it ran a single check, which is
+// the thing somebody runs this to rule out. Measured on a healthy afternoon,
+// `--dry-run` printed nothing at all and exited zero.
+if (
+  broken.length === 0 &&
+  !hygieneBehind &&
+  !noticesStuck &&
+  !backupsStale &&
+  !said &&
+  (dryRun || noteIsDue())
+) {
+  if (!dryRun) state.lastNote = now;
   const swept = apiRead?.body?.swept_at
     ? `${Math.round((Date.parse(now) - Date.parse(apiRead.body.swept_at)) / 60_000)} min`
     : 'unknown';
