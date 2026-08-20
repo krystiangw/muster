@@ -113,11 +113,25 @@ export function nobodyIsListening(waiting: number, shareWith: string, offered = 
   );
 }
 
+/**
+ * Every power the link grants, in one sentence the documents share.
+ *
+ * Written as an inventory rather than a summary, down to consolidating two
+ * spellings of one agent, because a warning that undersells the authority is
+ * believed. Which is why holding a card behind other cards belongs in it: it
+ * was missing while smaller powers were named, and it is the one on this list
+ * that stops work rather than changing it, since a card waiting on another is
+ * not offered to anybody until the other is done.
+ *
+ * `test/security.test.ts` reads the write routes on the link and requires each
+ * one to be named here or to be gated by more than the link, so the next power
+ * added cannot go missing the way this one did.
+ */
 export const READ_LINK_GRANTS =
   'reads the board, answers the questions your agents filed, files work of their own, ' +
   'writes notes onto the timeline the agents read, corrects the words on a card, sets ' +
-  'urgency, owners and labels, moves cards, consolidates two spellings of one agent and ' +
-  'replaces the layout';
+  'urgency, owners and labels, moves cards, holds one behind the work it is waiting ' +
+  'on, consolidates two spellings of one agent and replaces the layout';
 
 /**
  * Hard wrapped, like the rest of this file.

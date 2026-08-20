@@ -254,12 +254,42 @@ if (args.includes('--verify')) {
     await mongod.stop().catch(() => {});
   }
 
+  /**
+   * Said rather than failed on, and said on both ways out.
+   *
+   * It is not this copy that is wrong: the record already describes the bytes
+   * that were read, so the watchdog sees an archive it has no verdict about
+   * and says so. This line is what stops that reading as a puzzle. On the
+   * failing path it matters more, not less: an archive replaced halfway
+   * through a gzip read usually fails to come back, and a log saying only that
+   * the copy is bad sends somebody looking for a corrupt backup that never
+   * existed.
+   *
+   * The stat can throw rather than differ. `--keep` prunes, so the file can be
+   * gone by now, and a diagnostic that fails the command it is explaining is
+   * worse than no diagnostic at all.
+   */
+  const sayIfItMovedUnderUs = () => {
+    let now = null;
+    try {
+      now = statSync(file);
+    } catch {
+      console.log(`\n${basename(file)} is no longer there; this verdict is about the copy that was.`);
+      return;
+    }
+    if (now.size !== subject.size || now.mtimeMs !== subject.mtimeMs) {
+      console.log(`\n${basename(file)} was written over while it was being checked, so this verdict is about the copy that was there before.`);
+    }
+  };
+
   if (wrong.length > 0) {
     recordCheck(false, wrong);
+    sayIfItMovedUnderUs();
     console.error(`\nThis copy does not come back cleanly:\n  ${wrong.join('\n  ')}`);
     process.exit(1);
   }
   recordCheck(true, []);
+  sayIfItMovedUnderUs();
 
   // Said, never failed on. A collection that had rows and now has none is
   // worth an eyebrow and is not by itself wrong: emptying one is what a purge
@@ -288,15 +318,6 @@ if (args.includes('--verify')) {
     } catch {
       // The older copy being unreadable says nothing about this one.
     }
-  }
-
-  // Said rather than failed on, because it is not this copy that is wrong: the
-  // record already describes the bytes that were read, so the watchdog will see
-  // an archive it has no verdict about and say so. This line is what explains
-  // that to whoever reads the log afterwards.
-  const now = statSync(file);
-  if (now.size !== subject.size || now.mtimeMs !== subject.mtimeMs) {
-    console.log(`\n${basename(file)} was written over while it was being checked, so this verdict is about the copy that was there before.`);
   }
 
   console.log(`\n${total} documents came back from ${at}, counts and shapes intact.`);

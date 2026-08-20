@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { after, before, describe, it } from 'node:test';
 import { redactCapabilities } from '../src/app.js';
 import { connectStore, ensureIndexes } from '../src/db.js';
@@ -362,17 +363,40 @@ describe('what the link says about itself', () => {
     // undersells the authority is worse than none, because it is believed. The
     // list is one exported sentence for that reason, so the three documents
     // that carry it cannot drift apart again; this checks all three.
-    for (const power of [
-      /answers the questions/,
-      /files work of their own/,
-      /writes notes onto the timeline/,
-      /corrects the words on a card/,
-      /sets\s+urgency, owners and labels/,
-      /moves cards/,
-      /consolidates two spellings/,
-      /replaces the\s+layout/,
-    ]) {
-      assert.match(docs.body, power, String(power));
+    // The list is checked against the routes, not against itself. Written out
+    // by hand it was wrong: holding a card behind other cards is a write the
+    // link has always granted, and it was missing while consolidating two
+    // spellings of one agent was named. So every write route on the link is
+    // read out of the source and has to be either named in the sentence or
+    // gated by more than the link. Adding one and saying nothing fails here.
+    const source = readFileSync(new URL('../src/routes/public.ts', import.meta.url), 'utf8');
+    const onTheLink = [...source.matchAll(/app\.(?:post|patch|delete)\('(\/r\/:readToken[^']*)'/g)].map(
+      (found) => found[1]!,
+    );
+    assert.ok(onTheLink.length >= 12, 'the routes were read, not guessed');
+
+    const named: Record<string, RegExp | null> = {
+      '/r/:readToken/board': /replaces the\s+layout/,
+      '/r/:readToken/board/owner': /sets\s+urgency, owners and labels/,
+      '/r/:readToken/board/waiting': /holds one behind the work it is waiting\s+on/,
+      '/r/:readToken/board/labels': /sets\s+urgency, owners and labels/,
+      '/r/:readToken/board/agent-rename': /consolidates two spellings/,
+      '/r/:readToken/board/new': /files work of their own/,
+      '/r/:readToken/board/priority': /sets\s+urgency, owners and labels/,
+      '/r/:readToken/board/edit': /corrects the words on a card/,
+      '/r/:readToken/board/note': /writes notes onto the timeline/,
+      '/r/:readToken/board/move': /moves cards/,
+      '/r/:readToken/escalations/:id': /answers the questions/,
+      // Not powers of the link: each of these asks for something the link
+      // holder does not have by holding it.
+      '/r/:readToken/handover': null, // a signed in operator session
+      '/r/:readToken/claim': null, // an admin token typed into the form
+      '/r/:readToken/claim/verify': null, // the code that was mailed
+    };
+    for (const route of onTheLink) {
+      assert.ok(route in named, `${route} writes through the link and the sentence has never heard of it`);
+      const power = named[route];
+      if (power) assert.match(docs.body, power, `${route}: ${String(power)}`);
     }
 
     for (const [url, what] of [
