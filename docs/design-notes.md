@@ -2024,3 +2024,18 @@ the difference between a test that reaches a line and a test that visits the
 route the line is on, and it is worth writing down because the green version
 looked more thorough than the fix it was guarding: twenty four operations, a
 hundred requests, no assertion that any of them got past the front desk.
+
+**Then twice more, for the same reason.** Review found the bodies carried only
+the field under test, so a door with required companions answered about the
+companion; and that only top level names were visited, so `expect.title`,
+`then.slug` and everything inside `history` were never sent anything. Then that
+the companions themselves were not plausible: a report's title is three
+characters and a claim code is six, and `x` fails both, so the crafted field
+still never ran.
+
+So the walk now checks itself. Any crafted value sitting inside a container
+whose request comes back complaining about a field beside it is recorded and
+fails the test, because that is the shape of every miss above. Replacing a whole
+object with a crafted one and being told what that object needs is not a miss,
+which is why the check only looks inside containers, and a count of places
+visited keeps the whole thing from quietly shrinking to nothing.

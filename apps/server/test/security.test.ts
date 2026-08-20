@@ -1575,18 +1575,30 @@ describe('a shape where a name belongs, at every door the document names', () =>
         required?: string[];
         items?: Schema;
         minimum?: number;
+        minLength?: number;
         maxLength?: number;
+        format?: string;
       };
-      const plausible = (schema: Schema): unknown => {
+      /**
+       * A companion the schema would accept, so the request is refused for the
+       * field being tested rather than for the one beside it. The lengths
+       * matter: a code is six characters and a report's title is three, and
+       * `x` fails both, which leaves the crafted field never reached.
+       */
+      const plausible = (schema: Schema, name = ''): unknown => {
         if (schema.enum?.length) return schema.enum[0];
         const type = Array.isArray(schema.type) ? schema.type[0] : schema.type;
         if (type === 'integer' || type === 'number') return schema.minimum ?? 1;
         if (type === 'boolean') return true;
         if (type === 'array') return schema.items ? [plausible(schema.items)] : [];
-        if (type === 'object') return Object.fromEntries(
-          (schema.required ?? []).map((name) => [name, plausible(schema.properties?.[name] ?? {})]),
-        );
-        return 'x';
+        if (type === 'object') {
+          return Object.fromEntries(
+            (schema.required ?? []).map((child) => [child, plausible(schema.properties?.[child] ?? {}, child)]),
+          );
+        }
+        if (schema.format === 'email' || /email/i.test(name)) return 'somebody@example.com';
+        if (schema.format === 'date-time' || /(^|_)at$/.test(name)) return '2026-01-01T00:00:00.000Z';
+        return 'x'.repeat(Math.max(1, Math.min(schema.minLength ?? 1, schema.maxLength ?? 64)));
       };
 
       /** Every place a value sits, including the ones inside other values. */
@@ -1599,22 +1611,28 @@ describe('a shape where a name belongs, at every door the document names', () =>
           return [here];
         });
 
-      const put = (into: Record<string, unknown>, trail: string[], value: unknown): void => {
-        let at: Record<string, unknown> | unknown[] = into;
-        for (let i = 0; i < trail.length - 1; i += 1) {
-          const key = trail[i]!;
-          const next = trail[i + 1]!;
-          const holder = at as Record<string, unknown>;
-          if (holder[key] === undefined || typeof holder[key] !== 'object') {
-            holder[key] = /^\d+$/.test(next) ? [] : {};
-          }
-          at = holder[key] as Record<string, unknown>;
+      /**
+       * The body for one place, built down the schema rather than into an
+       * empty object. A container opened on the way has its own required
+       * fields filled: `then` needs a slug, an entry in `history` needs three
+       * things, and an empty one is refused for the companion rather than for
+       * the value under test.
+       */
+      const valueAt = (schema: Schema, trail: string[]): unknown => {
+        if (trail.length === 0) return crafted;
+        const type = Array.isArray(schema.type) ? schema.type[0] : schema.type;
+        if (type === 'array') {
+          return [valueAt(schema.items ?? {}, trail.slice(1))];
         }
-        (at as Record<string, unknown>)[trail[trail.length - 1]!] = value;
+        const [head, ...rest] = trail as [string, ...string[]];
+        const filled = plausible(schema) as Record<string, unknown>;
+        filled[head] = valueAt(schema.properties?.[head] ?? {}, rest);
+        return filled;
       };
 
       const broke: string[] = [];
       let walked = 0;
+      const refusedForACompanion: string[] = [];
       for (const [path, operations] of Object.entries(doc.paths)) {
         for (const [method, operation] of Object.entries(operations)) {
           if (!['post', 'put', 'patch', 'delete'].includes(method)) continue;
@@ -1630,11 +1648,7 @@ describe('a shape where a name belongs, at every door the document names', () =>
           // is exactly where this went wrong. Both get a body anyway.
           const bodies: Record<string, unknown>[] =
             trails.length > 0
-              ? trails.map((trail) => {
-                  const body = plausible(schema) as Record<string, unknown>;
-                  put(body, trail, crafted);
-                  return body;
-                })
+              ? trails.map((trail) => valueAt(schema, trail) as Record<string, unknown>)
               : [
                   { client_id: registered.client_id, client_secret: crafted, grant_type: 'client_credentials' },
                   { client_id: crafted, client_secret: 'whatever', grant_type: 'client_credentials' },
@@ -1647,6 +1661,15 @@ describe('a shape where a name belongs, at every door the document names', () =>
               payload,
             });
             walked += 1;
+            // The walk checking itself. A crafted value sitting inside a
+            // container must not be answered with a complaint about a field
+            // beside it: that means the body was not plausible and the value
+            // under test never ran. Only for trails that go inside something,
+            // because replacing a whole object with a crafted one and being
+            // told what that object needs is the right answer, not a miss.
+            if ((trails[n]?.length ?? 0) > 1 && /must have required property/.test(answer.body)) {
+              refusedForACompanion.push(`${method.toUpperCase()} ${path} on ${(trails[n] ?? ['body']).join('.')}`);
+            }
             if (answer.statusCode >= 500) {
               broke.push(`${method.toUpperCase()} ${path} on ${(trails[n] ?? ['body']).join('.')}: ${answer.statusCode}`);
             }
@@ -1659,6 +1682,7 @@ describe('a shape where a name belongs, at every door the document names', () =>
       // shrinking: a schema read that returns nothing leaves every assertion
       // above it true. Sixty is well under what it visits today.
       assert.ok(walked >= 60, `it visited the doors rather than counting them: ${walked}`);
+      assert.deepEqual(refusedForACompanion.sort(), [], 'each crafted value was the reason its request was refused');
     } finally {
       await harness.stop();
     }
