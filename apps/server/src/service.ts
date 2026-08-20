@@ -26,6 +26,11 @@ import {
   type TimelineKind,
   OPERATOR_ACTOR,
   SEARCH_NARROWING,
+  CLAIM_TTL_MAX,
+  CLAIM_TTL_MIN,
+  PAGE_MAX,
+  PRIORITY_MAX,
+  PRIORITY_MIN,
 } from './types.js';
 import { TIMELINE_KEEP } from './hygiene.js';
 
@@ -84,8 +89,8 @@ export function normalizeUpsertInput(input: UpsertItemInput): UpsertItemInput {
     );
   }
   if (input.priority !== undefined) {
-    if (!Number.isInteger(input.priority) || input.priority < -10 || input.priority > 10) {
-      throw badRequest('bad_priority', 'Priority is an integer between -10 and 10.');
+    if (!Number.isInteger(input.priority) || input.priority < PRIORITY_MIN || input.priority > PRIORITY_MAX) {
+      throw badRequest('bad_priority', `Priority is an integer between ${PRIORITY_MIN} and ${PRIORITY_MAX}.`);
     }
   }
   if (input.labels !== undefined) {
@@ -128,8 +133,8 @@ export function normalizeUpsertInput(input: UpsertItemInput): UpsertItemInput {
         : {}),
       ...(typeof raw.owner === 'string' || raw.owner === null ? { owner: raw.owner as string | null } : {}),
     };
-    if (then.priority !== undefined && (!Number.isInteger(then.priority) || then.priority < -10 || then.priority > 10)) {
-      throw badRequest('bad_then', 'then.priority is an integer between -10 and 10.');
+    if (then.priority !== undefined && (!Number.isInteger(then.priority) || then.priority < PRIORITY_MIN || then.priority > PRIORITY_MAX)) {
+      throw badRequest('bad_then', `then.priority is an integer between ${PRIORITY_MIN} and ${PRIORITY_MAX}.`);
     }
   }
 
@@ -1919,7 +1924,7 @@ export async function claimItem(
     throw badRequest('bad_agent', 'agent is the handle taking this item.');
   }
   const now = new Date();
-  const ttl = Math.min(Math.max(ttlMinutes ?? project.rules.claimTtlMinutes, 1), 1440);
+  const ttl = Math.min(Math.max(ttlMinutes ?? project.rules.claimTtlMinutes, CLAIM_TTL_MIN), CLAIM_TTL_MAX);
   const expiresAt = new Date(now.getTime() + ttl * 60_000);
   // Which lease this is, so the rollback below can only ever take back the one
   // this call wrote. Two requests renewing in the same millisecond share an
@@ -2029,7 +2034,7 @@ export async function heartbeatClaim(
   ttlMinutes?: number,
 ): Promise<ItemDoc> {
   const now = new Date();
-  const ttl = Math.min(Math.max(ttlMinutes ?? project.rules.claimTtlMinutes, 1), 1440);
+  const ttl = Math.min(Math.max(ttlMinutes ?? project.rules.claimTtlMinutes, CLAIM_TTL_MIN), CLAIM_TTL_MAX);
   const item = await store.items.findOneAndUpdate(
     {
       projectId: project._id,
@@ -2302,7 +2307,7 @@ async function listItems(
   if (conditions.length === 1) Object.assign(filter, conditions[0]);
   else if (conditions.length > 1) filter.$and = conditions;
 
-  const limit = Math.min(Math.max(query.limit ?? 50, 1), 200);
+  const limit = Math.min(Math.max(query.limit ?? 50, 1), PAGE_MAX);
   const projection = query.includeTimeline ? undefined : { timeline: 0 };
   const sort: Record<string, 1 | -1> =
     order === 'id'
@@ -2495,7 +2500,7 @@ export async function readItems(
   // and marking are the timer's job, so that reading the board cannot end
   // anybody's work.
   void maybeExpireClaims(store, project).catch(() => undefined);
-  const limit = Math.min(Math.max(input.limit ?? 50, 1), 200);
+  const limit = Math.min(Math.max(input.limit ?? 50, 1), PAGE_MAX);
   const order: ItemOrder =
     input.order === 'id' ? 'id' : input.order === 'recent' ? 'recent' : 'urgency';
   const since =
@@ -2591,7 +2596,7 @@ export async function nextItemHeld(
     throw badRequest('bad_agent', 'Claiming what comes next needs the handle it is for.');
   }
   const now = new Date();
-  const ttl = Math.min(Math.max(ttlMinutes ?? project.rules.claimTtlMinutes, 1), 1440);
+  const ttl = Math.min(Math.max(ttlMinutes ?? project.rules.claimTtlMinutes, CLAIM_TTL_MIN), CLAIM_TTL_MAX);
   const expiresAt = new Date(now.getTime() + ttl * 60_000);
   const nonce = newId('l', 10);
 
@@ -3177,7 +3182,7 @@ export async function listEscalations(
   return store.escalations
     .find(query)
     .sort({ createdAt: -1, _id: -1 })
-    .limit(Math.min(Math.max(filter.limit ?? 50, 1), 200))
+    .limit(Math.min(Math.max(filter.limit ?? 50, 1), PAGE_MAX))
     .toArray() as Promise<EscalationDoc[]>;
 }
 

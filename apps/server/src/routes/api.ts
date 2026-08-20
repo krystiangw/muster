@@ -84,6 +84,11 @@ import {
   type ItemStatus,
   OPERATOR_ACTOR,
   SEARCH_NARROWING,
+  CLAIM_TTL_MAX,
+  CLAIM_TTL_MIN,
+  PAGE_MAX,
+  PRIORITY_MAX,
+  PRIORITY_MIN,
 } from '../types.js';
 
 declare module 'fastify' {
@@ -666,7 +671,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
         const agents = await store.agents
           .find({ projectId: project._id })
           .sort({ lastSeenAt: -1 })
-          .limit(200)
+          .limit(PAGE_MAX)
           .toArray();
         // The names on the work, minus the names that declared themselves. The
         // browser has shown this since the filter existed; an agent auditing
@@ -717,8 +722,8 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
               },
               priority: {
                 type: 'integer',
-                minimum: -10,
-                maximum: 10,
+                minimum: PRIORITY_MIN,
+                maximum: PRIORITY_MAX,
                 description:
                   'Higher is more urgent. 0 is ordinary work and the default. Every queue sorts by it downwards.',
               },
@@ -746,7 +751,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
                   slug: { type: 'string', minLength: 1, maxLength: 96 },
                   title: { type: 'string', maxLength: 300 },
                   body: { type: 'string', maxLength: 20000 },
-                  priority: { type: 'integer', minimum: -10, maximum: 10 },
+                  priority: { type: 'integer', minimum: PRIORITY_MIN, maximum: PRIORITY_MAX },
                   labels: { type: 'array', items: { type: 'string', maxLength: 48 }, maxItems: 20 },
                   owner: { type: ['string', 'null'], maxLength: 48 },
                 },
@@ -870,7 +875,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
                 description:
                   `Words to look for in the slug or the title, case insensitive: every word has to appear, in either field, in any order. The same search the board offers a person, so both doors answer alike. Anything past 120 characters or six words is cut rather than refused, for the same reason. A search that reads for longer than it is allowed is refused with 503 search_too_slow, never answered with an empty page: narrow it with ${SEARCH_NARROWING} beside it, which are the ones that bound what gets read. Another word narrows the answer but not the read, and neither does label=.`,
               },
-              limit: { type: 'integer', minimum: 1, maximum: 200 },
+              limit: { type: 'integer', minimum: 1, maximum: PAGE_MAX },
               order: {
                 type: 'string',
                 enum: ['urgency', 'id', 'recent'],
@@ -971,7 +976,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
             required: ['agent'],
             properties: {
               agent: { type: 'string', maxLength: 48 },
-              ttl_minutes: { type: 'integer', minimum: 1, maximum: 1440 },
+              ttl_minutes: { type: 'integer', minimum: CLAIM_TTL_MIN, maximum: CLAIM_TTL_MAX },
             },
             additionalProperties: false,
           },
@@ -1005,7 +1010,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
             required: ['agent'],
             properties: {
               agent: { type: 'string', maxLength: 48 },
-              ttl_minutes: { type: 'integer', minimum: 1, maximum: 1440 },
+              ttl_minutes: { type: 'integer', minimum: CLAIM_TTL_MIN, maximum: CLAIM_TTL_MAX },
             },
             additionalProperties: false,
           },
@@ -1311,7 +1316,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
             required: ['agent'],
             properties: {
               agent: { type: 'string', maxLength: 48 },
-              ttl_minutes: { type: 'integer', minimum: 1, maximum: 1440 },
+              ttl_minutes: { type: 'integer', minimum: CLAIM_TTL_MIN, maximum: CLAIM_TTL_MAX },
             },
             additionalProperties: false,
           },
@@ -1439,7 +1444,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
                 description:
                   'false is every answer nobody has acted on yet, whatever its status. That is the question a job asking "what is new for me" is actually asking.',
               },
-              limit: { type: 'integer', minimum: 1, maximum: 200 },
+              limit: { type: 'integer', minimum: 1, maximum: PAGE_MAX },
               cursor: {
                 type: 'string',
                 description: 'Paging cursor: pass the next_cursor from the previous page.',
@@ -1673,7 +1678,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
                 additionalProperties: false,
               },
               require_body_after_hours: { type: ['integer', 'null'], minimum: 1 },
-              claim_ttl_minutes: { type: 'integer', minimum: 1, maximum: 1440 },
+              claim_ttl_minutes: { type: 'integer', minimum: CLAIM_TTL_MIN, maximum: CLAIM_TTL_MAX },
               scope_warnings: { type: 'boolean' },
             },
             additionalProperties: false,

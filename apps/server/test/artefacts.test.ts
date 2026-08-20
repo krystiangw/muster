@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { startHarness, type Harness } from './helper.js';
@@ -22,6 +22,58 @@ import { startHarness, type Harness } from './helper.js';
  * which is a thing that happens once and then never again.
  */
 const ROOT = fileURLToPath(new URL('../../..', import.meta.url));
+
+describe('a number this service publishes as a rule', () => {
+  /**
+   * Written once and read everywhere, checked by looking for it written twice.
+   *
+   * The lease ceiling was in ten places and the priority scale in nine, four of
+   * them prose that nothing compared with the code. They agreed, which is not
+   * the same as being unable to disagree: the promise about scope warnings was
+   * in three places and had already stopped being true in one of them.
+   *
+   * Only the source is read, and only for the literals themselves. A test that
+   * rendered the pages and looked for the numbers would pass while a second
+   * copy sat in the source waiting to be edited on its own.
+   */
+  const sources = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+      entry.isDirectory()
+        ? sources(`${dir}/${entry.name}`)
+        : entry.name.endsWith('.ts')
+          ? [`${dir}/${entry.name}`]
+          : [],
+    );
+
+  it('is written in one place, and nowhere else says it in numbers', () => {
+    const written: string[] = [];
+    for (const file of sources(`${ROOT}/apps/server/src`)) {
+      if (file.endsWith('/types.ts')) continue;
+      const text = readFileSync(file, 'utf8');
+      const where = file.slice(file.indexOf('/apps/server/') + 13);
+      // The ceiling on a lease, and the two ends of the priority scale as a
+      // reader meets them: in a schema, in a comparison, or spelled out in a
+      // sentence.
+      for (const [pattern, name] of [
+        [/\b1440\b/, 'CLAIM_TTL_MAX'],
+        [/-10 (to|and) 10\b/, 'PRIORITY_SCALE'],
+        [/minimum: -10/, 'PRIORITY_MIN'],
+        // Two forms and not a bare number: in this codebase 200 is usually a
+        // status code, so the pattern names the two shapes the page cap is
+        // actually written in, a schema bound and the sentence about it.
+        [/maximum: 200\b/, 'PAGE_MAX'],
+        [/at most 200\b/, 'PAGE_MAX'],
+      ] as [RegExp, string][]) {
+        if (pattern.test(text)) written.push(`${where} spells out ${name}`);
+      }
+    }
+    assert.deepEqual(
+      written.sort(),
+      [],
+      'every one of these is exported from types.ts; import it rather than writing the number again',
+    );
+  });
+});
 
 describe('what we publish about ourselves', () => {
   let harness: Harness;

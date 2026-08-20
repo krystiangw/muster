@@ -47,6 +47,11 @@ import {
   type EscalationPriority,
   type ItemStatus,
   SEARCH_NARROWING,
+  CLAIM_TTL_MAX,
+  CLAIM_TTL_MIN,
+  PAGE_MAX,
+  PRIORITY_MAX,
+  PRIORITY_MIN,
 } from '../types.js';
 
 /**
@@ -353,7 +358,7 @@ const TOOLS: ToolDefinition[] = [
         body: { type: 'string' },
         status: { type: 'string', enum: [...ITEM_STATUSES] },
         owner: { type: 'string' },
-        priority: { type: 'integer', minimum: -10, maximum: 10 },
+        priority: { type: 'integer', minimum: PRIORITY_MIN, maximum: PRIORITY_MAX },
         labels: { type: 'array', items: { type: 'string' } },
         source: { type: 'string', description: 'Set when the item mirrors an external signal' },
         fields: {
@@ -380,7 +385,7 @@ const TOOLS: ToolDefinition[] = [
             slug: { type: 'string' },
             title: { type: 'string' },
             body: { type: 'string' },
-            priority: { type: 'integer', minimum: -10, maximum: 10 },
+            priority: { type: 'integer', minimum: PRIORITY_MIN, maximum: PRIORITY_MAX },
             labels: { type: 'array', items: { type: 'string' } },
             owner: { type: 'string' },
           },
@@ -421,7 +426,7 @@ const TOOLS: ToolDefinition[] = [
       properties: {
         slug: { type: 'string' },
         agent: { type: 'string' },
-        ttl_minutes: { type: 'integer', minimum: 1, maximum: 1440 },
+        ttl_minutes: { type: 'integer', minimum: CLAIM_TTL_MIN, maximum: CLAIM_TTL_MAX },
       },
     },
     requiresProject: true,
@@ -446,7 +451,7 @@ const TOOLS: ToolDefinition[] = [
       properties: {
         slug: { type: 'string' },
         agent: { type: 'string' },
-        ttl_minutes: { type: 'integer', minimum: 1, maximum: 1440 },
+        ttl_minutes: { type: 'integer', minimum: CLAIM_TTL_MIN, maximum: CLAIM_TTL_MAX },
       },
     },
     requiresProject: true,
@@ -528,7 +533,7 @@ const TOOLS: ToolDefinition[] = [
           description:
             'Take the lease in the same call. Without it, a fleet asking at once is offered the same item and all but one lose the claim that follows.',
         },
-        ttl_minutes: { type: 'integer', minimum: 1, maximum: 1440 },
+        ttl_minutes: { type: 'integer', minimum: CLAIM_TTL_MIN, maximum: CLAIM_TTL_MAX },
       },
     },
     requiresProject: true,
@@ -592,7 +597,7 @@ const TOOLS: ToolDefinition[] = [
           description:
             `Words to look for in the slug or the title, case insensitive: every word has to appear, in either field, in any order. Past 120 characters or six words it is cut, not refused. A search that reads for longer than it is allowed is refused with search_too_slow rather than answered with an empty list: narrow it with ${SEARCH_NARROWING} beside it, which are the ones that bound what gets read. Another word narrows the answer but not the read, and neither does label=.`,
         },
-        limit: { type: 'integer', minimum: 1, maximum: 200 },
+        limit: { type: 'integer', minimum: 1, maximum: PAGE_MAX },
         order: {
           type: 'string',
           enum: ['urgency', 'id', 'recent'],

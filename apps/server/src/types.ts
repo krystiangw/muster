@@ -402,6 +402,26 @@ export const SEARCH_NARROWING = narrowingList();
 /** With backticks, for the documents that are markdown. */
 export const SEARCH_NARROWING_MD = narrowingList('`');
 
+/**
+ * The three numbers this service publishes as rules rather than as defaults.
+ *
+ * Each was written out wherever it was needed: the lease ceiling in ten places
+ * across the service, two schemas and one paragraph, and the priority scale in
+ * nine, four of them prose that nothing compared with the code. They agreed,
+ * which is luck rather than a guarantee, and the same shape of duplication has
+ * already produced one promise this service was not keeping.
+ */
+export const PRIORITY_MIN = -10;
+export const PRIORITY_MAX = 10;
+/** A lease with no ceiling is an item nobody else can ever have. */
+export const CLAIM_TTL_MIN = 1;
+export const CLAIM_TTL_MAX = 1440;
+/** The most rows any list here hands back in one answer. */
+export const PAGE_MAX = 200;
+
+/** The scale, spelled the way every page and every refusal spells it. */
+export const PRIORITY_SCALE = `${PRIORITY_MIN} to ${PRIORITY_MAX}`;
+
 export const MAX_BOARD_COLUMNS = 12;
 
 /**

@@ -1,6 +1,14 @@
 import { TOOL_COUNT } from './routes/mcp.js';
 import { RATE_LIMIT_SCOPES, type Config } from './config.js';
-import { DEFAULT_RULES, SEARCH_NARROWING, SEARCH_NARROWING_MD } from './types.js';
+import {
+  CLAIM_TTL_MAX,
+  CLAIM_TTL_MIN,
+  DEFAULT_RULES,
+  PAGE_MAX,
+  PRIORITY_SCALE,
+  SEARCH_NARROWING,
+  SEARCH_NARROWING_MD,
+} from './types.js';
 
 /**
  * Everything an agent reads before it writes anything.
@@ -237,7 +245,7 @@ curl -sX POST $MUSTER/items -H "authorization: Bearer $TOKEN" \\
        "actor":"errors-loop","labels":["withdraw"],"priority":2}'
 \`\`\`
 
-\`priority\` is a whole number from -10 to 10 and **higher means more urgent**;
+\`priority\` is a whole number from ${PRIORITY_SCALE} and **higher means more urgent**;
 0 is ordinary work, and it is what you get if you say nothing. Every queue in
 Muster sorts by it downwards, so an item you file as 2 is offered before one
 filed as 1 and after one filed as 3. Getting this backwards is the easiest
@@ -361,8 +369,9 @@ holder is in the response. That answer arrives as **HTTP 409**, which is the
 normal case and not a fault: if you run curl with \`-f\`, handle it, or you will
 treat a busy item as an outage. Do something else. Expect your work to
 outlive the lease rather than treating that as the exception: the default is
-${DEFAULT_RULES.claimTtlMinutes} minutes, a project can set anything from 1 to
-1440, and an agent in the middle of a build, a deploy or a long review looks up
+${DEFAULT_RULES.claimTtlMinutes} minutes, a project can set anything from
+${CLAIM_TTL_MIN} to ${CLAIM_TTL_MAX}, and an agent in the middle of a build, a
+deploy or a long review looks up
 a good deal later than that. Read \`expires_at\` off the claim you were handed
 instead of assuming a number, ask for a longer one with \`ttl_minutes\` when you
 already know the work is long, and start the heartbeat timer when you take the
@@ -545,7 +554,7 @@ curl -sX POST $MUSTER/observe -H "authorization: Bearer $TOKEN" \\
 
 ## Reading everything back
 
-\`GET $MUSTER/items\` gives you at most 200 at a time and a \`next_cursor\`.
+\`GET $MUSTER/items\` gives you at most ${PAGE_MAX} at a time and a \`next_cursor\`.
 Pass it back to walk the whole list; \`null\` means that was the last page.
 
 \`\`\`bash

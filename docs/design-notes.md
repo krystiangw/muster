@@ -1846,3 +1846,29 @@ which is the test the rest of this map is held to: only what this door can
 actually produce, in words true of this door. A 500 is also not an answer to
 the request but this service failing to give one, and the sentence that matters
 about it is already in the body it sends.
+
+## A number written once, 2026-08-20
+
+The ceiling on a lease was in ten places: three clamps in the service, four
+schemas on the HTTP door, two on the MCP door, and one paragraph of `skill.md`.
+The priority scale was in nine, four of them prose that nothing compared with
+the code. Every one of them agreed, which is not the same as being unable to
+disagree, and the promise about scope warnings had already shown what that
+difference costs: three places said it, the code kept it in one.
+
+So `CLAIM_TTL_MIN`, `CLAIM_TTL_MAX`, `PRIORITY_MIN`, `PRIORITY_MAX`,
+`PRIORITY_SCALE` and `PAGE_MAX` are exported and everything reads them. The
+rendered documents are unchanged to the byte, which is the point: nobody was
+being told anything wrong today.
+
+**Guarded by looking for the number written twice**, not by rendering the pages
+and checking they still say it. A rendered check passes while a second copy sits
+in the source waiting to be edited on its own, and the copy is the whole
+problem. The test reads every source file except the one the constants live in
+and fails on the literal in any of the shapes it is actually written in: `1440`,
+`-10 to 10`, `minimum: -10`, `maximum: 200`, `at most 200`.
+
+Not a bare `200`, because in this codebase that is usually a status code, and a
+guard with a false positive on every second file gets deleted rather than
+obeyed. Two comments were rewritten instead of exempted: a sentence about the
+scale reads better without the numbers in it anyway.

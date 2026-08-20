@@ -1,6 +1,6 @@
 import type { AgentFacet, BoardFacets, BoardFilter, BoardView } from '../board.js';
 import { normalizeHandle } from '../ids.js';
-import { OPERATOR_ACTOR, type BoardColumn, type BoardConfig } from '../types.js';
+import { OPERATOR_ACTOR, PRIORITY_SCALE, type BoardColumn, type BoardConfig } from '../types.js';
 import { BOARD_PRESETS, COLUMN_RENDER_LIMIT, applyForColumn, landingLane, unsatisfiableBy } from '../board.js';
 import { boardConfigJson } from '../serialize.js';
 import { chip, escapeHtml, when } from '../html.js';
@@ -180,7 +180,7 @@ function card(
       // "-2" carry the direction in the glyph. Zero is ordinary work and says
       // nothing, so a board that never sets a priority looks no busier.
       item.priority
-        ? `<span class="prio" title="priority, higher is more urgent, -10 to 10">${
+        ? `<span class="prio" title="priority, higher is more urgent, ${PRIORITY_SCALE}">${
             item.priority > 0 ? '+' : ''
           }${item.priority}</span>`
         : ''
@@ -235,7 +235,7 @@ function preview(
       ${item.source ? chip(`from ${item.source}`, 'note') : ''}
       ${
         item.priority
-          ? `<span class="chip note" title="higher is more urgent, -10 to 10">priority ${
+          ? `<span class="chip note" title="higher is more urgent, ${PRIORITY_SCALE}">priority ${
               item.priority > 0 ? '+' : ''
             }${item.priority}</span>`
           : ''
@@ -331,8 +331,8 @@ ${timeline
  * The urgency scale, in words a person can pick from.
  *
  * The number is the real thing and every queue here sorts by it, but a board is
- * read by somebody who does not want to learn that -10 to 10 exists before they
- * can say "this one first". The values are spread rather than consecutive so
+ * read by somebody who does not want to learn the whole scale exists before
+ * they can say "this one first". The values are spread rather than consecutive so
  * there is room left for an agent to file something between two of them.
  *
  * An item filed from the board with no urgency is ordinary work, which is what
@@ -1142,7 +1142,7 @@ ${Object.entries(BOARD_PRESETS)
 <tr><td class="mono">stale</td><td>Whether hygiene has flagged it as untouched.</td></tr>
 <tr><td class="mono">source</td><td>For items mirrored from a scanner or an error stream.</td></tr>
 <tr><td class="mono">slug_prefix</td><td>Slug starts with this. Boards name their cards <code>area:thing</code>, so <code>"slug_prefix": "ops:"</code> is one area of the work without anybody adding a label for it.</td></tr>
-<tr><td class="mono">priority_min</td><td>Priority at or above this number. Higher is more urgent: the scale runs -10 to 10, 0 is ordinary work.</td></tr>
+<tr><td class="mono">priority_min</td><td>Priority at or above this number. Higher is more urgent: the scale runs ${PRIORITY_SCALE}, 0 is ordinary work.</td></tr>
 <tr><td class="mono">within_days</td><td>Only work touched in the last N days. What a "Done" column wants: finished work is worth reading, and all of it for ever is a landfill. Nothing is deleted, and the rest is one search away.</td></tr>
 <tr><td class="mono">fields</td><td>Values kept from another system, e.g. <code>{"legacy_status":["investigating","fix_planned"]}</code>.</td></tr>
 </tbody></table></div>
@@ -1164,7 +1164,7 @@ than the move can set, the reply says which column the card actually landed in.<
 <tr><td class="mono">add_labels</td><td>Labels put on. Applied in the database, so a move never overwrites a label somebody else set meanwhile.</td></tr>
 <tr><td class="mono">remove_labels</td><td>Labels taken off, the same way.</td></tr>
 <tr><td class="mono">owner</td><td>Sets the owner. <code>null</code> leaves it to nobody.</td></tr>
-<tr><td class="mono">priority</td><td>Sets the priority, -10 to 10.</td></tr>
+<tr><td class="mono">priority</td><td>Sets the priority, ${PRIORITY_SCALE}.</td></tr>
 <tr><td class="mono">claim</td><td><code>true</code> takes the lease in the mover's name, and the move is refused if somebody else is holding the card.</td></tr>
 <tr><td class="mono">release</td><td><code>true</code> hands the lease back. One column cannot do both.</td></tr>
 <tr><td class="mono">touch</td><td>Only <code>true</code>. Names the write every move already makes, the one that clears the stale flag. A column asking for <code>"stale": false</code> derives it by itself; it has a name so that a move which changes nothing else still counts as a move.</td></tr>

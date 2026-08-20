@@ -57,6 +57,8 @@ import {
   type ProjectDoc,
   type TimelineEntry,
   OPERATOR_ACTOR,
+  PRIORITY_MAX,
+  PRIORITY_MIN,
 } from '../types.js';
 
 export interface PublicDeps {
@@ -2016,7 +2018,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
    * everything the agents had filed at +5: `/next` offers by priority, so work
    * a person asked for first arrived last. The scale is the item's own, and the
    * page offers four points on it rather than the number, because a board is
-   * read by somebody who should not have to learn that -10 to 10 exists to say
+   * read by somebody who should not have to learn the whole scale to say
    * "this one first".
    */
   app.post('/r/:readToken/board/priority', { schema: { hide: true } }, async (request, reply) => {
@@ -2032,7 +2034,7 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
 
     const priority = wholeNumber(one(form.priority));
     if (priority === null || priority < -10 || priority > 10) {
-      throw new ServiceError(400, 'bad_priority', 'Priority is a whole number from -10 to 10.');
+      throw new ServiceError(400, 'bad_priority', `Priority is a whole number from ${PRIORITY_MIN} to ${PRIORITY_MAX}.`);
     }
     await upsertItem(store, project, {
       slug: form.slug,
