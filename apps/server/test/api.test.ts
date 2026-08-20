@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { circleBack } from '../src/service.js';
+import { circleBack, circlesAmong } from '../src/service.js';
 import { after, before, describe, it } from 'node:test';
 import { RATE_LIMIT_SCOPES } from '../src/config.js';
 import { agentAccessJson } from '../src/content.js';
@@ -3628,6 +3628,24 @@ describe('cards waiting on each other', () => {
     ]);
   });
 
+  it('walks a chain deeper than a call stack', () => {
+    // No database: this is about the walk, and the walk is pure. Fifty
+    // thousand cards in a line is deeper than any call stack this runs on, so
+    // a recursive version answers RangeError, which /next would return as a
+    // 500 to an agent asking what to do next. A board is allowed a long chain.
+    const chain = new Map<string, string[]>();
+    for (let index = 0; index < 50_000; index += 1) chain.set(`n${index}`, [`n${index + 1}`]);
+    assert.deepEqual(circlesAmong(chain), []);
+
+    // And the same chain closed into one ring is found, once, however many of
+    // its cards the walk starts from.
+    chain.set('n49999', ['n0']);
+    const found = circlesAmong(chain);
+    assert.equal(found.length, 1);
+    assert.equal(found[0]!.length, 50_001);
+    assert.equal(found[0]![0], 'n0');
+  });
+
   it('counts its round trips, not only the cards it reads', async () => {
     const project = await createProject(harness);
     await post(project, '/items', { slug: 'own', title: 'own', actor: 'x' });
@@ -3776,6 +3794,33 @@ describe('cards waiting on each other', () => {
     assert.match(reason, /2 items are waiting on other cards/);
     assert.match(reason, /circle/);
     assert.match(reason, /ring-a waits on ring-b waits on ring-a/);
+
+    // A circle through a card somebody parked as `blocked` is as stuck as any
+    // other, and the offer's own count deliberately asks about open cards
+    // alone: leaving the parked one out of the walk made it look like the end
+    // of the chain, and the circle went unnamed.
+    const parked = await createProject(harness);
+    await harness.store.items.insertMany([
+      { ...base, projectId: parked.id, _id: 'i_park_a', slug: 'park-a', blockedBy: ['park-b'] },
+      {
+        ...base,
+        projectId: parked.id,
+        _id: 'i_park_b',
+        slug: 'park-b',
+        status: 'blocked' as const,
+        blockedBy: ['park-a'],
+      },
+    ] as never);
+    const throughParked = await harness.server.inject({
+      method: 'GET',
+      url: `${parked.api}/next?agent=somebody`,
+      headers: authed(parked),
+    });
+    assert.equal(throughParked.json().item, null);
+    assert.match(throughParked.json().reason as string, /park-a waits on park-b waits on park-a/);
+    // And the count still says one, because only one of the two was ever on
+    // offer to be withheld.
+    assert.match(throughParked.json().reason as string, /1 item is waiting on other cards/);
 
     // And a board with no circle keeps the plain sentence, so the new half
     // does not turn every quiet board into a warning.

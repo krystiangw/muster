@@ -2118,35 +2118,52 @@ export function circlesAmong(waiting: Map<string, string[]>): string[][] {
   const found: string[][] = [];
   const seenCircles = new Set<string>();
 
-  const walk = (slug: string, path: string[]): void => {
-    const at = state.get(slug);
-    if (at === 'done') return;
-    if (at === 'walking') {
-      // The circle is the tail of the path from where this card first appears.
-      const from = path.indexOf(slug);
-      if (from === -1) return;
-      // Turned to start at the card that sorts first, so the same board says
-      // the same sentence whatever order the rows came back in. A message
-      // somebody compares between two runs has to be the same message.
-      const ring = path.slice(from);
-      const first = ring.indexOf([...ring].sort()[0]!);
-      const turned = [...ring.slice(first), ...ring.slice(0, first)];
-      const circle = [...turned, turned[0]!];
-      // One circle, however many cards it is walked from: the same three cards
-      // reached from each of the three is one thing wrong, not three.
-      const key = [...circle.slice(0, -1)].sort().join('\u0000');
-      if (!seenCircles.has(key)) {
-        seenCircles.add(key);
-        found.push(circle);
-      }
-      return;
-    }
-    state.set(slug, 'walking');
-    for (const next of waiting.get(slug) ?? []) walk(next, [...path, slug]);
-    state.set(slug, 'done');
+  const record = (path: string[], from: number): void => {
+    // Turned to start at the card that sorts first, so the same board says the
+    // same sentence whatever order the rows came back in. A message somebody
+    // compares between two runs has to be the same message.
+    const ring = path.slice(from);
+    const first = ring.indexOf([...ring].sort()[0]!);
+    const turned = [...ring.slice(first), ...ring.slice(0, first)];
+    // One circle, however many cards it is walked from: the same three cards
+    // reached from each of the three is one thing wrong, not three.
+    const key = [...turned].sort().join('\u0000');
+    if (seenCircles.has(key)) return;
+    seenCircles.add(key);
+    found.push([...turned, turned[0]!]);
   };
 
-  for (const slug of waiting.keys()) walk(slug, []);
+  // Depth first with an explicit stack rather than the call stack, and one
+  // path shared across the walk rather than a copy per step. Recursion here
+  // was a chain of cards deep enough to overflow the stack, answering 500 to
+  // an agent asking what to do next, and a path cloned at every step made the
+  // allocation quadratic on the way there. A board is allowed to have a long
+  // dependency chain.
+  for (const root of waiting.keys()) {
+    if (state.get(root) === 'done') continue;
+    const path: string[] = [];
+    const onPath = new Set<string>();
+    const stack: Array<{ slug: string; at: number }> = [{ slug: root, at: 0 }];
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1]!;
+      if (frame.at === 0) {
+        state.set(frame.slug, 'walking');
+        path.push(frame.slug);
+        onPath.add(frame.slug);
+      }
+      const next = (waiting.get(frame.slug) ?? [])[frame.at];
+      if (next === undefined) {
+        state.set(frame.slug, 'done');
+        onPath.delete(frame.slug);
+        path.pop();
+        stack.pop();
+        continue;
+      }
+      frame.at += 1;
+      if (onPath.has(next)) record(path, path.indexOf(next));
+      else if (state.get(next) !== 'done') stack.push({ slug: next, at: 0 });
+    }
+  }
   return found;
 }
 
@@ -3028,23 +3045,35 @@ export async function nextItem(
   const blocked = await waitingBlockers(store, project._id, ['open']);
   const waiting = [...blocked.keys()];
   if (waiting.length > 0) base.slug = { $nin: waiting };
-  // The map is already here, so saying whether any of it waits round in a
-  // circle costs nothing. It is worth the sentence because the count on its
-  // own reads as "somebody else will finish those", and in a circle nobody
-  // will: those cards sit in the column for work waiting to be picked up and
-  // nothing ever offers them again. The write door refuses a list that closes
-  // a circle, so what turns up here is a board written before that refusal or
-  // two requests that closed one in the same instant.
-  const circles = waiting.length > 0 ? circlesAmong(blocked) : [];
-  const alsoWaiting =
-    waiting.length === 0
-      ? ''
-      : `; ${waiting.length} ${waiting.length === 1 ? 'item is' : 'items are'} waiting on other cards` +
-        (circles.length === 0
-          ? ''
-          : `, and ${circles.length === 1 ? 'two or more of them wait' : `${circles.length} sets of them wait`} round in a circle, which nothing will free: ${circles
-              .map((circle) => circle.join(' waits on '))
-              .join('; ')}. Take one card out of one of those lists.`);
+  /**
+   * What is waiting, and whether any of it waits round in a circle.
+   *
+   * Said only when there is nothing to hand over, which is the moment somebody
+   * is asking why. The count on its own reads as "somebody else will finish
+   * those", and in a circle nobody will: those cards sit in the column for
+   * work waiting to be picked up and nothing ever offers them again. The write
+   * door refuses a list that closes a circle, so what turns up here is a board
+   * written before that refusal, or two requests that closed one in the same
+   * instant.
+   *
+   * The circle is looked for across every card that is not finished, while the
+   * count above stays open cards alone. A card somebody parked as `blocked` is
+   * as stuck in a circle as any other, and leaving it out made the walk treat
+   * it as the end of the chain and see nothing; counting it as withheld work
+   * would report something that was never on offer. Two questions, two sets.
+   */
+  const sayWaiting = async (): Promise<string> => {
+    if (waiting.length === 0) return '';
+    const said = `; ${waiting.length} ${waiting.length === 1 ? 'item is' : 'items are'} waiting on other cards`;
+    const circles = circlesAmong(await waitingBlockers(store, project._id));
+    if (circles.length === 0) return said;
+    return (
+      said +
+      `, and ${circles.length === 1 ? 'two or more of them wait' : `${circles.length} sets of them wait`} round in a circle, which nothing will free: ${circles
+        .map((circle) => circle.join(' waits on '))
+        .join('; ')}. Take one card out of one of those lists.`
+    );
+  };
   const sort = { priority: -1 as const, touchedAt: 1 as const };
 
   const scope = agent?.scope ?? [];
@@ -3073,15 +3102,15 @@ export async function nextItem(
       item: null,
       reason:
         otherCount > 0
-          ? `nothing open in your scope; ${otherCount} open ${otherCount === 1 ? 'item belongs' : 'items belong'} to other scopes. Widen your scope on purpose, or leave them alone.${alsoWaiting}`
-          : `nothing open in this project${alsoWaiting}`,
+          ? `nothing open in your scope; ${otherCount} open ${otherCount === 1 ? 'item belongs' : 'items belong'} to other scopes. Widen your scope on purpose, or leave them alone.${await sayWaiting()}`
+          : `nothing open in this project${await sayWaiting()}`,
     };
   }
 
   const any = await store.items.find(base).sort(sort).limit(1).toArray();
   return any[0]
     ? { item: any[0] as ItemDoc, reason: 'oldest untouched open item' }
-    : { item: null, reason: `nothing open in this project${alsoWaiting}` };
+    : { item: null, reason: `nothing open in this project${await sayWaiting()}` };
 }
 
 function escapeRegex(value: string): string {

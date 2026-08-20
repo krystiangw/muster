@@ -2361,3 +2361,20 @@ circle and which. The count on its own reads as *somebody else will finish
 those*, and in a circle nobody will. Turned to start at the card that sorts
 first, so the same board says the same sentence whatever order the rows came
 back in.
+
+**Review again, and both findings were about what the walk could not see.** A
+circle running through a card somebody parked as `blocked` was invisible,
+because the offer's map is open cards alone and the walk read the parked card
+as the end of the chain. The two questions want two sets: the count says how
+much work was withheld, and a parked card was never on offer to withhold, while
+the circle asks what is stuck, and a parked card in a circle is as stuck as any
+other. The circle map is fetched only when the offer comes back empty, which is
+the moment somebody is asking why, so the two extra queries land on the one
+call that has nothing else to do.
+
+And the walk was recursive, with the path cloned at every step. A board is
+allowed a long dependency chain, and a long enough one turns `/next` into a
+`RangeError` and a 500 for an agent asking what to do next. It is an explicit
+stack now, with one path shared across the walk. Proved without a database,
+because the walk is pure: fifty thousand cards in a line, which no call stack
+here would survive, and the same line closed into a ring, found once.
