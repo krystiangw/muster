@@ -158,9 +158,13 @@ added tomorrow is in tomorrow's archive without anybody touching this file.
 Seeing what the watchdog does on a bad night is the one thing you cannot try,
 because trying it is the thing it does: `node apps/server/tools/watchdog.mjs --dry-run` runs
 every check against the real deployment and prints what it would have filed and
-mailed, writing nothing and sending nothing, not even its own state file. It
-rehearses from wherever the counters already are, since a run that wrote them
-would change the thing it was rehearsing. Use it instead of pointing a scratch
+mailed, writing nothing and sending nothing, not even its own state file. On a
+night with nothing wrong it prints what each check answered anyway, which a real
+round does only once an hour: a rehearsal that printed nothing would be telling
+you the same thing as a rehearsal that crashed before its first check, and
+ruling that out is the reason to run one. It rehearses from wherever the
+counters already are, since a run that wrote them would change the thing it was
+rehearsing. Use it instead of pointing a scratch
 `MUSTER_HOME` at production, which on 2026-08-19 put three urgent questions on
 the operator's board and mailed one of them at eleven at night.
 
