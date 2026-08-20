@@ -1793,14 +1793,16 @@ describe('the same shape at the door the document counts as one', () => {
             // argument was read, and the walk learned nothing about it.
             const named = trail[trail.length - 1] ?? '';
             const asPath = trail.join('.');
-            if (
-              refused &&
-              (said.includes(`"${named}"`) ||
-                said.includes(asPath) ||
-                new RegExp(`\\b${named}\\b`, 'i').test(said))
-            ) {
-              reached = true;
-            }
+            // A field inside something has to be named with its path. The bare
+            // word matches refusals that are about a different field of the
+            // same name: with `then.title` dropped, the call goes on to the
+            // empty `expect` and is refused with "Send the title or the body",
+            // which mentions a title and means nothing about this one.
+            const names =
+              trail.length > 1
+                ? said.includes(asPath)
+                : said.includes(`"${named}"`) || new RegExp(`\\b${named}\\b`, 'i').test(said);
+            if (refused && names) reached = true;
           }
 
           // Free-form places are exempt by their own schema: `fields` and

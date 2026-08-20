@@ -115,7 +115,10 @@ export function normalizeUpsertInput(input: UpsertItemInput): UpsertItemInput {
     }
     const next = normalizeSlug(typeof raw.slug === 'string' ? raw.slug : '');
     if (!next) {
-      throw badRequest('bad_then', 'then needs the slug of the card to file.');
+      // Named the way its siblings are named. Every other refusal from this
+      // block says `then.something`, and a caller matching on the field it got
+      // wrong had to know that this one alone was worded differently.
+      throw badRequest('bad_then', 'then.slug is the card to file when this one finishes, and this call has none.');
     }
     if (next === normalizeSlug(input.slug)) {
       throw badRequest(
