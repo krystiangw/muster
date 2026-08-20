@@ -44,6 +44,10 @@ function hoursAgo(hours: number): Date {
   return new Date(Date.now() - hours * 3_600_000);
 }
 
+function minutesAgo(minutes: number): Date {
+  return new Date(Date.now() - minutes * 60_000);
+}
+
 describe('claim expiry', () => {
   it('frees an item whose holder stopped sending heartbeats, and says who dropped it', async () => {
     const project = await createProject(harness);
@@ -62,6 +66,65 @@ describe('claim expiry', () => {
     assert.equal(last.by, 'hygiene');
     assert.match(last.message, /crashed-agent/);
     assert.match(last.message, /without a heartbeat/);
+  });
+
+  it('clears a lease left on finished work by a move that never finished', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'work', title: 'work', actor: 'a' });
+    await post(project, '/items', { slug: 'work', status: 'done', actor: 'a' });
+
+    // The state a crash can leave and a request cannot: the reopening move
+    // takes the lease first and dies before it writes the status. Staged here,
+    // because the door refuses to produce it and that is the point.
+    await harness.store.items.updateOne(
+      { projectId: project.id, slug: 'work' },
+      {
+        $set: {
+          claim: {
+            agent: 'crashed-mover',
+            claimedAt: minutesAgo(5),
+            expiresAt: hoursAgo(-1),
+            ttlMinutes: 60,
+          },
+        },
+      },
+    );
+    await sweepProject(harness.store, await projectDoc(project));
+
+    const item = await itemDoc(project, 'work');
+    assert.equal(item.claim, null, 'finished work does not stay held');
+    assert.equal(item.status, 'done', 'and the sweep does not decide the work is open again');
+    const last = item.timeline.at(-1)!;
+    assert.equal(last.by, 'hygiene');
+    assert.match(last.message, /crashed-mover/);
+    assert.match(last.message, /move that did not finish/);
+  });
+
+  it('leaves a lease a reopening move is still in the middle of using', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'work', title: 'work', actor: 'a' });
+    await post(project, '/items', { slug: 'work', status: 'done', actor: 'a' });
+
+    // Same shape, seconds old rather than minutes: this is a move in flight,
+    // and sweeping it would take the lease out from under a caller that is
+    // about to write the status. The grace is what tells the two apart.
+    await harness.store.items.updateOne(
+      { projectId: project.id, slug: 'work' },
+      {
+        $set: {
+          claim: {
+            agent: 'mover',
+            claimedAt: new Date(),
+            expiresAt: hoursAgo(-1),
+            ttlMinutes: 60,
+          },
+        },
+      },
+    );
+    await sweepProject(harness.store, await projectDoc(project));
+
+    const item = await itemDoc(project, 'work');
+    assert.equal(item.claim?.agent, 'mover');
   });
 });
 

@@ -108,13 +108,44 @@ async function releaseSlots(store: Store, projectId: string, count: number): Pro
  * Releases claims whose heartbeat stopped. Without this, one crashed session
  * holds a ticket forever and every other agent politely skips it.
  */
+/**
+ * How long a lease on finished work is left alone before it is read as
+ * wreckage.
+ *
+ * There is one caller allowed to hold a lease over a terminal card: a board
+ * move dragging finished work back into progress, which takes the lease and
+ * then writes the status that ends the contradiction, in that order and on
+ * purpose. Two writes, milliseconds apart. A process that dies between them
+ * leaves the lease behind, and nothing inside the request can clean up after a
+ * process that is gone.
+ *
+ * So the repair pass does it, which is where invariants that have to survive a
+ * crash belong. A minute is far longer than the move and far shorter than a
+ * lease, and being generous costs nothing: the only thing waiting on it is a
+ * card nobody is working on.
+ */
+const FINISHED_LEASE_GRACE_MS = 60_000;
+
 export async function expireClaims(
   store: Store,
   projectId: string,
   now: Date,
 ): Promise<HygieneOutcome> {
   const result = await store.items.updateMany(
-    { projectId, 'claim.expiresAt': { $lte: now } },
+    {
+      $or: [
+        { projectId, 'claim.expiresAt': { $lte: now } },
+        // Finished work is not work in progress, and this is the half of that
+        // rule no request path can enforce. A lease is refused over a card
+        // that is already over; one that is there anyway got there through a
+        // move that did not finish.
+        {
+          projectId,
+          status: { $in: [...TERMINAL_STATUSES] },
+          'claim.claimedAt': { $lte: new Date(now.getTime() - FINISHED_LEASE_GRACE_MS) },
+        },
+      ],
+    },
     [
       {
         $set: {
@@ -123,7 +154,13 @@ export async function expireClaims(
               $concat: [
                 'claim by ',
                 { $ifNull: ['$claim.agent', 'unknown'] },
-                ' expired without a heartbeat, item is free again',
+                {
+                  $cond: [
+                    { $lte: ['$claim.expiresAt', now] },
+                    ' expired without a heartbeat, item is free again',
+                    ' was left on finished work by a move that did not finish, and is cleared',
+                  ],
+                },
               ],
             },
             now,

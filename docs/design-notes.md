@@ -2149,3 +2149,29 @@ that only claims does not say it, and meets the refusal like anybody else,
 because that column is precisely the one that would show finished work as
 somebody's work in progress. Both directions are pinned: forcing the hatch open
 fails the three refusal tests, and taking it away fails the reopen.
+
+**Review again, on the window a fix of this shape always leaves.** The
+reopening move is two writes: the lease, then the status that ends the
+contradiction. A process that dies between them leaves a lease on a finished
+card, which is the state this whole section exists to remove. Nothing inside a
+request can clean up after a process that is gone.
+
+Neither of the two obvious answers survives contact with what this repository
+already learned. A transaction spanning the claim and the upsert needs a
+replica set, and the last-admin-key guard is in the tree with a
+`withoutTransactions` fallback precisely because standalone deployments answered
+500 without one; it would also wrap the busiest write in the service for the
+sake of a window measured in milliseconds. Writing the status first and undoing
+it when the claim fails is a compensating write, which was the first shape of
+that same guard and was wrong for the same reason: the compensation is itself a
+write that can fail.
+
+So the repair pass enforces it, which is where an invariant that has to survive
+a crash belongs. The lease sweep already clears expired leases and does not
+filter on status; it now also clears a lease sitting on a terminal card, but
+only one older than a minute. The grace is what tells a crash from a move in
+flight: a minute is far longer than two writes and far shorter than a lease,
+and the only thing waiting on the difference is a card nobody is working on.
+The timeline entry says which of the two cases it was, because "expired without
+a heartbeat" is not what happened. Both halves are pinned: taking the clause
+out leaves the wreckage, and taking the grace out sweeps a live move.
