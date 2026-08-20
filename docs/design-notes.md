@@ -2669,3 +2669,17 @@ service writes has a `createdAt`, and it comes back as a Date whatever the file
 says. The general rule stays beside it for everything else, comparing the
 archive's own ISO strings with what arrived.
 
+**The comparison read the future.** Verifying an archive that is not the newest
+picked the newest *other* one to compare with, so checking the oldest copy on
+disk announced that `oauthClients` "had 3 and has none here": true of the pair
+and backwards in time, since those three were registered two days after that
+copy was written. It compares with the entry immediately before it now, and
+with nothing at all when the file is not in that directory, because a file from
+somewhere else has no place in this directory's order.
+
+Worth writing down because the demonstration was harder than the fix: checking
+the second-newest copy showed no line at all, since nothing had been emptied
+between those two. The bug only speaks when a collection is *added* later,
+which is why the case that proves it is the oldest archive rather than the one
+next door.
+

@@ -205,7 +205,14 @@ if (args.includes('--verify')) {
   // looks like, and refusing to verify the copy taken after a deliberate one
   // would be the tool arguing with the operator. The line is the artefact; a
   // schedule keeps it in the log next to the exit code.
-  const older = listBackups().filter((b) => b.path !== file).at(-1);
+  // The one before this one, and only when this one is in that directory at
+  // all. Taking the newest other copy read the future when an older archive
+  // was named on the command line: the line then said a collection had been
+  // emptied because it was filled afterwards. A file from somewhere else has
+  // no place in this directory's order, so it is compared with nothing.
+  const known = listBackups();
+  const here = known.findIndex((b) => b.path === file);
+  const older = here > 0 ? known[here - 1] : undefined;
   if (older) {
     try {
       const chunks = [];
