@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 // Imported from source rather than from the built package so a broken SDK
 // fails this suite instead of silently testing a stale dist.
@@ -584,5 +588,54 @@ describe('the typed SDK', () => {
       const missing = emitted(fn).filter((key) => !declared(type).has(key));
       assert.deepEqual(missing, [], `${type} does not describe what ${fn} returns`);
     }
+  });
+});
+
+describe('the package a fleet installs', () => {
+  const sdk = new URL('../../../packages/sdk/', import.meta.url).pathname;
+
+  /**
+   * Everything above this imports the source, on purpose, so a broken SDK
+   * fails here rather than a stale `dist` passing quietly. That leaves the
+   * thing that actually ships untested: the tarball carries `dist`, its
+   * `exports` map names files that have to exist, and nothing in this suite
+   * had ever loaded one of them. A package can be perfect in TypeScript and
+   * unimportable on the other end.
+   *
+   * Built here rather than assumed, which is also what answers the comment
+   * above: this cannot pass on a stale build because it makes the build.
+   */
+  it('builds, and the built files are the ones its manifest names', async () => {
+    execFileSync('npm', ['run', 'build'], { cwd: sdk, stdio: 'ignore' });
+    const manifest = JSON.parse(readFileSync(join(sdk, 'package.json'), 'utf8')) as {
+      main: string;
+      types: string;
+      exports: Record<string, Record<string, string>>;
+    };
+    const named = [
+      manifest.main,
+      manifest.types,
+      ...Object.values(manifest.exports).flatMap((entry) => Object.values(entry)),
+    ];
+    for (const path of named) {
+      assert.ok(existsSync(join(sdk, path)), `${path} is named by package.json and is not on disk`);
+    }
+  });
+
+  it('drives a session through the built entry point, the way an install would', async () => {
+    const entry = pathToFileURL(join(sdk, 'dist/index.js')).href;
+    const built = (await import(entry)) as { Muster: { start: (options: Record<string, unknown>) => Promise<any> } };
+    assert.equal(typeof built.Muster?.start, 'function', 'the entry point exports what the docs tell people to import');
+
+    const { client, created } = await built.Muster.start({
+      name: 'from the built package',
+      actor: 'errors-loop',
+      baseUrl,
+    });
+    assert.match(created.token, /^mk_/);
+    const upserted = await client.upsert({ slug: 'errors:built', title: 'filed through the tarball' });
+    assert.equal(upserted.item.slug, 'errors:built');
+    const read = await client.item('errors:built');
+    assert.equal(read.item.title, 'filed through the tarball');
   });
 });
