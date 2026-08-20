@@ -2402,14 +2402,6 @@ about as clear a signal as this repository gets that a sentence living in one
 function is a sentence the door beside it does not have. It lives in one
 function now, and a test asserts both doors return the same string.
 
-Measured rather than waved at, and then measured again because the first
-measurement was published without saying what it counted. "Four queries" came
-from a counter wrapped around `find` and `countDocuments` alone, which is not
-what a reader hears. Counting every call the offer makes on the items
-collection, an empty one lands between six and ten, and most of that spread is
-not this change at all: it is whether the hygiene sweep fires on that request,
-which adds five writes of its own on a project nobody has touched.
-
 What this change costs is the second `waitingBlockers`: one read when no card
 that is still open or blocked uses `blocked_by`, and two when some do, because
 the second only runs if the first found rows. That is the price of not
@@ -2418,10 +2410,21 @@ that has nothing else to do. If it ever matters, the saving is to project
 `status` alongside `blockedBy` and derive both sets from one read, rather than
 asking twice with two different status filters.
 
-The lesson is older than the number: a published cost needs its units. This
-repository has now put out four performance sentences that were untrue in a way
-nobody checked, and this one was untrue by measuring a subset and naming it
-"queries".
+**No absolute number here, on purpose, and that is the finding.** Three
+attempts to publish what an empty offer costs produced three different answers,
+each corrected by review. The first counted a subset and called it "queries":
+`find` and `countDocuments`, while the call also uses `findOne` and
+`findOneAndUpdate`. The second gave a range from three measured shapes and
+missed the corners. The third tried to pin the corners by forcing the hygiene
+sweep on and off and got the same two numbers either way, because the sweep
+fires on state the measurement was not controlling. Across those attempts the
+same call measured 4, 5, 6, 7, 10 and 12.
+
+The delta is stable and the absolute is not, because the absolute is dominated
+by whether the repair pass runs on that request, which is neither this change
+nor a property of the call. So the delta is what is published. A number whose
+inputs cannot be enumerated is a number that will be wrong again, and this one
+was, twice, in the space of an hour.
 
 **A probe that found nothing, worth the line it takes to say so.** The document
 promises an unclaimed project is deleted with all its data. Checked against
