@@ -123,10 +123,16 @@ export async function startHarness(
       // left alone: a compressed body says nothing either way, and guessing
       // there would report a miss that never happened.
       const json = String(reply.getHeader('content-type') ?? '').includes('application/json');
-      if (status >= 200 && status < 300 && json && typeof payload === 'string') {
+      // An empty JSON answer arrives here as `undefined`, not as an empty
+      // string: `reply.type('application/json').send()` is a normal thing to
+      // write and the exact regression this is for, and reading only strings
+      // walked past it. A payload that is neither is left alone, because a
+      // compressed body says nothing either way.
+      const readable = typeof payload === 'string' || payload === undefined || payload === null;
+      if (status >= 200 && status < 300 && json && readable) {
         let top: Record<string, unknown> = {};
         try {
-          const parsed: unknown = JSON.parse(payload);
+          const parsed: unknown = typeof payload === 'string' ? JSON.parse(payload) : undefined;
           if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)) {
             top = parsed as Record<string, unknown>;
           }

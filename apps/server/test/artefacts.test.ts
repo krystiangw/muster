@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { itemJson } from '../src/serialize.js';
 import { scopeWarningSays } from '../src/types.js';
-import { startHarness, type Harness } from './helper.js';
+import { authed, createProject, startHarness, type Harness } from './helper.js';
 
 /**
  * The things we publish, checked against the thing we run.
@@ -84,6 +84,82 @@ describe('a number this service publishes as a rule', () => {
       [],
       'every one of these is exported from types.ts; import it rather than writing the number again',
     );
+  });
+});
+
+describe('the two doors this service answers on', () => {
+  /**
+   * The same operation asked over HTTP and over MCP, compared by what comes
+   * back rather than by what is refused.
+   *
+   * A test already holds the refusals to each other. Answers were never
+   * compared, and the pair that mattered was found by hand this morning: the
+   * two offers, where the one a fleet is pointed at said less than the one
+   * beside it. This is that comparison made permanent, and it is cheap: one
+   * project, a handful of calls, and the keys of what each door hands back.
+   *
+   * Keys and not values on purpose. The two doors answer about different
+   * cards, and demanding equal contents would be demanding a fixture rather
+   * than a contract.
+   */
+  it('hands back the same fields whichever one is asked', async () => {
+    const harness = await startHarness();
+    try {
+      const project = await createProject(harness);
+      const headers = { ...authed(project), 'content-type': 'application/json' };
+      const http = (method: 'GET' | 'POST', path: string, payload?: unknown) =>
+        harness.server.inject({ method, url: `${project.api}${path}`, headers, payload: payload as object });
+      const mcp = async (name: string, args: Record<string, unknown>) => {
+        const answered = await harness.server.inject({
+          method: 'POST',
+          url: '/mcp',
+          headers,
+          payload: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args } },
+        });
+        const body = answered.json() as { result?: { structuredContent?: Record<string, unknown> } };
+        // An empty object here would compare equal to a door that answers
+        // nothing, so a tool that came back with no structured answer is named
+        // rather than quietly matching.
+        return body.result?.structuredContent ?? { NOTHING_CAME_BACK: true };
+      };
+      const fields = (answer: unknown): string => Object.keys((answer ?? {}) as object).sort().join(',');
+
+      await http('POST', '/agents', { handle: 'w', description: 'does things' });
+      for (const slug of ['one', 'two', 'three']) {
+        await http('POST', '/items', { slug, title: slug, actor: 'w' });
+      }
+
+      const pairs: Array<[string, () => Promise<unknown>, () => Promise<unknown>]> = [
+        ['read one', async () => (await http('GET', '/items/one')).json(), () => mcp('read_item', { slug: 'one' })],
+        ['read a page', async () => (await http('GET', '/items?limit=2')).json(), () => mcp('list_items', { limit: 2 })],
+        [
+          'take a lease',
+          async () => (await http('POST', '/items/two/claim', { agent: 'w' })).json(),
+          () => mcp('claim_item', { slug: 'three', agent: 'w' }),
+        ],
+        [
+          'be offered work',
+          async () => (await http('GET', '/next?agent=w')).json(),
+          () => mcp('next_item', { agent: 'w' }),
+        ],
+        [
+          'be offered work and hold it',
+          async () => (await http('POST', '/next', { agent: 'first' })).json(),
+          () => mcp('next_item', { agent: 'second', claim: true }),
+        ],
+        ['read the board', async () => (await http('GET', '/board')).json(), () => mcp('board', {})],
+      ];
+
+      const apart: string[] = [];
+      for (const [what, overHttp, overMcp] of pairs) {
+        const one = fields(await overHttp());
+        const other = fields(await overMcp());
+        if (one !== other) apart.push(`${what}: http has ${one}, mcp has ${other}`);
+      }
+      assert.deepEqual(apart, [], 'both doors answer with the same fields');
+    } finally {
+      await harness.stop();
+    }
   });
 });
 

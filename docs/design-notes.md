@@ -2511,3 +2511,24 @@ the type a caller compiles against. Added, and a test now reads the interface
 out of the client's source and the properties out of the document and fails
 either way round. Two hand-kept surfaces describing one thing drift in the
 quiet direction, which is the one nobody is looking at.
+
+**An empty JSON answer is not an empty string.** Review again, on the same
+guard: `reply.type('application/json').send()` arrives in the hook as
+`undefined`, not as `""`, so the string-only condition walked past exactly the
+regression the guard was written for. Three shapes of empty answer now fail it
+by name, and a payload that is neither string nor absent is still left alone,
+because a compressed body says nothing either way.
+
+**Both doors, compared by what they answer rather than by what they refuse.**
+A test has held the refusals to each other for a while. Answers were never
+compared, and the pair that mattered was found by hand this morning: the offer
+a fleet is pointed at said less than the one beside it. Six operations are
+compared now, by the fields that come back rather than by their contents, since
+the two doors are asked about different cards and demanding equal contents
+would be demanding a fixture rather than a contract. Adding a field to one door
+and not the other fails it by name.
+
+The mutation that proved it took two goes. The first landed in a tool
+description rather than in the answer, passed, and proved nothing, which is the
+same trap as the door whose path was guessed: a mutation has to be checked for
+having reached the thing it claims to test.
