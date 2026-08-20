@@ -196,6 +196,46 @@ describe('what we publish about ourselves', () => {
     assert.deepEqual(ghosts, [], `tools describing fields they do not have:\n${ghosts.join('\n')}`);
   });
 
+  it('answers a wrong shape with the code the document promises for it', async () => {
+    // The document tells an agent that a value of the wrong shape comes back
+    // named rather than dropped, which is a promise about a refusal, and a
+    // promise about a refusal is the kind this service has already been caught
+    // making and not keeping. Both doors, because the sentence does not say
+    // which one it is about.
+    const doc = (await harness.server.inject({ method: 'GET', url: '/skill.md' })).body;
+    assert.match(doc, /bad_argument/, 'the document names the code');
+
+    const created = await harness.server.inject({ method: 'POST', url: '/p', payload: { name: 'shapes' } });
+    const project = created.json() as { project: string; token: string };
+    const headers = { authorization: `Bearer ${project.token}`, 'content-type': 'application/json' };
+
+    const overMcp = await harness.server.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers,
+      payload: {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'upsert_item', arguments: { slug: 'shaped', title: { $ne: null }, actor: 'a' } },
+      },
+    });
+    const said = String(
+      (overMcp.json() as { result?: { content?: { text?: string }[] } }).result?.content?.[0]?.text ?? '',
+    );
+    assert.match(said, /bad_argument/, said);
+    assert.match(said, /"title"/, said);
+
+    // And nothing was written, which is the other half of what the sentence
+    // promises: not a card with no title.
+    const read = await harness.server.inject({
+      method: 'GET',
+      url: `/v1/${project.project}/items/shaped`,
+      headers: { authorization: `Bearer ${project.token}` },
+    });
+    assert.equal(read.statusCode, 404, 'the card the refusal refused was not made anyway');
+  });
+
   it('publishes the caps it actually enforces, for both kinds of project', async () => {
     // The numbers on the page are the ones a stranger plans around, and the
     // two kinds are a tenth apart: a board nobody has claimed gets fifty

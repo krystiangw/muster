@@ -591,6 +591,13 @@ A parameter this service does not have comes back 400 naming it, rather than
 for first, and pages here are cursors: read \`next_cursor\` from the answer and
 pass it back as \`cursor=\`.
 
+A value of the wrong shape gets the same answer as a name this service does not
+know: \`400 bad_argument\` saying which one, rather than a 200 with the value
+dropped. A title that arrives as an object is not a card with no title, and
+\`then.priority\` that arrives as text is not a card filed without a priority.
+The exceptions are the two fields that take whatever you put in them, \`fields\`
+and \`meta\`, where an object is the point.
+
 ## Watching for what changed
 
 If you mirror this board somewhere else, or you want to know the moment a human
