@@ -2335,3 +2335,29 @@ nobody can reach in a test is a ceiling nobody has measured: the earlier test
 built eight hundred and twenty cards to touch it once, and could say nothing
 about what happens at the edge. Three cards of budget against a level of five,
 four of them missing, says it in a line.
+
+**And the carry broke the ceiling a third time, in a third direction.** Review
+again: a name nobody ever filed costs no card, so sizing the question by the
+cards left over turned a wide level of missing names into one query per name.
+Five hundred cards read while enqueuing eight thousand absent descendants
+became thousands of round trips inside one write, under a ceiling that was
+doing its job on the only number it was counting.
+
+Three numbers now, because there are three ways to spend too much: cards read,
+names to a question, and questions asked. Two hundred and twelve covers any
+dependency graph a board has ever had. All three are parameters defaulting to
+their constants, and the test that pins them sets them small enough to build:
+one card of budget, four questions, ten names each, against a hundred names
+nobody filed. It asserts both the round trips and the names they carried,
+because tying the question back to the cards left over gives the same four
+round trips carrying one name each, and a test counting only round trips walks
+straight past it.
+
+**Where a circle is said out loud, now that one can only arrive two ways.** The
+offer already reads the whole map of what waits on what, in two queries, and
+throws the values away. Finding a circle in that map is free, so `/next` says
+it: not just how many cards are waiting, but that some of them wait round in a
+circle and which. The count on its own reads as *somebody else will finish
+those*, and in a circle nobody will. Turned to start at the card that sorts
+first, so the same board says the same sentence whatever order the rows came
+back in.

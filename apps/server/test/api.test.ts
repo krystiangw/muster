@@ -3602,7 +3602,7 @@ describe('cards waiting on each other', () => {
     await post(project, '/items', { slug: 'far', blocked_by: ['own'], actor: 'x' });
 
     const frontier = ['gone-1', 'gone-2', 'gone-3', 'gone-4', 'far'];
-    const found = await circleBack(harness.store, project.id, 'own', frontier, 3);
+    const found = await circleBack(harness.store, project.id, 'own', frontier, { cards: 3 });
     assert.deepEqual(found, ['own', 'far', 'own'], 'the fifth name was still worth asking about');
 
     // And the ceiling is still a ceiling: cards that exist do cost budget.
@@ -3615,17 +3615,58 @@ describe('cards waiting on each other', () => {
       await post(project, '/items', { slug, blocked_by: waits, actor: 'x' });
     }
     assert.equal(
-      await circleBack(harness.store, project.id, 'own', ['c1'], 2),
+      await circleBack(harness.store, project.id, 'own', ['c1'], { cards: 2 }),
       null,
       'two cards of budget does not reach a circle three cards away',
     );
-    assert.deepEqual(await circleBack(harness.store, project.id, 'own', ['c1'], 3), [
+    assert.deepEqual(await circleBack(harness.store, project.id, 'own', ['c1'], { cards: 3 }), [
       'own',
       'c1',
       'c2',
       'c3',
       'own',
     ]);
+  });
+
+  it('counts its round trips, not only the cards it reads', async () => {
+    const project = await createProject(harness);
+    await post(project, '/items', { slug: 'own', title: 'own', actor: 'x' });
+
+    // Names nobody ever filed, which is the shape that broke the first
+    // ceiling: a missing name costs no card, so a walk that sized its question
+    // by the cards it had left asked about them one at a time. Counted here,
+    // because "it finished" and "it finished without a thousand round trips"
+    // are different claims.
+    let asked = 0;
+    let names = 0;
+    const real = harness.store.items.find.bind(harness.store.items);
+    (harness.store.items as unknown as { find: typeof real }).find = ((
+      ...args: Parameters<typeof real>
+    ) => {
+      asked += 1;
+      const filter = args[0] as { slug?: { $in?: string[] } } | undefined;
+      names += filter?.slug?.$in?.length ?? 0;
+      return real(...args);
+    }) as typeof real;
+
+    const missing = Array.from({ length: 100 }, (_, index) => `gone-${index}`);
+    try {
+      const found = await circleBack(harness.store, project.id, 'own', missing, {
+        cards: 1,
+        queries: 4,
+        batch: 10,
+      });
+      assert.equal(found, null);
+    } finally {
+      (harness.store.items as unknown as { find: typeof real }).find = real;
+    }
+    // Ten names to a question and four questions: forty asked about, and the
+    // walk stops rather than working through all hundred one at a time.
+    assert.equal(asked, 4, `the walk made ${asked} round trips`);
+    // And the size of a question is its own number. Tied back to the cards
+    // left over, these same four round trips would carry one name each, which
+    // is the shape that turned a wide level into thousands of them.
+    assert.equal(names, 40, `the walk asked about ${names} names in ${asked} round trips`);
   });
 
   it('stops walking a wide graph rather than reading all of it', { timeout: 30_000 }, async () => {
@@ -3691,6 +3732,66 @@ describe('cards waiting on each other', () => {
     // The ceiling is five hundred cards. Without a bound on the way in, one
     // level of this graph is four hundred rows and the next is eight thousand.
     assert.ok(read <= 600, `the walk read ${read} cards`);
+  });
+
+  it('tells an agent asking for work that a circle is why there is none', async () => {
+    const project = await createProject(harness);
+    // Only two things can put a circle on a board now: a board written before
+    // the refusal existed, and two requests closing one in the same instant.
+    // Written straight into the store, because that is what both look like.
+    const base = {
+      projectId: project.id,
+      title: 'from before',
+      body: '',
+      status: 'open' as const,
+      owner: null,
+      priority: 0,
+      labels: [],
+      source: null,
+      fields: {},
+      stale: false,
+      staleSince: null,
+      claim: null,
+      timeline: [],
+      timelineCount: 0,
+      lastActor: 'x',
+      closedAt: null,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      touchedAt: new Date(),
+    };
+    await harness.store.items.insertMany([
+      { ...base, _id: 'i_ring_a', slug: 'ring-a', blockedBy: ['ring-b'] },
+      { ...base, _id: 'i_ring_b', slug: 'ring-b', blockedBy: ['ring-a'] },
+    ] as never);
+
+    const offered = await harness.server.inject({
+      method: 'GET',
+      url: `${project.api}/next?agent=somebody`,
+      headers: authed(project),
+    });
+    assert.equal(offered.json().item, null);
+    const reason = offered.json().reason as string;
+    // The count on its own reads as "somebody else will finish those".
+    assert.match(reason, /2 items are waiting on other cards/);
+    assert.match(reason, /circle/);
+    assert.match(reason, /ring-a waits on ring-b waits on ring-a/);
+
+    // And a board with no circle keeps the plain sentence, so the new half
+    // does not turn every quiet board into a warning.
+    const plain = await createProject(harness);
+    await post(plain, '/items', { slug: 'one', title: 'one', actor: 'x' });
+    await post(plain, '/items', { slug: 'two', title: 'two', actor: 'x' });
+    await post(plain, '/items', { slug: 'two', blocked_by: ['one'], actor: 'x' });
+    await post(plain, '/items', { slug: 'one', status: 'blocked', actor: 'x' });
+    const quiet = await harness.server.inject({
+      method: 'GET',
+      url: `${plain.api}/next?agent=somebody`,
+      headers: authed(plain),
+    });
+    assert.equal(quiet.json().item, null);
+    assert.match(quiet.json().reason as string, /1 item is waiting on other cards/);
+    assert.doesNotMatch(quiet.json().reason as string, /circle/);
   });
 
   it('refuses it at the MCP door in the same words', async () => {

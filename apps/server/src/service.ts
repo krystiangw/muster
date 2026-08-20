@@ -1855,6 +1855,23 @@ function takingIt(agent: string, now: Date, ttl: number, expiresAt: Date, nonce:
 const CIRCLE_BUDGET = 500;
 
 /**
+ * How many slugs one question carries, and how many questions there may be.
+ *
+ * Separate from the card budget on purpose, which review found the hard way: a
+ * name nobody ever filed costs no card, so tying the size of the question to
+ * the cards left over turned a wide level of missing names into one query per
+ * name. Five hundred cards read while enqueuing eight thousand absent
+ * descendants became thousands of round trips inside a single write, under a
+ * ceiling that was doing its job on the only number it was counting.
+ *
+ * So the round trips are counted too. Two hundred names to a question and
+ * twelve questions covers any dependency graph a board has ever had, and the
+ * write path is bounded whichever way the graph is shaped.
+ */
+const CIRCLE_BATCH = 200;
+const CIRCLE_QUERIES = 12;
+
+/**
  * Whether waiting on these would put this card in a circle, and the chain that
  * closes it.
  *
@@ -1876,13 +1893,19 @@ export async function circleBack(
   own: string,
   waitingOn: string[],
   /**
-   * The ceiling, as a parameter so a test can build a graph it can afford. A
-   * bound nobody can reach in a test is a bound nobody has measured, and this
-   * one has now been wrong twice: once by being checked in the wrong place,
-   * and once by throwing away candidates it had not paid for.
+   * The ceilings, as parameters so a test can build a graph it can afford. A
+   * bound nobody can reach in a test is a bound nobody has measured, and these
+   * have now been wrong three times: checked in the wrong place, throwing away
+   * candidates they had not paid for, and counting cards while the round trips
+   * ran away.
    */
-  budgetStart = CIRCLE_BUDGET,
+  limits: { cards?: number; queries?: number; batch?: number } = {},
 ): Promise<string[] | null> {
+  const {
+    cards: budgetStart = CIRCLE_BUDGET,
+    queries: queryStart = CIRCLE_QUERIES,
+    batch = CIRCLE_BATCH,
+  } = limits;
   const parent = new Map<string, string>();
   // The cards this one would wait on are visited, not merely queued. Left out
   // of this set they can be reached a second time from deeper in the walk and
@@ -1895,6 +1918,7 @@ export async function circleBack(
   const seen = new Set<string>([own, ...waitingOn]);
   let frontier = waitingOn.filter((slug) => slug !== own);
   let budget = budgetStart;
+  let questions = queryStart;
 
   // The chain reads the way somebody would say it out loud: this card, then
   // each card it ends up waiting on, then this card again.
@@ -1915,7 +1939,8 @@ export async function circleBack(
     return [own, ...path.reverse(), own];
   };
 
-  while (frontier.length > 0 && budget > 0) {
+  while (frontier.length > 0 && budget > 0 && questions > 0) {
+    questions -= 1;
     // Bounded on the way in as well as on the way out. A level wider than the
     // budget would otherwise be read whole and walked whole, which is the
     // ceiling this constant exists to hold not being held.
@@ -1926,10 +1951,13 @@ export async function circleBack(
     // the budget for, and a circle sitting behind one of them was allowed
     // through while the ceiling went unspent. Carried in front of the level
     // below, so the order is still breadth first.
-    const asking = frontier.slice(0, budget);
-    const carried = frontier.slice(budget);
+    const asking = frontier.slice(0, batch);
+    const carried = frontier.slice(batch);
     const rows = (await store.items
       .find({ projectId, slug: { $in: asking } }, { projection: { slug: 1, blockedBy: 1 } })
+      // The cards left over, so a question wider than the budget still cannot
+      // read more than the budget allows.
+      .limit(budget)
       .toArray()) as Array<Pick<ItemDoc, 'slug' | 'blockedBy'>>;
     const next: string[] = [];
     for (const row of rows) {
@@ -2070,6 +2098,58 @@ export async function waitingBlockers(
  * other status was never a candidate, and both callers use the length of this
  * to tell an agent how much work was held back from it.
  */
+/**
+ * The cards in a circle, out of a map of what is waiting on what.
+ *
+ * The write door refuses a list that closes a circle, which catches the way
+ * circles are actually built: two agents, minutes apart. It cannot catch two
+ * requests closing one at the same instant, and it cannot do anything about a
+ * board written before it existed. Both leave the same wreckage: cards sitting
+ * in the column for work waiting to be picked up, that nothing will ever
+ * offer, on a board that says only that some items are waiting on other cards.
+ *
+ * Free, which is why it is here rather than in the repair pass: the offer
+ * already reads this map and throws the values away. Depth first with three
+ * colours, over cards that use the field at all, which is a set bounded by
+ * usage rather than by the size of the board.
+ */
+export function circlesAmong(waiting: Map<string, string[]>): string[][] {
+  const state = new Map<string, 'walking' | 'done'>();
+  const found: string[][] = [];
+  const seenCircles = new Set<string>();
+
+  const walk = (slug: string, path: string[]): void => {
+    const at = state.get(slug);
+    if (at === 'done') return;
+    if (at === 'walking') {
+      // The circle is the tail of the path from where this card first appears.
+      const from = path.indexOf(slug);
+      if (from === -1) return;
+      // Turned to start at the card that sorts first, so the same board says
+      // the same sentence whatever order the rows came back in. A message
+      // somebody compares between two runs has to be the same message.
+      const ring = path.slice(from);
+      const first = ring.indexOf([...ring].sort()[0]!);
+      const turned = [...ring.slice(first), ...ring.slice(0, first)];
+      const circle = [...turned, turned[0]!];
+      // One circle, however many cards it is walked from: the same three cards
+      // reached from each of the three is one thing wrong, not three.
+      const key = [...circle.slice(0, -1)].sort().join('\u0000');
+      if (!seenCircles.has(key)) {
+        seenCircles.add(key);
+        found.push(circle);
+      }
+      return;
+    }
+    state.set(slug, 'walking');
+    for (const next of waiting.get(slug) ?? []) walk(next, [...path, slug]);
+    state.set(slug, 'done');
+  };
+
+  for (const slug of waiting.keys()) walk(slug, []);
+  return found;
+}
+
 export async function waitingSlugs(store: Store, projectId: string): Promise<string[]> {
   return [...(await waitingBlockers(store, projectId, ['open'])).keys()];
 }
@@ -2945,12 +3025,26 @@ export async function nextItem(
   // Same rule as the call that takes one: an offer a claim would refuse is
   // worse than no offer, and the count is said out loud so a board that looks
   // emptier than it is explains itself.
-  const waiting = await waitingSlugs(store, project._id);
+  const blocked = await waitingBlockers(store, project._id, ['open']);
+  const waiting = [...blocked.keys()];
   if (waiting.length > 0) base.slug = { $nin: waiting };
+  // The map is already here, so saying whether any of it waits round in a
+  // circle costs nothing. It is worth the sentence because the count on its
+  // own reads as "somebody else will finish those", and in a circle nobody
+  // will: those cards sit in the column for work waiting to be picked up and
+  // nothing ever offers them again. The write door refuses a list that closes
+  // a circle, so what turns up here is a board written before that refusal or
+  // two requests that closed one in the same instant.
+  const circles = waiting.length > 0 ? circlesAmong(blocked) : [];
   const alsoWaiting =
     waiting.length === 0
       ? ''
-      : `; ${waiting.length} ${waiting.length === 1 ? 'item is' : 'items are'} waiting on other cards`;
+      : `; ${waiting.length} ${waiting.length === 1 ? 'item is' : 'items are'} waiting on other cards` +
+        (circles.length === 0
+          ? ''
+          : `, and ${circles.length === 1 ? 'two or more of them wait' : `${circles.length} sets of them wait`} round in a circle, which nothing will free: ${circles
+              .map((circle) => circle.join(' waits on '))
+              .join('; ')}. Take one card out of one of those lists.`);
   const sort = { priority: -1 as const, touchedAt: 1 as const };
 
   const scope = agent?.scope ?? [];
