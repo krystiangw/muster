@@ -1929,3 +1929,23 @@ So the builder is exported and asked directly, which is the whole lesson: a
 guard against a shape the harness cannot produce has to be tested at the level
 where the shape exists, or it is decoration. The path is now rebuilt from the
 token this route matched, and the query is everything after the first mark.
+
+## What the old number cannot be asked, 2026-08-20
+
+Stopping the board's own reload from counting fixes tomorrow and does nothing
+about the three and a half thousand views already stored. Measured across them,
+excluding what was already marked as ours: 35 per cent land exactly a minute
+apart and 44 per cent between eleven and forty seconds, which is what two or
+three tabs left open look like when their cycles interleave. Whatever that
+number was measuring, it was not people.
+
+**Not repaired, split.** Marking the old rows as ours would mean guessing which
+of them was a person, and a guess written into the data outlives the caveat that
+explains it. So the report counts board views on both sides of the moment the
+marker shipped, says the older number out loud as "not a number of people", and
+computes moves per board view only on the clean side, with a numerator from the
+same side.
+
+The caveat sits on the row somebody reads first rather than four lines below it.
+A footnote under a table is read after the number it corrects, which is the
+wrong order for a number that is off by a factor of sixty.

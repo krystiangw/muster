@@ -43,7 +43,37 @@ const store = await connectStore(uri, dbName);
 const { events, projects, items } = store;
 const since = (days: number) => new Date(Date.now() - days * 86_400_000);
 
-const [report, fileRows, arrivals, privateCount, weekSignups, weekWrites, moves, boardViews, unswept, oldestSweep] =
+/**
+ * When a board view stopped meaning somebody arrived.
+ *
+ * Until this deploy the page's own reload, once a minute, was recorded like any
+ * other view, and there is no identity stored that could tell the two apart
+ * afterwards. Measured before the fix: 3364 board views over two and a half
+ * days, 35 per cent of them exactly a minute apart and 44 per cent between
+ * eleven and forty seconds, which is what two or three tabs left open look like
+ * when their cycles interleave. Whatever that number was measuring, it was not
+ * people.
+ *
+ * So the count is printed on both sides of this moment rather than repaired.
+ * Marking the old rows would mean guessing which of them was a person, and a
+ * guess written into the data outlives the caveat that explains it.
+ */
+const REFRESH_MARKED_FROM = new Date('2026-08-20T06:05:00.000Z');
+
+const [
+  report,
+  fileRows,
+  arrivals,
+  privateCount,
+  weekSignups,
+  weekWrites,
+  moves,
+  boardViews,
+  viewsBeforeTheMark,
+  movesSinceTheMark,
+  unswept,
+  oldestSweep,
+] =
   await Promise.all([
     insights(store),
     events
@@ -86,7 +116,9 @@ const [report, fileRows, arrivals, privateCount, weekSignups, weekWrites, moves,
       ])
       .toArray(),
     events.countDocuments({ kind: 'move' }),
-    events.countDocuments({ kind: 'view', detail: 'board' }),
+    events.countDocuments({ kind: 'view', detail: 'board', at: { $gte: REFRESH_MARKED_FROM } }),
+    events.countDocuments({ kind: 'view', detail: 'board', at: { $lt: REFRESH_MARKED_FROM } }),
+    events.countDocuments({ kind: 'move', at: { $gte: REFRESH_MARKED_FROM } }),
     // Hygiene, across every project rather than the one the watchdog reads: a
     // board nobody is sweeping looks exactly like a board with nothing to sweep.
     projects.countDocuments({
@@ -182,7 +214,17 @@ if (fileRows.length > 0) {
 const pageRows = Object.entries(report.pages).sort((a, b) => b[1] - a[1]);
 if (pageRows.length > 0) {
   console.log('\nPages people opened');
-  for (const [page, n] of pageRows) row(page, n);
+  for (const [page, n] of pageRows) {
+    // The board is the one row here that was not people for most of its life,
+    // and this is the line somebody reads first, so it says so where it is read
+    // rather than four lines further down.
+    if (page === 'board' && viewsBeforeTheMark > 0) {
+      row(page, n);
+      console.log(`  ${' '.repeat(28)} ${String(`of those, ${viewsBeforeTheMark} before the page's own reload stopped counting`).padStart(7)}`);
+      continue;
+    }
+    row(page, n);
+  }
   row('  in the last seven days', report.pagesLastWeek);
   // The number that decides whether drag and drop was refused on evidence or
   // on taste. Above roughly three moves per board view, the refusal is wrong.
@@ -193,7 +235,17 @@ if (pageRows.length > 0) {
   // window is a broken form, not a preference, and reading it as evidence is
   // how a feature gets refused twice for the same wrong reason.
   row('cards moved by hand', moves);
-  row('  per board view', boardViews === 0 ? 0 : (moves / boardViews).toFixed(2));
+  // Both halves of this division have to come from the same side of the
+  // moment the page's own reload stopped counting, or the ratio is a fix
+  // divided by an artefact.
+  row(
+    '  per board view, since the reload stopped counting',
+    boardViews === 0 ? 'no board views yet on this side of it' : (movesSinceTheMark / boardViews).toFixed(2),
+  );
+  row(
+    '  board views before that, page reloads and all',
+    `${viewsBeforeTheMark}, which is not a number of people`,
+  );
 }
 
 if (arrivals.length > 0) {

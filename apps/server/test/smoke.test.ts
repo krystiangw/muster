@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 import { flushEvents } from '../src/events.js';
-import { startHarness, type Harness } from './helper.js';
+import { createProject, startHarness, type Harness } from './helper.js';
 
 /**
  * The scripts we point at production, pointed at a server we control.
@@ -101,6 +101,12 @@ describe('the scripts that check production, run against a harness', () => {
     // telemetry is buffered on a timer in this one, so without this it would
     // be handed a database where nothing has happened yet and would pass by
     // agreeing with itself about zero.
+    // One board view, so the section this reads is drawn at all: the report
+    // does not print a table with nothing in it, and the line being pinned
+    // lives under that table.
+    const watched = await createProject(harness, 'watched');
+    const readToken = (await harness.store.projects.findOne({ _id: watched.id }))!.readToken;
+    await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
     await flushEvents();
     const out = (
       await run(process.execPath, ['--import', 'tsx', 'tools/insights.mts'], {
@@ -113,6 +119,12 @@ describe('the scripts that check production, run against a harness', () => {
     assert.match(out, /strangers\s+ours/);
     assert.match(out, /marked as ours since \d{4}-\d{2}-\d{2}/, out);
     assert.match(out, /created a project/);
+    // The one number in here that was an artefact for most of its life. The
+    // report may print it, but not as if it were people, and not as the
+    // denominator of a ratio whose numerator comes from the other side of the
+    // fix. A board view on a fresh database is on the clean side, so what this
+    // pins is the wording rather than the arithmetic.
+    assert.match(out, /per board view, since the reload stopped counting/, out);
   });
 
   it('compares a deployment\u2019s indexes against the ones the code declares', async () => {
