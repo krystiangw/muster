@@ -2842,13 +2842,18 @@ export async function acknowledgeEscalation(
   id: string,
   input: { agent: string; note?: string },
 ): Promise<EscalationDoc> {
+  // The same rule as asking and taking back. This name is what the next caller
+  // is refused by, so a shortened one makes two agents look like the one that
+  // already acted, and the refusal that stops two agents doing one job is by
+  // name. The last place in this file that quietly cut a handle instead.
+  const who = askingHandle(input.agent);
   const now = new Date();
   const updated = await store.escalations.findOneAndUpdate(
     { _id: id, projectId: project._id, status: { $ne: 'open' }, acknowledgedAt: null, withdrawnAt: null },
     {
       $set: {
         acknowledgedAt: now,
-        acknowledgedBy: input.agent.slice(0, 48),
+        acknowledgedBy: who,
         acknowledgedNote: (input.note ?? '').slice(0, 2000) || null,
         updatedAt: now,
       },
@@ -2884,7 +2889,7 @@ export async function acknowledgeEscalation(
       store,
       project,
       updated.itemSlug,
-      input.agent,
+      who,
       input.note
         ? `acted on the operator's answer: ${input.note.slice(0, 160)}`
         : "acted on the operator's answer",

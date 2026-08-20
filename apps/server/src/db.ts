@@ -274,9 +274,18 @@ export async function runMigrations(store: Store): Promise<void> {
    * handle. It exists for a deployment that upgrades with older rows, so that
    * every reader downstream can compare one shape and mean it.
    */
-  await store.escalations.updateMany({ $expr: { $ne: ['$agent', { $trim: { input: '$agent' } }] } }, [
-    { $set: { agent: { $trim: { input: '$agent' } } } },
-  ]);
+  // Exactly the twenty five code points `String.prototype.trim` strips, asked
+  // of JavaScript rather than assumed. `$trim` has its own default set, which
+  // both misses some of these and includes U+0000, which JavaScript keeps: left
+  // to itself it would strand a handle padded with an ideographic space and
+  // silently merge one padded with a null into somebody else's identity. The
+  // point of this migration is that one function decides what a handle is.
+  const TRIMS = '\u0009\u000a\u000b\u000c\u000d\u0020\u00a0\u1680\u2000\u2001\u2002\u2003'
+    + '\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff';
+  await store.escalations.updateMany(
+    { $expr: { $ne: ['$agent', { $trim: { input: '$agent', chars: TRIMS } }] } },
+    [{ $set: { agent: { $trim: { input: '$agent', chars: TRIMS } } } }],
+  );
 
   await store.escalations.updateMany({ priorityRank: { $exists: false } }, [
     {

@@ -1150,6 +1150,32 @@ describe('what taking a question back must not do', () => {
     );
   });
 
+  it('holds acknowledging to the same rule, since that name refuses the next caller', async () => {
+    // The refusal that stops two agents acting on one answer is by name, so a
+    // shortened handle would make the second one look like the first. This was
+    // the last place in the file that quietly cut one.
+    const project = await createProject(harness);
+    const id = await raise(project, 'errors-loop', 'Bridge?');
+    await harness.server.inject({
+      method: 'PATCH',
+      url: `${project.api}/escalations/${id}`,
+      headers: { ...authed(project), 'content-type': 'application/json' },
+      payload: { status: 'answered', answer: 'bridge it' },
+    });
+    const acted = await harness.server.inject({
+      method: 'POST',
+      url: '/mcp',
+      headers: { ...authed(project), 'content-type': 'application/json' },
+      payload: {
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'tools/call',
+        params: { name: 'acknowledge', arguments: { id, agent: 'a'.repeat(60), note: 'done' } },
+      },
+    });
+    assert.match(JSON.stringify(acted.json().result), /bad_agent/);
+  });
+
   it('measures a handle the way the door beside it measures one', async () => {
     // The HTTP schema publishes the same limit and JSON Schema counts
     // characters. Counting UTF-16 units instead would refuse a handle of
@@ -1184,7 +1210,11 @@ describe('what taking a question back must not do', () => {
     // A row from before handles were trimmed. Defending against this shape at
     // every reader is what cost three rounds of review, each finding another
     // place the raw form had leaked to. A migration makes it not exist.
-    await harness.store.escalations.updateOne({ _id: id }, { $set: { agent: '  errors-loop  ' } });
+    // Padded with an ideographic space, which MongoDB's own default trim leaves
+    // alone and JavaScript strips. The migration exists to make one function
+    // decide what a handle is, so it has to agree with that function on the
+    // characters nobody thinks about.
+    await harness.store.escalations.updateOne({ _id: id }, { $set: { agent: '\u3000errors-loop\u3000' } });
     const { runMigrations } = await import('../src/db.js');
     await runMigrations(harness.store);
     assert.equal((await harness.store.escalations.findOne({ _id: id }))?.agent, 'errors-loop');
@@ -1199,7 +1229,7 @@ describe('what taking a question back must not do', () => {
         method: 'tools/call',
         params: {
           name: 'withdraw',
-          arguments: { id, agent: '  errors-loop  ', reason: 'padded on the way in, trimmed on the way through' },
+          arguments: { id, agent: '\u3000errors-loop\u3000', reason: 'padded on the way in, trimmed on the way through' },
         },
       },
     });
