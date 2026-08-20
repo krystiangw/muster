@@ -244,11 +244,13 @@ const BACKUP_MAX_AGE_HOURS = 48;
 let backupAge = null;
 let backupsFresh = false;
 let restoreFailed = false;
+let restoreConfirmed = false;
 let restoreSaidForAlert = 'no reason recorded';
 {
   const dir = join(HOME, 'backups');
   let newest = null;
   let newestName = null;
+  let newestSize = null;
   if (existsSync(dir)) {
     for (const name of readdirSync(dir)) {
       if (!name.endsWith('.json.gz')) continue;
@@ -256,6 +258,7 @@ let restoreSaidForAlert = 'no reason recorded';
       if (newest === null || at > newest) {
         newest = at;
         newestName = name;
+        newestSize = statSync(join(dir, name)).size;
       }
     }
   }
@@ -305,7 +308,15 @@ let restoreSaidForAlert = 'no reason recorded';
   if (existsSync(record)) {
     try {
       const seen = JSON.parse(readFileSync(record, 'utf8'));
-      const forNewest = newestName !== null && seen.file === newestName;
+      // The name carries only the minute, so it is not an identity on its own:
+      // a run repeated inside one minute writes over the archive this record
+      // describes. Size and mtime come from the same stat the age above uses,
+      // so this costs nothing and the record cannot outlive its subject.
+      const forNewest =
+        newestName !== null
+        && seen.file === newestName
+        && seen.bytes === newestSize
+        && seen.mtime === newest;
       const ageH = (Date.now() - Date.parse(seen.at)) / 3_600_000;
       if (seen.ok !== true) {
         restoreFailed = forNewest;
@@ -313,9 +324,10 @@ let restoreSaidForAlert = 'no reason recorded';
           ? `the newest copy did not come back: ${(seen.failures ?? []).join('; ') || 'no reason recorded'}`
           : `an older copy did not come back (${seen.file})`;
       } else if (forNewest) {
+        restoreConfirmed = true;
         restoreSaid = `newest came back ${Math.round(ageH)}h ago`;
       } else {
-        restoreSaid = `checked ${seen.file}, not the newest`;
+        restoreSaid = `checked ${seen.file}, not the copy that is newest now`;
       }
     } catch {
       restoreSaid = 'the record of the last check is unreadable';
@@ -601,7 +613,13 @@ if (broken.length > 0) {
     `backup does not restore: ${restoreSaidForAlert} | board ${filed} | email ${delivery}`
       + (state.restoreAlerted ? '' : ' | nothing landed, will try again'),
   );
-} else if (!restoreFailed && state.restoreAlerted) {
+} else if (restoreConfirmed && state.restoreAlerted) {
+  // A fresh pass on the copy that is newest now, and nothing less. Clearing
+  // this on `not restoreFailed` let the next night's archive put the alarm out
+  // by existing: the old record stops being about the newest file, the failure
+  // stops being reported, and if the check never runs again the latch is
+  // already gone. An alarm that goes quiet because the evidence moved is worse
+  // than one that never fired.
   say('the newest backup comes back again');
   state.restoreAlerted = false;
 }

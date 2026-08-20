@@ -147,9 +147,25 @@ if (args.includes('--verify')) {
    */
   const recordCheck = (ok, failures) => {
     try {
+      // Named, sized and stamped, because the name alone is not an identity:
+      // the name carries the minute it was written, so a backup taken twice in
+      // one minute writes over the file this record is about and the record
+      // goes on describing contents that are no longer there.
+      const seen = statSync(file);
       writeFileSync(
         join(dirname(file), 'verified.json'),
-        JSON.stringify({ at: new Date().toISOString(), file: basename(file), ok, failures }, null, 2),
+        JSON.stringify(
+          {
+            at: new Date().toISOString(),
+            file: basename(file),
+            bytes: seen.size,
+            mtime: seen.mtimeMs,
+            ok,
+            failures,
+          },
+          null,
+          2,
+        ),
       );
     } catch (error) {
       // The check itself still answers with its exit code. A directory that

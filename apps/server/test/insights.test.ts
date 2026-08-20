@@ -704,6 +704,28 @@ describe('counting the people, not the agents', () => {
       'both browser doors, not only the operator page',
     );
 
+    // And the same form posted by something that is not a browser is not a
+    // browser answer. The route takes it either way and writes the same
+    // answer; what changes is only the count, and `browser` is a claim about a
+    // person. Every browser sends `Sec-Fetch-Site` on a form post and curl
+    // sends neither header, so a post with neither, from nobody signed in, is
+    // a program: an agent holding the link it was handed can close the
+    // question it asked, and this is the number that says how often that
+    // happens rather than hiding it inside the one number that was supposed to
+    // say whether people answer from a browser at all.
+    const overScript = await ask('through the link, by a program?');
+    const byAProgram = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/escalations/${overScript}`,
+      payload: 'status=wont_do&answer=closed+by+the+agent+that+asked',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    });
+    assert.equal(byAProgram.statusCode, 303, 'the door is unchanged, only the counting is');
+    await flushEvents();
+    const counted = (await insights(harness.store)).answerDoors;
+    assert.equal((counted.link ?? 0) - (after.link ?? 0), 1, 'counted as the link, by name');
+    assert.equal((counted.browser ?? 0) - (after.browser ?? 0), 0, 'and not as a person in a browser');
+
     // A client retrying an identical answer after a timeout is one decision,
     // and the accounting treats it as one everywhere else already.
     assert.equal((await answerOverHttp()).statusCode, 200);
@@ -747,8 +769,8 @@ describe('counting the people, not the agents', () => {
     await flushEvents();
     assert.equal(
       await harness.store.events.countDocuments({ kind: 'answer', projectId: project.id }),
-      5,
-      'three doors, the first answer of the raced one, and one edit rather than two',
+      6,
+      'four doors, the first answer of the raced one, and one edit rather than two',
     );
   });
 

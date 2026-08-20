@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -131,8 +131,8 @@ describe('the watchdog, watched', () => {
   });
 
   /** Puts one archive in place, stamped whenever the case needs it to be. */
-  const backupWritten = (at: number): void => {
-    const file = join(home, 'backups', 'muster-test.json.gz');
+  const backupWritten = (at: number, name = 'muster-test.json.gz'): void => {
+    const file = join(home, 'backups', name);
     writeFileSync(file, 'not really gzip, and nothing here reads it');
     utimesSync(file, new Date(at), new Date(at));
   };
@@ -172,11 +172,18 @@ describe('the watchdog, watched', () => {
     assert.equal(saved().failures, 0);
   });
 
-  /** The record `backup.mjs --verify` leaves beside the archive it checked. */
+  /**
+   * The record `backup.mjs --verify` leaves beside the archive it checked.
+   *
+   * Sized and stamped from the file itself, the way the real one is: the name
+   * carries only the minute it was written, so a record that matched on the
+   * name alone would go on describing an archive that had been written over.
+   */
   const restoreRecorded = (ok: boolean, file = 'muster-test.json.gz', failures: string[] = []): void => {
+    const seen = statSync(join(home, 'backups', file));
     writeFileSync(
       join(home, 'backups', 'verified.json'),
-      JSON.stringify({ at: new Date().toISOString(), file, ok, failures }),
+      JSON.stringify({ at: new Date().toISOString(), file, bytes: seen.size, mtime: seen.mtimeMs, ok, failures }),
     );
   };
 
@@ -210,10 +217,39 @@ describe('the watchdog, watched', () => {
     assert.equal(saved().restoreAlerted, false);
   });
 
+  it('keeps the alarm until the copy that is newest now has come back', async () => {
+    await round();
+    restoreRecorded(false, 'muster-test.json.gz', ['dates came back as text']);
+    await round();
+    assert.equal(saved().restoreAlerted, true, 'latched on a copy that did not come back');
+
+    // Tonight's archive arrives and the check has not run yet. The old record
+    // stops being about the newest file, which is not the same thing as the
+    // newest file being fine.
+    backupWritten(Date.now(), 'muster-tonight.json.gz');
+    const out = await round();
+    assert.doesNotMatch(out, /comes back again/, 'a new file is not evidence about itself');
+    assert.equal(saved().restoreAlerted, true, 'and the alarm is still standing');
+
+    restoreRecorded(true, 'muster-tonight.json.gz');
+    assert.match(await round(), /the newest backup comes back again/);
+    assert.equal(saved().restoreAlerted, false);
+  });
+
+  it('does not take a record about an overwritten copy as a verdict on this one', async () => {
+    await round();
+    restoreRecorded(true);
+    // Same name, same minute, different contents: a backup run twice inside
+    // one minute writes over the file the record is about.
+    writeFileSync(join(home, 'backups', 'muster-test.json.gz'), 'a different archive under the same name');
+    assert.match(await round(), /restores checked .*not the copy that is newest now/);
+  });
+
   it('does not read a record about some other copy as a verdict on this one', async () => {
     await round();
     // The archive was replaced after the check ran, which is what every night
     // looks like between the backup and the check. Silence, not an alarm.
+    backupWritten(Date.now() - 25 * 3_600_000, 'muster-yesterday.json.gz');
     restoreRecorded(false, 'muster-yesterday.json.gz', ['whatever went wrong with that one']);
     const out = await round();
     assert.match(out, /an older copy did not come back/);

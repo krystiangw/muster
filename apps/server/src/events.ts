@@ -84,8 +84,17 @@ export type EventKind =
    */
   | 'refused';
 
-/** Which door it came through. */
-export type EventDoor = 'http' | 'mcp' | 'oauth' | 'browser';
+/**
+ * Which door it came through.
+ *
+ * `link` is the capability link used by something that is not a browser. It
+ * exists because `browser` claims a person: every browser sends `Sec-Fetch-Site`
+ * on a form post and curl sends neither header, so a write on `/r/` with no
+ * header at all and nobody signed in is a program, and counting it as a browser
+ * answer is the one thing that would stop this number answering its own
+ * question, which is whether people answer from a browser at all.
+ */
+export type EventDoor = 'http' | 'mcp' | 'oauth' | 'browser' | 'link';
 
 /**
  * The pages a view can be recorded for, and nothing else.

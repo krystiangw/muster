@@ -396,7 +396,11 @@ if (report.behaviour.answersSampled > 0) {
 // anywhere else, and the refused one is the one that gets removed for being
 // unused. Both browser doors count as `browser`; which page it was is not worth
 // a second field, since the question this settles is whether people answer from
-// a browser at all.
+// a browser at all. Which is exactly why `link` is a door of its own: the form
+// on the capability link takes a post from anything that has the link, and one
+// with no browser header and nobody signed in is a program. Counted apart
+// rather than refused, because refusing it is a decision about the product and
+// this is only the number telling the truth about itself.
 const answerDoorRows = Object.entries(report.answerDoors).sort((a, b) => b[1] - a[1]);
 if (answerDoorRows.length > 0) {
   console.log('\nHow the answers arrived');

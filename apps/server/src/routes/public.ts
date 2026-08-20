@@ -2240,7 +2240,17 @@ ${renderBoardSettings(project, view, `/r/${escapeHtml(readToken)}/board`, boardW
     if (!ESCALATION_STATUSES.includes(status)) {
       throw new ServiceError(400, 'bad_status', 'Unknown answer type.');
     }
-    await answerEscalation(store, project._id, id, status, (form.answer ?? '').slice(0, 8000), 'browser');
+    // Which door this really was. The route is the same one either way and so
+    // is the answer it writes; only the count is at stake, and the count says
+    // `browser`, which is a claim about a person. A browser sends
+    // `Sec-Fetch-Site` on every form post and blanks `Origin` only when the
+    // referrer policy says to, so one of the two is always there; curl and the
+    // agents send neither. Somebody signed in counts as a person whatever they
+    // sent, because the session is better evidence than a header.
+    const looksLikeABrowser =
+      typeof request.headers['sec-fetch-site'] === 'string' || typeof request.headers.origin === 'string';
+    const door = looksLikeABrowser || (await readSession(store, request)) !== null ? 'browser' : 'link';
+    await answerEscalation(store, project._id, id, status, (form.answer ?? '').slice(0, 8000), door);
     // Named in the redirect so the page can confirm it. Four buttons that look
     // alike and a silent reload is how somebody ends up answering twice.
     //
