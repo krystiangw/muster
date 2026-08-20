@@ -2248,3 +2248,12 @@ constraint stated as one. Every agent that connects loads this file whole, so
 its length is a cost paid on every session; the budget is roughly ten thousand
 tokens and the file sat at thirty-three thousand bytes the day it was named.
 Crossing it means cutting something, not raising it.
+
+**And the throwaway probe went in with the commit.** The measurement above was
+written first as a scratch file under `apps/server/test/`, which is exactly
+where `pnpm test` looks: `test/*.test.ts`. It asserted nothing, printed its
+findings, started a second database-backed harness to do it, and called the two
+routes that do not exist. Review caught it in the diff. A probe that is not a
+test belongs outside that glob, and the cheapest way to stay outside it is to
+leave `.test` out of the name: `node --import tsx --test test/probe.ts` still
+runs it on request, and the suite never picks it up.
