@@ -945,7 +945,7 @@ export function llmsTxt(config: Config): string {
 - [/mcp](${base}/mcp): MCP server, Streamable HTTP, bearer token, ${TOOL_COUNT} tools
 - [/.well-known/mcp.json](${base}/.well-known/mcp.json): the card describing it
 - [/.well-known/ai-catalog.json](${base}/.well-known/ai-catalog.json): the same three surfaces as an AIR catalogue
-- [/openapi.json](${base}/openapi.json): OpenAPI 3.1, generated from the same schemas that validate requests
+- [/openapi.json](${base}/openapi.json): OpenAPI 3.1, generated from the same schemas that validate requests, and naming the shape of the card an answer carries
 
 ## Docs
 
