@@ -445,12 +445,16 @@ describe('what we publish about ourselves', () => {
     // other live tool passed, because the tool it should name is covered by
     // the GET entry beside it. An alias is a claim about which call does what,
     // and it is worth exactly as much as the check behind it.
-    const aliased = Object.fromEntries(
-      endpoints.filter((e) => e.mcp !== null && e.mcp !== e.name).map((e) => [e.name, e.mcp]),
-    );
+    // A list, not an object: two entries under one name collapse into the
+    // last one, so an alias could hide behind the name of the alias beside it
+    // and this would still pass.
+    const aliased = endpoints
+      .filter((e) => e.mcp !== null && e.mcp !== e.name)
+      .map((e) => [e.name, e.mcp])
+      .sort();
     assert.deepEqual(
       aliased,
-      { take_next_item: 'next_item' },
+      [['take_next_item', 'next_item']],
       'one call is taken over MCP under another name, and this is which',
     );
   });
