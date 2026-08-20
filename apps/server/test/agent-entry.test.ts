@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { OAUTH_TOKEN_IS } from '../src/routes/oauth.js';
 import { after, before, describe, it } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { SERVER_SUMMARY } from '../src/content.js';
@@ -753,6 +754,51 @@ describe('B. agent entry', () => {
       payload: { slug: 'via-oauth', title: 'written with an oauth token', actor: 'some-agent' },
     });
     assert.equal(used.statusCode, 201);
+
+    // What that token is, measured, because the page and the document now say
+    // it out loud. It was published as "a project token", which is true and
+    // silent about the half somebody wiring this into a shared context needs:
+    // it is an admin key, so it mints further keys and deletes cards.
+    const minted = await harness.server.inject({
+      method: 'POST',
+      url: `/v1/${access.project}/keys`,
+      headers: { authorization: `Bearer ${access.access_token}`, 'content-type': 'application/json' },
+      payload: { name: 'a key made with an oauth token', role: 'admin' },
+    });
+    assert.equal(minted.statusCode, 201, 'the token is an admin one, and the page says so');
+    const deleted = await harness.server.inject({
+      method: 'DELETE',
+      url: `/v1/${access.project}/items/via-oauth`,
+      headers: { authorization: `Bearer ${access.access_token}` },
+    });
+    assert.equal(deleted.statusCode, 200);
+
+    // And on nobody else's board, which is the other half of the sentence.
+    const elsewhere = await createProject(harness);
+    for (const [what, sent] of [
+      ['read', await harness.server.inject({
+        method: 'GET',
+        url: `/v1/${elsewhere.id}/board`,
+        headers: { authorization: `Bearer ${access.access_token}` },
+      })],
+      ['write', await harness.server.inject({
+        method: 'POST',
+        url: `/v1/${elsewhere.id}/items`,
+        headers: { authorization: `Bearer ${access.access_token}`, 'content-type': 'application/json' },
+        payload: { slug: 'not-yours', title: 'not yours', actor: 'a' },
+      })],
+    ] as Array<[string, { statusCode: number }]>) {
+      assert.equal(sent.statusCode, 403, `the token was refused on another board, ${what}`);
+    }
+
+    // The hour, from the constant the sentence is built from rather than from
+    // a number written twice.
+    assert.ok(
+      Math.abs(access.expires_in - 3600) <= 2,
+      `the token said it lasts ${access.expires_in} seconds`,
+    );
+    assert.match(OAUTH_TOKEN_IS, /admin key/);
+    assert.match(OAUTH_TOKEN_IS, /60 minutes/);
   });
 
   it('publishes every call an agent needs, including the ones added last', async () => {

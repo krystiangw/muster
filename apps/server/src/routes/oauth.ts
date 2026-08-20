@@ -25,6 +25,18 @@ export interface OAuthDeps {
 
 /** How long an access token from the token endpoint lives. */
 const TOKEN_TTL_MS = 60 * 60 * 1000;
+/**
+ * What that token is, in the words the page and the document both render.
+ *
+ * Measured rather than described: the key this endpoint mints is an admin one
+ * over the project registered with the client, so it reads and writes there,
+ * mints further keys and deletes cards, and answers 403 on any other project.
+ * None of that was published anywhere. "A project token" is true and says
+ * nothing about the half somebody wiring this into a shared context needs to
+ * know.
+ */
+export const OAUTH_TOKEN_IS =
+  `an admin key for the project the client was registered with, good for ${TOKEN_TTL_MS / 60_000} minutes: it reads and writes there, mints further keys and deletes cards, and is refused on every other project. Ask for a new one rather than storing it`;
 
 export function registerOAuth(app: FastifyInstance, deps: OAuthDeps): void {
   const { store, config, limiter } = deps;
@@ -148,6 +160,7 @@ export function registerOAuth(app: FastifyInstance, deps: OAuthDeps): void {
       schema: {
         tags: ['oauth'],
         summary: 'Token endpoint, client_credentials grant',
+        description: `Answers with ${OAUTH_TOKEN_IS}.`,
       },
     },
     async (request, reply) => {

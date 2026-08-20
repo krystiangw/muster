@@ -2581,3 +2581,24 @@ Three of the calls in that probe were wrong before they were right, and all
 three the same way: `/board/label` for `/board/labels`, `labels=` for `add=`,
 and `handle=` for `from=`. A guessed name answers something, and something is
 easy to read as an answer about the product. Read the route, then call it.
+
+## What an OAuth token actually is, 2026-08-20
+
+Registering under RFC 7591 provisions a project and hands back credentials, and
+the page said the client exchanges them "for a project token". True, and silent
+about the half that matters: measured, the token is an **admin** key over that
+project, so it reads and writes there, mints further keys, deletes cards, and
+is refused with 403 on every other board. It lasts an hour, which the answer
+carries as `expires_in` and nothing else said.
+
+The isolation holds by construction rather than by check: the project comes off
+the client document written at registration, not off anything the caller sends,
+so a client cannot ask for a token on somebody else's board. That is worth
+knowing and it is not what the sentence was missing.
+
+One sentence in `oauth.ts`, rendered by the page and by the document, built from
+the same constant the key is minted with, and a test that drives all three
+claims: mints a key, deletes a card, is refused on another board, and reads the
+hour off the answer. Turning the key to `write` fails it, and so does changing
+the sentence to say `write` while the code still mints admin. The words cannot
+drift in either direction on their own.

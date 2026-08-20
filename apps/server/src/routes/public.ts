@@ -1,5 +1,6 @@
 import { TOOL_COUNT } from './mcp.js';
 import { clientIp } from './api.js';
+import { OAUTH_TOKEN_IS } from './oauth.js';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import {
   BOARD_PRESETS,
@@ -763,7 +764,8 @@ claimed it can issue a new one from the project's read view.</p>
 <h2>OAuth</h2>
 <p>Clients that prefer OAuth can register themselves under RFC 7591 at
 <code>POST /oauth/register</code> and exchange the credentials for a project token at
-<code>POST /oauth/token</code> with the <code>client_credentials</code> grant. Metadata lives at
+<code>POST /oauth/token</code> with the <code>client_credentials</code> grant. What comes back is
+${OAUTH_TOKEN_IS}. Metadata lives at
 <a href="/.well-known/oauth-authorization-server">/.well-known/oauth-authorization-server</a>.
 There is no authorization code flow, because there is no end user to ask for consent.</p>
 `;
