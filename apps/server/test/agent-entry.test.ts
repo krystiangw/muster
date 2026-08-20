@@ -478,6 +478,17 @@ describe('A. discovery', () => {
       assert.doesNotMatch(response.body, /<script/i, `${url} must not need JavaScript`);
       assert.ok(response.body.length > 800, `${url} must carry its content in the first response`);
     }
+
+    // And the front page says what is true rather than what was true. It read
+    // "every page here is served as HTML with no JavaScript at all" for as
+    // long as that held, and went on reading it after the board got a script:
+    // one deferred file, adding a second way to do what the forms already do,
+    // which `test/board.test.ts` pins to exactly one tag with nothing inside
+    // it. The claim that matters is the one about an agent reading what a
+    // person reads, and that survives the exception being named.
+    const landing = (await harness.server.inject({ method: 'GET', url: '/' })).body.replace(/\s+/g, ' ');
+    assert.doesNotMatch(landing, /no JavaScript at all/);
+    assert.match(landing, /one script in the whole service, deferred, on the board/);
   });
 
   it('does not block on-demand agent fetchers and sets no punishing crawl delay', async () => {

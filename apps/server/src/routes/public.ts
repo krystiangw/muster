@@ -499,8 +499,9 @@ as activity, and any of them is undone by an ordinary write.</p>
     for that address, and a link that has stopped working says the same thing to everybody.</p>
   </div>
 </div>
-<p class="why">Every page here is served as HTML with no JavaScript at all, which is why an agent
-reads the same thing you do. The server is
+<p class="why">Every page here is server rendered HTML, which is why an agent reads the same thing
+you do. There is one script in the whole service, deferred, on the board: it adds a second way to do
+what the forms on that page already do, and nothing needs it to read a board or answer a question. The server is
 <a href="https://github.com/krystiangw/muster">source available on GitHub</a> under the
 <a href="https://github.com/krystiangw/muster/blob/main/LICENSE.md">FSL-1.1-ALv2</a> licence, which
 becomes Apache 2.0 two years after each release, and it runs on Node and MongoDB if you would
