@@ -256,6 +256,42 @@ describe('the operator view', () => {
     );
   });
 
+  it('gives a shared address what the link gives, which is not read-only', async () => {
+    // Worth pinning because the words around this feature kept saying "read",
+    // and the writes on a capability link are gated by the same check as the
+    // reads: an address named here answers questions and writes on the board,
+    // exactly as anybody the owner had handed the link to. If that is ever
+    // narrowed to a viewer seat, four published sentences have to change with
+    // it, and this is what will say so.
+    const project = await createProject(harness, 'not read only');
+    const readToken = project.readUrl.split('/r/')[1]!;
+    await claimFor(project, 'owner@example.com');
+    const owner = await signIn(harness, 'owner@example.com');
+    await harness.server.inject({
+      method: 'POST',
+      url: `/operator/projects/${project.id}/shared`,
+      payload: owner.form({ add: 'guest@example.com' }),
+      headers: owner.headers,
+    });
+
+    const guest = await signIn(harness, 'guest@example.com');
+    const wrote = await harness.server.inject({
+      method: 'POST',
+      url: `/r/${readToken}/board/new`,
+      payload: 'title=filed+by+the+guest',
+      headers: {
+        ...guest.headers,
+        'content-type': 'application/x-www-form-urlencoded',
+        'sec-fetch-site': 'same-origin',
+      },
+    });
+    assert.equal(wrote.statusCode, 303);
+    assert.equal(
+      await harness.store.items.countDocuments({ projectId: project.id, title: 'filed by the guest' }),
+      1,
+    );
+  });
+
   it('keeps a revocation and an addition that arrive together, both of them', async () => {
     // What this pins is the outcome, not the mechanism. Read the list, change
     // it here, write the whole thing back, and a removal landing between

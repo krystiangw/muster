@@ -430,7 +430,11 @@ describe('what the link says about itself', () => {
       /opened back up is open by link whether or not somebody owns it/,
       'and the state that survives a claim is named, since that is the one a warning gets wrong',
     );
-    assert.match(docs.body, /names the addresses that may read it beside/, 'and says what replaces it');
+    assert.match(
+      docs.body.replace(/\s+/g, ' '),
+      /names the addresses that may open it beside their own, and an address named that way does what the link did/,
+      'and says what replaces it, including that it is not a read-only seat',
+    );
   });
 
   it('tells the reader what the address in their hand can do', async () => {

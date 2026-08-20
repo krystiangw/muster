@@ -728,8 +728,11 @@ A project nobody owns yet opens for whoever holds the read link, because that
 link is the only way anybody could ever claim it: you hand it to a person who
 has no account, and their claiming it is what gives the board an owner. From
 that moment the board is theirs. The link stops opening it for anybody else,
-and the owner says who else may read it, by address, on their own page. They
-can also open it back up to the link with one switch. Your token is unaffected
+and the owner names any other address that may open it, one at a time, on
+their own page. Naming an address gives it what the link gave: this is not a
+read-only seat, and somebody sitting in one answers your questions and writes
+on the board. The owner can also open the board back up to the link with one
+switch. Your token is unaffected
 by any of this, so it never changes how you work.
 
 ## If a link gets out

@@ -463,7 +463,8 @@ function sharing(
                    </form>`,
               )
               .join('\n')
-          : '<p class="note">Nobody yet. Only you.</p>'
+          : '<p class="note">Nobody yet. Only you. An address added here does what the read link'
+            + ' does: answers questions and writes on the board.</p>'
       }
       <form method="post" action="/operator/projects/${escapeHtml(project._id)}/shared">
         ${csrfField(session)}
@@ -896,8 +897,10 @@ ${
       sharedWithMe.length === 0
         ? ''
         : `<h2>Shared with you</h2>
-<p style="color:var(--ink-2)">Somebody else owns these and let this address read them. The
-questions above are the ones waiting on you, so nothing from here is counted in them.</p>
+<p style="color:var(--ink-2)">Somebody else owns these and named this address as one that may open
+them. That is not a read-only seat: on these boards you answer questions and write, the same as
+anybody they had handed the link to. The questions above are the ones waiting on you, so nothing
+from here is counted in them.</p>
 <div class="scroll cards"><table class="cards">
 <thead><tr><th scope="col">Project</th><th scope="col" class="mono">open</th><th scope="col">Owner</th><th scope="col"></th></tr></thead>
 <tbody>
