@@ -798,6 +798,12 @@ describe('counting the people, not the agents', () => {
       'https://probe.test/',
       'https://www.example/',
       'http://localhost:4600/',
+      // The rest of RFC 2606, which the first version of this rule missed: the
+      // reserved names on their own, and the three example domains that look
+      // like ordinary sites.
+      'https://test/',
+      'https://example.com/',
+      'https://sub.example.org/',
     ]) {
       await harness.server.inject({ method: 'GET', url: '/pricing', headers: { referer } });
     }
@@ -808,11 +814,25 @@ describe('counting the people, not the agents', () => {
       before,
       'none of them named a source',
     );
+    // A host that only looks like one of them is still a source: the rule is
+    // about names nobody can hold, not about the word appearing anywhere.
+    await harness.server.inject({
+      method: 'GET',
+      url: '/pricing',
+      headers: { referer: 'https://notexample.com/' },
+    });
+    await flushEvents();
+    assert.equal(
+      await harness.store.events.countDocuments({ kind: 'view', from: 'notexample.com' }),
+      1,
+      'a real host that merely reads like a reserved one still counts',
+    );
+
     // And the visits themselves still count: somebody did fetch the page, and
     // only the claim about where they came from was dropped.
     assert.equal(
       await harness.store.events.countDocuments({ kind: 'view', detail: 'pricing' }),
-      readsBefore + 4,
+      readsBefore + 8,
       'the reads are still reads',
     );
   });

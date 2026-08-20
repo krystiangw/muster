@@ -95,7 +95,11 @@ const [
         { $match: { kind: 'view', from: { $ne: null }, at: { $gte: since(30) } } },
         { $group: { _id: '$from', n: { $sum: 1 } } },
         { $sort: { n: -1 } },
-        { $limit: 15 },
+        // Room for the rows dropped below. The limit used to be the fifteen
+        // printed, so a test host in the top fifteen ate one of them and the
+        // next real source fell off the end of a table that then said nothing
+        // else had named a source.
+        { $limit: 60 },
       ])
       .toArray(),
     projects.countDocuments({ visibility: 'owner' }),
@@ -270,7 +274,7 @@ if (pageRows.length > 0) {
 // largest source of traffic this service had. Counted and named as what they
 // are rather than deleted: the visit happened, only the claim about where it
 // came from was somebody's own audit.
-const real = arrivals.filter((row) => !isUnholdable(String(row._id)));
+const real = arrivals.filter((row) => !isUnholdable(String(row._id))).slice(0, 15);
 const fromTests = arrivals
   .filter((row) => isUnholdable(String(row._id)))
   .reduce((sum, row) => sum + row.n, 0);

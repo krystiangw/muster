@@ -406,9 +406,17 @@ export interface ViewedRequest {
  * The visit still counts, because somebody did fetch the page. Only the claim
  * about where they came from is dropped.
  */
-const UNHOLDABLE = /\.(invalid|test|example|localhost)$|^localhost$/;
+const UNHOLDABLE =
+  /(^|\.)(invalid|test|example|localhost)$|(^|\.)example\.(com|net|org)$/;
 
-/** Exported for the report, which has two hundred of these already stored. */
+/**
+ * Exported for the report, which has two hundred of these already stored.
+ *
+ * All of RFC 2606, not the part that turned up here: the four reserved top
+ * level names as a suffix and on their own, and the three second level example
+ * domains. A rule written to the one shape production happened to show would
+ * have called `example.com` a source of readers.
+ */
 export function isUnholdable(host: string): boolean {
   return UNHOLDABLE.test(host.toLowerCase().split(':')[0] ?? '');
 }

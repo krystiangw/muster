@@ -1968,6 +1968,15 @@ the shape this arrives in, and the first version tested the host, which misses i
 by a colon. The test caught it because it sent all four reserved shapes rather
 than the one that had actually turned up in production.
 
+**And against the whole RFC, not the part that turned up here.** Review found
+the first pattern reading only the suffix form, so `example.com`, `example.net`,
+`example.org` and a bare `https://test/` would have been printed as sources of
+readers. A rule shaped to the one example production happened to show is a rule
+that will be wrong the first time somebody uses a different one. The same review
+found the table's limit applied before the filter, so a test host inside the top
+fifteen took a slot from a real source and the table could then claim nothing
+else had named one.
+
 The two hundred already stored get the same treatment as the board reloads:
 counted, named as what they are, and not deleted. The arrivals table now prints
 them as "arrivals naming a test host, not a site", which is the whole of that
