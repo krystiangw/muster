@@ -49,6 +49,8 @@ describe('the watchdog, watched', () => {
     names: null as string | null,
     /** What the server serves under that name, or nothing. */
     serves: null as string | null,
+    /** What the spare board's page answers, when this check falls back to it. */
+    spare: 200 as number,
   };
 
   const script = "(() => { /* the one script this service serves */ })();\n";
@@ -82,6 +84,13 @@ describe('the watchdog, watched', () => {
       // whole point of that probe: the path in front of the write is open.
       if (url.pathname.startsWith('/r/') && url.pathname.includes('/escalations/')) {
         return send(400, '{"error":"unknown_status"}', 'application/json');
+      }
+      // The spare board, which is any board this check can still open: the
+      // walkthrough leaves one behind every morning and it is never claimed.
+      if (url.pathname === '/r/r_spare/board') {
+        if (state.spare !== 200) return send(state.spare, 'not here');
+        const tag = state.names === null ? '' : `<script src="/board-${state.names}.js" defer></script>`;
+        return send(200, `<!doctype html><html><head>${tag}</head><body>a spare board</body></html>`, 'text/html');
       }
       if (url.pathname === '/r/r_test/board') {
         // What a board narrowed to its owner says to anybody without the
@@ -124,6 +133,7 @@ describe('the watchdog, watched', () => {
     state.serves = script;
     state.visibility = 'link';
     state.private = false;
+    state.spare = 200;
     // An archive from an hour ago, because the ordinary case is that last
     // night's cron ran. The cases below move it or take it away.
     mkdirSync(join(home, 'backups'), { recursive: true });
@@ -439,17 +449,33 @@ describe('the watchdog, watched', () => {
     assert.match(await round(), /board script: script 404/);
   });
 
-  it('does not page about a board that is private on purpose', async () => {
+  it('checks the deploy on another board when its own is private', async () => {
     // The board the operator narrowed to themselves answers 404 to a stranger,
-    // and this check holds no session cookie. There is no page to read, so
-    // there is no script tag to miss, and demanding one would turn a setting
-    // into an outage every quarter of an hour.
+    // and this check holds no session cookie. That used to end the matter and
+    // pass, which is a check reporting that it did not run in the words of one
+    // that did: boards became private by default and this went quiet about
+    // every deploy, on a schedule, saying "not open by link" each time.
+    //
+    // The question is about the deploy rather than about that board, so any
+    // board answers it. The walkthrough leaves one behind every morning.
+    state.visibility = 'owner';
+    state.private = true;
+    writeFileSync(join(home, 'walkthrough.json'), JSON.stringify({ [base]: { readToken: 'r_spare' } }));
+    await round();
+    assert.match(await round(), new RegExp(`board script ${hashOf(script)}, on the spare board`));
+
+    // And it still catches the thing it is for, on that board.
+    state.serves = 'something else entirely';
+    assert.match(await round(), /board script: page wants .*server serves/);
+  });
+
+  it('says it did not check rather than passing, when there is no board it can open', async () => {
     state.visibility = 'owner';
     state.private = true;
     await round();
     const out = await round();
-    assert.match(out, /board script not open by link/);
-    assert.equal(saved().failures, 0);
+    assert.match(out, /board script not checked: no board this can open/);
+    assert.equal(saved().failures, 0, 'and it is still not an outage');
   });
 
   it('treats one failure as weather and the second as an outage', async () => {

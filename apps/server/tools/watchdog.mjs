@@ -197,29 +197,87 @@ if (readUrl) {
  * build. Coupling the check to any string inside the script would instead make
  * it fail the next time somebody edits a comment.
  */
+/**
+ * Any board this can open, since the one it watches may not be one.
+ *
+ * The check below is about the deploy rather than about a particular board: it
+ * asks whether the page names a script and whether the server serves that
+ * script. Its own project went private the day boards became private when
+ * claimed, and a private board answers 404 to anything without the owner's
+ * session, so the check started saying "not open by link" and passing, every
+ * quarter of an hour, about nothing. A monitor that goes quiet because its
+ * subject moved is the failure this file exists to catch, and it had it.
+ *
+ * The walkthrough runs the whole agent journey against production every
+ * morning and leaves the board it made behind, unclaimed and therefore
+ * readable. Its read token is what this borrows, and never prints.
+ */
+function spareBoard() {
+  try {
+    const seen = JSON.parse(read(join(HOME, 'walkthrough.json')) ?? '{}');
+    const token = seen[base]?.readToken;
+    return typeof token === 'string' && token.length > 0 ? `${base}/r/${token}` : null;
+  } catch {
+    return null;
+  }
+}
+
 if (readUrl) {
-  const page = await probe(`${readUrl}/board`, { text: true });
-  const named = /\/board-([0-9a-f]{12})\.js/.exec(page.body ?? '');
-  let script = { ok: false, why: 'the board page names no script' };
-  // A board narrowed to its owner answers 404 to anybody without the owner's
-  // session cookie, which this has no way to hold. The same exception the form
-  // probe above makes, and for the same reason: on that board there is no page
-  // for a stranger to read, so there is no script tag to check and demanding
-  // one would page about the board being private.
+  /**
+   * Which board this reads, and why it may not be the one it watches.
+   *
+   * A board narrowed to its owner answers 404 to anybody without the owner's
+   * session cookie, which this has no way to hold. So the page is read from
+   * the watched board when that board is open, and from the spare when it is
+   * not: the question here is whether the deploy serves the script its page
+   * names, and any board's page asks it.
+   */
+  let page = await probe(`${readUrl}/board`, { text: true });
+  let from = 'this board';
+  let unchecked = null;
   if (page.status === 404 && formOpen.includes(404)) {
-    script = { ok: true, why: 'not open by link' };
+    const spare = spareBoard();
+    const other = spare === null ? null : await probe(`${spare}/board`, { text: true });
+    if (other !== null && other.status === 200) {
+      page = other;
+      from = 'the spare board';
+    } else {
+      unchecked =
+        spare === null
+          ? 'not checked: no board this can open'
+          : `not checked: the spare board answers ${other.status || other.error}`;
+    }
+  }
+
+  let script;
+  if (unchecked !== null) {
+    // Passing, and saying so out loud rather than saying nothing. This used to
+    // read "not open by link" and count as a pass, which is a check reporting
+    // that it did not run in the words of one that did.
+    script = { ok: true, why: unchecked };
   } else if (page.status !== 200) {
     script = { ok: false, why: `board page ${page.status || page.error}` };
-  } else if (named) {
-    const served = await probe(`${base}${named[0]}`, { text: true });
-    const digest =
-      served.status === 200 && served.body !== null
-        ? createHash('sha256').update(served.body).digest('hex').slice(0, 12)
-        : null;
-    script =
-      digest === named[1]
-        ? { ok: true, why: named[1] }
-        : { ok: false, why: digest === null ? `script ${served.status || served.error}` : `page wants ${named[1]}, server serves ${digest}` };
+  } else {
+    const named = /\/board-([0-9a-f]{12})\.js/.exec(page.body ?? '');
+    if (!named) {
+      script = { ok: false, why: `the board page names no script (${from})` };
+    } else {
+      const served = await probe(`${base}${named[0]}`, { text: true });
+      const digest =
+        served.status === 200 && served.body !== null
+          ? createHash('sha256').update(served.body).digest('hex').slice(0, 12)
+          : null;
+      script =
+        digest === named[1]
+          ? { ok: true, why: from === 'this board' ? named[1] : `${named[1]}, on the spare board` }
+          : {
+              ok: false,
+              why:
+                digest === null
+                  ? `script ${served.status || served.error}`
+                  : `page wants ${named[1]}, server serves ${digest}`,
+            };
+    }
   }
   checks.push({ name: 'board script', ok: script.ok, status: script.why });
 }
