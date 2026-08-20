@@ -1617,6 +1617,30 @@ describe('a project cannot revoke its own way in', () => {
     assert.ok(live >= 1, `something can still open this project: ${live} admin keys left`);
   });
 
+  it('leaves the key alive when the database goes away mid-call', async () => {
+    // The failure the first version of this guard had: it revoked, counted,
+    // and put the key back when the count came up empty. A store that goes
+    // away between the write and the compensating write never puts it back,
+    // and the retry then answers 404 because the key is already revoked, which
+    // is exactly the lockout being prevented, reached by a different door.
+    const project = await createProject(harness);
+    await post(project, '/keys', { name: 'second', role: 'admin' });
+    const [first] = await keysOf(project);
+
+    const real = harness.store.projects.updateOne.bind(harness.store.projects);
+    harness.store.projects.updateOne = (async () => {
+      throw new Error('primary stepped down');
+    }) as typeof real;
+    try {
+      await assert.rejects(() => revokeApiKey(harness.store, project.id, first!.id));
+    } finally {
+      harness.store.projects.updateOne = real;
+    }
+
+    const after = await keysOf(project);
+    assert.equal(after.find((k) => k.id === first!.id)!.revoked_at, null, 'the key still opens the door');
+  });
+
   it('lets a worker key go even when it is the only one', async () => {
     const project = await createProject(harness);
     const worker = (await post(project, '/keys', { name: 'worker', role: 'write' })).json().key.id;

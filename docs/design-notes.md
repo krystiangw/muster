@@ -1716,12 +1716,27 @@ count as the one that is left, because an expired admin key is not a door.
 Worker keys are never refused: they cannot mint anything, so nothing depends on
 the last one.
 
-**Revoked first, checked after.** A fleet shares one key, so two loops reacting
-to the same leak fire two revocations at once, and a count taken before the
-write sees the other key alive in both of them: both proceed, and the project
-ends with none. Writing first means the worst case is both calls putting their
-key back and both being told no, which is the safe direction. The test that
-proves this forces the interleaving by holding each call at its count until the
-other has reached its own. Run as two ordinary concurrent requests it proves
-nothing: the pair serialises and passes under the broken order, measured eight
-times out of eight before the barrier was added.
+**Every failure here has to leave the key alive**, and both obvious shapes fail
+the other way. Counting first and writing after loses to two loops of one fleet
+reacting to the same leak: each sees the other key still alive, both proceed,
+and the project ends with none. Writing first and putting the key back when the
+count comes up empty was the version that shipped for twenty minutes, and review
+found what it cost: a store that goes away between the two writes never puts the
+key back, and the retry then answers 404 because the key is already revoked. The
+same lockout, reached through the door that was meant to close it.
+
+So the count competes for a version on the project. A revocation may act only on
+a count it took while holding the epoch it read; the loser re-reads instead of
+proceeding, and a crash anywhere in the sequence leaves at worst a bumped number
+and a key that still works. The epoch is not a count of anything, and deliberately
+not a cached number of admin keys: a denormalised count drifts the moment a key
+expires rather than being revoked, and a drifted count is a lockout waiting for
+the next call.
+
+Both failure modes are pinned by tests, and neither could be written casually.
+The race forces its own interleaving by holding each call at its count until the
+other has reached its own; run as two ordinary concurrent requests it proves
+nothing, because the pair serialises and passes under the broken order, measured
+eight times out of eight. The outage test takes the store away between the write
+and the write that would undo it, which is the review's scenario made
+mechanical.

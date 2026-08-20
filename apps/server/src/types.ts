@@ -474,6 +474,15 @@ export interface ProjectDoc {
   /** Absent on projects created before this existed; `link` applies. */
   visibility?: ProjectVisibility;
   /**
+   * Bumped by every admin-key revocation, and by nothing else.
+   *
+   * Not a count of anything. It is the version two concurrent revocations
+   * compete on, so that only one of them may act on a reading of how many admin
+   * keys are left. Absent means nobody has revoked one here yet, which reads as
+   * zero.
+   */
+  adminEpoch?: number;
+  /**
    * When the project first received an item. Absent means never, which is what
    * makes the activation moment countable exactly once: the open item counter
    * cannot do it, because a first item created as `done` leaves it at zero and
