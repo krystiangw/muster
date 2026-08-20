@@ -95,7 +95,11 @@ export async function startHarness(
   server.addHook('onSend', (request, reply, payload, done) => {
     const status = reply.statusCode;
     const pattern = request.routeOptions?.url;
-    if (pattern && (status === 404 || status === 409)) {
+    // Every answer, and 500 is not one: it is this service failing to give one.
+    // Every door can produce it in the trivial sense, so naming it on each of
+    // them would say nothing about any door, which is the test the rest of this
+    // map is held to.
+    if (pattern && status !== 304 && status !== 500) {
       const path = pattern.replace(/:([A-Za-z_]+)/g, '{$1}');
       const key = `${request.method.toLowerCase()} ${path}`;
       const seen = answered.get(key) ?? new Set<number>();

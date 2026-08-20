@@ -314,6 +314,7 @@ const REFUSAL_SAYS: Record<string, string> = {
   '404': 'No such thing under that name here.',
   '409': 'Somebody else got there first, or the state you said you expected is not the state that is stored.',
   '429': 'Over a published rate limit. The answer names which budget and carries retry-after.',
+  '413': 'The body is larger than the megabyte this service reads, and was refused before any of this endpoint\u2019s own rules ran. Nothing was applied.',
   '415': 'The body announced a type this service does not read. Send application/json, or a form body on the HTML endpoints.',
   '503': 'The store is out of reach. This is not your request being wrong: come back, and the answer says when.',
 };
@@ -784,7 +785,13 @@ export async function buildApp(
           // body, which was tried and was wrong: three writes declare no body
           // schema and answer 415 all the same, and so does every DELETE. A
           // GET answers 200 and ignores the header, having nothing to parse.
-          if (['post', 'put', 'patch', 'delete'].includes(method)) responses['415'] ??= refusal('415');
+          if (['post', 'put', 'patch', 'delete'].includes(method)) {
+            responses['415'] ??= refusal('415');
+            // The same door and the same parser, one step earlier: a body too
+            // large never reaches the endpoint either. Derived the same way,
+            // for the same reason.
+            responses['413'] ??= refusal('413');
+          }
 
           // The two OAuth endpoints, which are the same service in somebody
           // else's vocabulary. Registration refuses in this service's shape,

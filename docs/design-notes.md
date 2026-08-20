@@ -1831,3 +1831,18 @@ about refusals at all: moving a card into a column that wants it claimed while
 somebody else holds it, verifying a claim nobody started, and withdrawing a
 question that is not there. The first of those is a 409 on the busiest verb the
 board has.
+
+**Then widened from refusals to every answer**, which cost nothing and is worth
+recording mostly for what it did not find: every 200 and 201 the suite provokes
+was already named, so the earlier pass that taught the map about 201 holds.
+What it did find was `413`. A body over the megabyte limit is refused by the
+parser before any endpoint's own rules run, exactly like a media type the
+service does not read, and the map named the second and not the first. It is
+derived the same way, from the method, because the same parser refuses both.
+
+**500 is deliberately not on the map.** Every door can produce one in the
+trivial sense, so naming it on each of them would say nothing about any door,
+which is the test the rest of this map is held to: only what this door can
+actually produce, in words true of this door. A 500 is also not an answer to
+the request but this service failing to give one, and the sentence that matters
+about it is already in the body it sends.
