@@ -720,6 +720,15 @@ describe('moving an item into a column', () => {
     const refused = await move(project, 'work', 'busy', 'worker');
     assert.equal(refused.statusCode, 409);
     assert.equal(refused.json().error, 'already_finished');
+    // Named for what actually stopped it. "Reopen it first" is true and
+    // unhelpful through this door, because a move into a column that reopens
+    // does exactly that for you: the reason this one did not is the column.
+    // Measured on a real board, where "In progress" declares an apply of
+    // `claim` alone and the default layout derives its status from its own
+    // filter, so nothing in the suite had ever met this.
+    assert.equal(refused.json().column, 'busy');
+    assert.match(refused.json().message as string, /"busy"/);
+    assert.match(refused.json().message as string, /does not put anything back in play/);
     const after = await harness.store.items.findOne({ projectId: project.id, slug: 'work' });
     assert.equal(after?.claim, null, 'and the refused move holds nothing');
     assert.equal(after?.status, 'done');

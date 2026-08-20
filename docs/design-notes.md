@@ -2542,3 +2542,20 @@ match the question. There is enough work for both sides now, and the pairs that
 have to come back holding something say so and fail when they do not. Starving
 one side again fails by name rather than passing quietly.
 
+
+**The fixture was not the deployment, and production said so.** Checking the
+whole day's chain against the live service turned up one thing the suite could
+not see: dragging a finished card into "In progress" on the operator's own
+board is refused, while the same move on a default board reopens it and hands
+over the lease. Both are correct. The difference is the layout: the default
+column carries no `apply`, so the move derives one from the column's own filter
+and gets `status: open` with the claim, while that board's column declares
+`apply: { claim: true }` and nothing else, so nothing in the move puts the card
+back in play.
+
+What was wrong was the sentence. The card's own refusal says to reopen it
+first, which is true at the lease door and unhelpful at this one: through a
+move, reopening is what the column is supposed to do for you, and the reason it
+did not is the column. The move now says which column refused and what its
+`apply` would need. Every fixture in the suite used the default layout, which
+is why nothing here had ever met it.

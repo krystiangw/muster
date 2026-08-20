@@ -844,7 +844,27 @@ export async function moveItem(
     // will write to it. A move that reopens carries the finished card through
     // its own guard; every other claim, this one included when the column only
     // claims, meets the refusal like anybody else.
-    const claimed = await claimItem(store, project, slug, options.actor, undefined, { reopening: reopens });
+    const claimed = await claimItem(store, project, slug, options.actor, undefined, {
+      reopening: reopens,
+    }).catch((error: unknown) => {
+      // The refusal a finished card gets, arriving through a move rather than
+      // through the lease door, where "reopen it first" is true and unhelpful:
+      // a move into a column that reopens does that for you, and the reason
+      // this one did not is the column, not the card. Found on a real board,
+      // where "In progress" declares `apply: { claim: true }` and nothing
+      // else, so nothing in the move puts the card back in play. The default
+      // layout derives the status from the column's own filter and works,
+      // which is why no test saw it.
+      if (error instanceof ServiceError && error.code === 'already_finished') {
+        throw new ServiceError(
+          409,
+          'already_finished',
+          `"${slug}" is ${before.status}, and moving it into "${column.key}" would take a lease on finished work. That column does not put anything back in play: give its "apply" a "status" of "open" if a move into it should, or reopen the card first.`,
+          { status: before.status, column: column.key },
+        );
+      }
+      throw error;
+    });
     if (!claimed.ok) {
       throw new ServiceError(
         409,
