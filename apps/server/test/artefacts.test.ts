@@ -606,6 +606,29 @@ describe('what we publish about ourselves', () => {
     }
   });
 
+  it('publishes one version of this server, to the registry and to the page', async () => {
+    // Three places carry it and they are read by different people: the
+    // document at /.well-known/mcp.json, the card an agent discovers this by,
+    // and server.json, which is what the official registry shows. Three copies
+    // agreeing today is not one value, and the registry entry is the surface
+    // we have the least ability to correct afterwards.
+    const manifest = JSON.parse(
+      readFileSync(new URL('../../../server.json', import.meta.url), 'utf8'),
+    ) as { version: string; remotes: Array<{ url: string }> };
+    const served = (await harness.server.inject({ method: 'GET', url: '/.well-known/mcp.json' })).json();
+    assert.equal(served.version, manifest.version, 'the page and the registry entry say the same version');
+
+    // The third copy lives in the ARD catalogue, under the surface that names
+    // the MCP tools. Found by its identifier rather than by position, since a
+    // surface added above it would otherwise move this assertion onto
+    // something else without failing.
+    const catalogue = (await harness.server.inject({ method: 'GET', url: '/.well-known/ai-catalog.json' })).json();
+    const entries = (catalogue.entries ?? []) as Array<Record<string, unknown>>;
+    const mcpEntry = entries.find((entry) => String(entry.identifier).includes(':tools:mcp'));
+    assert.ok(mcpEntry, 'the catalogue still names an MCP entry');
+    assert.equal(mcpEntry!.version, manifest.version, 'and it says the same version as the registry entry');
+  });
+
   it('says what a new board is, in the words a new board is made with', async () => {
     // The description of this field said "link is the default" for as long as
     // link was the default, and went on saying it afterwards, because nothing

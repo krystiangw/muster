@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { after, before, describe, it } from 'node:test';
 // Imported from source rather than from the built package so a broken SDK
 // fails this suite instead of silently testing a stale dist.
@@ -592,7 +592,10 @@ describe('the typed SDK', () => {
 });
 
 describe('the package a fleet installs', () => {
-  const sdk = new URL('../../../packages/sdk/', import.meta.url).pathname;
+  // `fileURLToPath`, not `.pathname`: a checkout under a directory with a
+  // space in it leaves the escape in the string, and `npm` is then handed a
+  // `cwd` that does not exist.
+  const sdk = fileURLToPath(new URL('../../../packages/sdk/', import.meta.url));
 
   /**
    * Everything above this imports the source, on purpose, so a broken SDK
@@ -623,7 +626,14 @@ describe('the package a fleet installs', () => {
   });
 
   it('drives a session through the built entry point, the way an install would', async () => {
-    const entry = pathToFileURL(join(sdk, 'dist/index.js')).href;
+    // The file the manifest points at, not the one I expect it to point at.
+    // An exports map moved to some other file that happens to exist passes
+    // the check above and would fail on the other end of an install, which is
+    // the only place that map is ever read.
+    const manifest = JSON.parse(readFileSync(join(sdk, 'package.json'), 'utf8')) as {
+      exports: Record<string, { import: string }>;
+    };
+    const entry = pathToFileURL(join(sdk, manifest.exports['.']!.import)).href;
     const built = (await import(entry)) as { Muster: { start: (options: Record<string, unknown>) => Promise<any> } };
     assert.equal(typeof built.Muster?.start, 'function', 'the entry point exports what the docs tell people to import');
 

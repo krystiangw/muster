@@ -1365,12 +1365,25 @@ export function agentAccessJson(config: Config): Record<string, unknown> {
 export const SERVER_SUMMARY =
   'Shared operational memory for long-lived agents: who owns what, what rotted, what needs a human.';
 
+/**
+ * What this MCP server says its version is.
+ *
+ * One value, because it is published in three places and they are read by
+ * different people: the document at `/.well-known/mcp.json`, the card an agent
+ * discovers this by, and `server.json`, which is what the official registry
+ * shows. Three copies agreeing today is not the same as one value, and the one
+ * that would drift is the registry entry, which is the surface we have the
+ * least ability to correct afterwards. `test/artefacts.test.ts` holds
+ * `server.json` against this.
+ */
+export const MCP_SERVER_VERSION = '0.1.0';
+
 export function mcpJson(config: Config): Record<string, unknown> {
   const base = config.baseUrl;
   return {
     name: 'muster',
     description: SERVER_SUMMARY,
-    version: '0.1.0',
+    version: MCP_SERVER_VERSION,
     transport: 'streamable-http',
     url: `${base}/mcp`,
     authentication: {
@@ -1423,7 +1436,7 @@ export function aiCatalogJson(config: Config): Record<string, unknown> {
           'find a task board an agent can sign up to without a human',
           'how does an agent ask a human a question and carry on working',
         ],
-        version: '0.1.0',
+        version: MCP_SERVER_VERSION,
       },
       {
         identifier: `urn:air:${host}:api:public`,
