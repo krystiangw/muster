@@ -2707,3 +2707,44 @@ due. The case that bites is the second rehearsal, inside the hour, which is
 also the only way anybody would ever run it: twice, because the first time
 printed nothing.
 
+
+## What a day of these had in common, 2026-08-20
+
+Sixteen entries above carry today's date. They are three shapes, and each one is
+a question worth asking of the next change rather than a story worth reading
+again.
+
+**Is this rule kept at the door beside this one?** A claim was refused on
+finished work and the close path had been clearing it for days, from the other
+side, alone. The scope warning fired at one write door and six were silent. The
+offer counted what it was withholding on the door a person browses and said
+nothing on the door a fleet is pointed at. Every one of those was a rule
+somebody had enforced once, correctly, and never asked about the neighbouring
+verb. The cheap version of this question is a list of every door that touches
+the same state, driven in one test that asserts they answer alike, rather than
+one assertion per door ageing separately.
+
+**Is the sentence narrower than the code, or wider?** Wider three times today.
+Scope "warns you when you write outside it" promised seven doors and had one.
+An OAuth token "good for 60 minutes" was true typically and false for every
+unclaimed board in its last hour, because a key never outlives the board. A
+performance line said "four queries" while counting two of the four methods a
+call uses. The pattern under all three: a number or a verb published as the
+typical case, when a published thing is read as the worst case. Say the bound,
+name the field that carries the truth, and ask what makes it smaller.
+
+**Would this guard fail if the thing it guards broke?** The parity test compared
+a door that got a card with a door told there was nothing left, and both answers
+were correct. The resource ceiling counted cards while the round trips ran away,
+and then counted round trips while the names per trip collapsed. The response
+recorder read only payloads that began with a brace, so an empty answer walked
+through the invariant it was written for. The rehearsal that exists to show what
+the monitor does printed nothing on a healthy afternoon. Four guards, each of
+them green, none of them holding. The only way any of it surfaced was breaking
+the thing on purpose and watching for red.
+
+The three questions have one thing behind them. Every failure here was a place
+where something *looked* checked: a rule that had a guard, a sentence that had a
+test, a bound that had a number. Nothing on this list was found by reading. All
+of it was found by driving the door, publishing the measurement, or mutating the
+guard and counting what went red.
