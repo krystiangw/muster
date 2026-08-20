@@ -123,6 +123,30 @@ export function normalizeUpsertInput(input: UpsertItemInput): UpsertItemInput {
         'A card cannot file itself when it finishes: that is a loop with one step in it.',
       );
     }
+    /**
+     * Refused when the shape is wrong, rather than left out.
+     *
+     * This was written as "keep it if it is a string", which drops anything
+     * else and files the next card without it. The caller is told the card was
+     * filed, and the priority or the labels it asked for are simply not there;
+     * the range check below could never fire either, because a wrong shape had
+     * already become an absence. `expect` beside it refuses by name, and this
+     * is the same kind of block.
+     */
+    const shaped = (name: string, value: unknown, ok: boolean): void => {
+      if (value !== undefined && !ok) {
+        throw badRequest('bad_then', `then.${name} is the wrong shape here, so nothing was filed.`);
+      }
+    };
+    shaped('title', raw.title, typeof raw.title === 'string');
+    shaped('body', raw.body, typeof raw.body === 'string');
+    shaped('priority', raw.priority, typeof raw.priority === 'number');
+    shaped(
+      'labels',
+      raw.labels,
+      Array.isArray(raw.labels) && raw.labels.every((label) => typeof label === 'string'),
+    );
+    shaped('owner', raw.owner, typeof raw.owner === 'string' || raw.owner === null);
     then = {
       slug: next,
       ...(typeof raw.title === 'string' ? { title: raw.title.slice(0, 300) } : {}),

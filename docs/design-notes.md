@@ -2068,3 +2068,22 @@ are only read inside a branch the call has to ask for: `ttl_minutes` when the
 claim is wanted, `owner_note` and `agent` when the board is being offered. A
 body carrying only the crafted argument never reaches them, and the walk then
 reports an argument nobody looked at as an argument nobody refused.
+
+**And filling every argument can hide the answer**, which review found next:
+`status` and `expect` together are a guarded write, and that refusal arrives
+before the crafted field is read. So the walk sends both shapes of the call and
+asks a different question of the answer: does the refusal name the argument
+being tested. A refusal about something else means the call was turned back
+before the argument was reached and the walk learned nothing.
+
+That question found the last of them. Inside `then`, the block saying what to
+file when this card finishes, every field was kept only if it already had the
+right shape and dropped otherwise, so the range check below it could never fire:
+a wrong shape had already become an absence. The next card was filed without the
+priority or the labels that were asked for, and the answer said it was filed.
+`expect` beside it refuses by name, which is what the block now does.
+
+**The generator itself was the last thing in the way.** Two fields filled with
+the same word are refused for being the same: a card whose `slug` and whose
+`then.slug` are both `x` files itself, and that refusal arrives first and says
+so. Every generated value now carries its own number.

@@ -1622,6 +1622,8 @@ describe('a shape where a name belongs, at every door the document names', () =>
 });
 
 const crafted = { $ne: null };
+/** Counts up so no two generated values collide. */
+let distinct = 0;
 
 /**
  * A value this schema would accept, so the request is refused for the
@@ -1655,9 +1657,15 @@ const plausible = (schema: CraftedSchema, name = ''): unknown => {
       (schema.required ?? []).map((child) => [child, plausible(schema.properties?.[child] ?? {}, child)]),
     );
   }
-  if (schema.format === 'email' || /email/i.test(name)) return 'somebody@example.com';
+  if (schema.format === 'email' || /email/i.test(name)) return `somebody${(distinct += 1)}@example.com`;
   if (schema.format === 'date-time' || /(^|_)at$/.test(name)) return '2026-01-01T00:00:00.000Z';
-  return 'x'.repeat(Math.max(1, Math.min(schema.minLength ?? 1, schema.maxLength ?? 64)));
+  // Distinct, because two fields filled with the same word can be refused for
+  // being the same rather than for the value under test: a card whose `slug`
+  // and whose `then.slug` are both `x` is a card that files itself, and that
+  // refusal arrives first and says so.
+  const wanted = Math.max(schema.minLength ?? 1, 4);
+  const value = `x${(distinct += 1)}-${name || 'field'}`;
+  return value.slice(0, schema.maxLength ?? 64).padEnd(Math.min(wanted, schema.maxLength ?? 64), 'x');
 };
 
 /** What the schema says sits in one place, so a free-form one can be left alone. */
@@ -1740,49 +1748,72 @@ describe('the same shape at the door the document counts as one', () => {
         const schema = tool.inputSchema ?? {};
         const trails = placesIn(schema);
         for (const trail of trails) {
-          const answer = await call(100 + walked, {
-            method: 'tools/call',
-            params: {
-              name: tool.name,
-              // Every argument filled, not only the required ones. Three of
-              // these are read inside a branch the call has to be asked for:
-              // `ttl_minutes` only when the claim is wanted, `owner_note` only
-              // when the board is being offered to somebody. A body carrying
-              // just the crafted one never reaches them, and the walk then
-              // reports an argument nobody looked at as an argument nobody
-              // refused.
-              arguments: {
-                ...(plausible(schema) as Record<string, unknown>),
-                ...Object.fromEntries(
-                  Object.entries(schema.properties ?? {}).map(([name, child]) => [name, plausible(child, name)]),
-                ),
-                ...(craftedAt(schema, trail) as Record<string, unknown>),
-              },
-            },
-          });
-          walked += 1;
-          const body = answer.json() as { error?: { code?: number }; result?: { isError?: boolean } };
-          // A tool refusing is the ordinary answer here and says so with
-          // isError; a JSON-RPC internal error, or an HTTP 5xx, is the door
-          // breaking rather than answering.
-          if (answer.statusCode >= 500 || body.error?.code === -32603) {
-            broke.push(`${tool.name} on ${trail.join('.')}: ${answer.statusCode} ${JSON.stringify(body.error ?? {})}`);
+          /**
+           * Two shapes of the same call, because either one alone can miss.
+           *
+           * Filling only what is required never reaches an argument read
+           * inside a branch: `ttl_minutes` when the claim is wanted,
+           * `owner_note` when the board is being offered. Filling everything
+           * can be refused before the argument is looked at: `status` and
+           * `expect` together are a guarded write, and that refusal arrives
+           * first and says so. So the walk tries both and asks whether either
+           * of them was answered about the argument it was testing.
+           */
+          const everything = {
+            ...Object.fromEntries(
+              Object.entries(schema.properties ?? {}).map(([name, child]) => [name, plausible(child, name)]),
+            ),
+            ...(craftedAt(schema, trail) as Record<string, unknown>),
+          };
+          const onlyWhatIsNeeded = craftedAt(schema, trail) as Record<string, unknown>;
+
+          let reached = false;
+          for (const args of [everything, onlyWhatIsNeeded]) {
+            const answer = await call(100 + walked, {
+              method: 'tools/call',
+              params: { name: tool.name, arguments: args },
+            });
+            walked += 1;
+            const body = answer.json() as {
+              error?: { code?: number };
+              result?: { isError?: boolean; content?: { text?: string }[] };
+            };
+            // A tool refusing is the ordinary answer here and says so with
+            // isError; a JSON-RPC internal error, or an HTTP 5xx, is the door
+            // breaking rather than answering.
+            if (answer.statusCode >= 500 || body.error?.code === -32603) {
+              broke.push(`${tool.name} on ${trail.join('.')}: ${answer.statusCode} ${JSON.stringify(body.error ?? {})}`);
+            }
+            const said = String(body.result?.content?.[0]?.text ?? '');
+            const refused = body.error !== undefined || body.result?.isError === true;
+            // Named in the refusal, in any of the ways this service names a
+            // field: in quotes, as a path like `then.priority`, or as the word
+            // itself at the head of a sentence about it. A refusal that names
+            // something else means the call was turned back before this
+            // argument was read, and the walk learned nothing about it.
+            const named = trail[trail.length - 1] ?? '';
+            const asPath = trail.join('.');
+            if (
+              refused &&
+              (said.includes(`"${named}"`) ||
+                said.includes(asPath) ||
+                new RegExp(`\\b${named}\\b`, 'i').test(said))
+            ) {
+              reached = true;
+            }
           }
-          // Refused, and not quietly given a default. Reading a crafted title
-          // as the empty string answers ok with a card that has no title,
-          // which tells the caller its words were kept when nothing was. A
-          // place the schema declares an object is exempt by its own contract:
-          // `fields` and `meta` take an object, and one is what they got.
+
+          // Free-form places are exempt by their own schema: `fields` and
+          // `meta` are declared objects and an object is what they take.
           const declared = typeAt(schema, trail);
-          const refused = body.error !== undefined || body.result?.isError === true;
-          if (!refused && declared !== undefined && declared !== 'object') {
+          if (!reached && declared !== undefined && declared !== 'object') {
             swallowed.push(`${tool.name} on ${trail.join('.')} (${declared})`);
           }
         }
       }
 
       assert.deepEqual(broke.sort(), [], 'a crafted argument is refused, never answered by breaking');
-      assert.deepEqual(swallowed.sort(), [], 'and refused rather than read as an empty one');
+      assert.deepEqual(swallowed.sort(), [], 'and every one of them was refused by name, not swallowed or masked');
       assert.ok(walked >= 40, `it visited the arguments rather than counting the tools: ${walked}`);
     } finally {
       await harness.stop();
