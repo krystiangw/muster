@@ -94,6 +94,8 @@ export async function startHarness(
   const answered = new Map<string, Set<number>>();
   /** Which doors were seen handing back a card, and under which key. */
   const carried = new Map<string, Set<string>>();
+  /** And which answered 2xx without one, so "always" can be measured. */
+  const lacked = new Map<string, Set<string>>();
   server.addHook('onSend', (request, reply, payload, done) => {
     const status = reply.statusCode;
     const pattern = request.routeOptions?.url;
@@ -132,6 +134,15 @@ export async function startHarness(
             keys.add('items');
             carried.set(key, keys);
           }
+          // The other side of the promise. Saying a field is required is a
+          // claim about every answer, not about the ones that happen to carry
+          // it, so the answers that do not are counted too.
+          for (const field of ['item', 'items'] as const) {
+            if (field in body) continue;
+            const missing = lacked.get(key) ?? new Set<string>();
+            missing.add(field);
+            lacked.set(key, missing);
+          }
         } catch {
           // Not JSON after all. Nothing to compare.
         }
@@ -162,7 +173,7 @@ export async function startHarness(
       await store.close();
       await releaseMongo();
       refusalsAreOnTheMap(documented, answered);
-      answersAreOnTheMap(documented, carried);
+      answersAreOnTheMap(documented, carried, lacked);
     },
   };
 }
@@ -266,8 +277,10 @@ export async function signIn(harness: Harness, email: string): Promise<OperatorS
 function answersAreOnTheMap(
   documented: Record<string, Record<string, { responses?: Record<string, unknown> }>>,
   carried: Map<string, Set<string>>,
+  lacked: Map<string, Set<string>>,
 ): void {
   const quiet: string[] = [];
+  const broken: string[] = [];
   for (const [key, fields] of carried) {
     const [method, path] = key.split(' ') as [string, string];
     const operation = documented?.[path]?.[method];
@@ -287,6 +300,29 @@ function answersAreOnTheMap(
       if (!said.has(field)) quiet.push(`${method.toUpperCase()} ${path} answered with ${field}`);
     }
   }
+  // And every field the document calls required has to arrive on every
+  // success from that door, which is a different claim from "this door can
+  // carry one" and the one a generated client is built on.
+  for (const [path, methods] of Object.entries(documented ?? {})) {
+    for (const [method, operation] of Object.entries(methods)) {
+      const key = `${method} ${path}`;
+      const promised = new Set<string>();
+      for (const code of ['200', '201']) {
+        const response = operation.responses?.[code] as
+          | { content?: { 'application/json'?: { schema?: { required?: string[] } } } }
+          | undefined;
+        for (const field of response?.content?.['application/json']?.schema?.required ?? []) {
+          promised.add(field);
+        }
+      }
+      for (const field of promised) {
+        if (lacked.get(key)?.has(field)) {
+          broken.push(`${method.toUpperCase()} ${path} promised ${field} on every success and answered without it`);
+        }
+      }
+    }
+  }
+  assert.deepEqual([...new Set(broken)].sort(), [], 'a required field arrives every time or is not required');
   assert.deepEqual(
     [...new Set(quiet)].sort(),
     [],

@@ -2478,3 +2478,19 @@ itself. `POST /agents/{handle}/rename` answers `items: 4`, meaning it moved
 four of them, and reading the key alone would have had the document promise a
 page of cards where a count arrives. A card is a thing with a slug, which is
 what the recorder looks for now.
+
+**Required is a claim about every answer, not about the ones that carry a
+card.** Review asked for it and it is right, but declaring it was the smaller
+half: a document saying `item` always arrives is a promise nobody was checking,
+and this repository spent the morning narrowing two promises that were wider
+than the code. So the recorder counts both sides now. It already noted every
+answer that carried a card; it also notes every 2xx that did not, and the
+teardown fails on a door whose document promises a field on every success and
+that answered without it once. Breaking one route's answer fails it by name.
+
+The null case is the one that makes the distinction worth stating: both offers
+answer `item: null` when there is nothing to give. Null is a value and the key
+is there, so the field is required and its type is `Item` or null. Optional
+would have said something different and weaker, and it would have been the
+easier thing to write.
+

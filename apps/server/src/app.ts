@@ -897,7 +897,19 @@ export async function buildApp(
                 description: existing.description ?? 'Done.',
                 content: {
                   'application/json': {
-                    schema: { type: 'object', properties: carries, additionalProperties: true },
+                    schema: {
+                      type: 'object',
+                      // Required, which is a claim about every success from
+                      // this door rather than about the ones that carry a
+                      // card. Both offers answer `item: null` when there is
+                      // nothing to give, and null is a value: the key is
+                      // there. A test walks every 2xx the suite provokes and
+                      // fails on a door that promised this and answered
+                      // without it.
+                      required: Object.keys(carries),
+                      properties: carries,
+                      additionalProperties: true,
+                    },
                   },
                 },
               };
