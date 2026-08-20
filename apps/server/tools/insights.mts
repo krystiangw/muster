@@ -70,6 +70,7 @@ const [
   moves,
   boardViews,
   viewsBeforeTheMark,
+  weekViewsBeforeTheMark,
   movesSinceTheMark,
   unswept,
   oldestSweep,
@@ -118,6 +119,15 @@ const [
     events.countDocuments({ kind: 'move' }),
     events.countDocuments({ kind: 'view', detail: 'board', at: { $gte: REFRESH_MARKED_FROM } }),
     events.countDocuments({ kind: 'view', detail: 'board', at: { $lt: REFRESH_MARKED_FROM } }),
+    // The same artefact inside the seven day window, which is the number
+    // printed directly under the row the caveat is attached to. It falls to
+    // zero on its own once the cutoff is a week old, and the sentence goes
+    // with it.
+    events.countDocuments({
+      kind: 'view',
+      detail: 'board',
+      at: { $gte: since(7), $lt: REFRESH_MARKED_FROM },
+    }),
     events.countDocuments({ kind: 'move', at: { $gte: REFRESH_MARKED_FROM } }),
     // Hygiene, across every project rather than the one the watchdog reads: a
     // board nobody is sweeping looks exactly like a board with nothing to sweep.
@@ -226,6 +236,11 @@ if (pageRows.length > 0) {
     row(page, n);
   }
   row('  in the last seven days', report.pagesLastWeek);
+  if (weekViewsBeforeTheMark > 0) {
+    console.log(
+      `  ${' '.repeat(28)} ${String(`of those, ${weekViewsBeforeTheMark} are board views from before it`).padStart(7)}`,
+    );
+  }
   // The number that decides whether drag and drop was refused on evidence or
   // on taste. Above roughly three moves per board view, the refusal is wrong.
   //
