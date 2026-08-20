@@ -203,6 +203,31 @@ function object(value: unknown, name: string): Record<string, unknown> | undefin
   return value as Record<string, unknown>;
 }
 
+/**
+ * A number, or a refusal. Same reason as the string above.
+ *
+ * `typeof x === 'number' ? x : undefined` was the shape here, and it turns an
+ * argument a model got wrong into an argument it never sent: the call answers
+ * with the default in place, and the caller is told the priority it asked for
+ * was kept.
+ */
+function num(value: unknown, name: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    throw new ServiceError(400, 'bad_argument', `"${name}" is a number here, and this one is not.`);
+  }
+  return value;
+}
+
+/** True, false, or a refusal. Anything else was read as false and never said so. */
+function flag(value: unknown, name: string): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== 'boolean') {
+    throw new ServiceError(400, 'bad_argument', `"${name}" is true or false here, and this one is neither.`);
+  }
+  return value;
+}
+
 /** Every element a string, or a refusal. Same reason, including the null. */
 function texts(value: unknown, name: string): string[] | undefined {
   if (value === undefined) return undefined;
@@ -1091,8 +1116,8 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         store,
         config,
         {
-          name: str(args.name, 'Untitled project'),
-          description: str(args.description),
+          name: text(args.name, 'name') ?? 'Untitled project',
+          description: text(args.description, 'description') ?? '',
         },
         'mcp',
       );
@@ -1194,7 +1219,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
     }
 
     const { project, key } = await authenticate(store, token);
-    const actor = str(args.actor) || str(args.agent) || 'unknown-agent';
+    const actor = text(args.actor, 'actor') || text(args.agent, 'agent') || 'unknown-agent';
 
     // Offering the project to a person decides who ends up owning it, and
     // ownership has no way back. The HTTP route asks for an admin key; a tool
@@ -1210,9 +1235,9 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
     switch (tool.name) {
       case 'register_agent': {
         const { agent, created } = await registerAgent(store, project, {
-          handle: str(args.handle),
-          scope: Array.isArray(args.scope) ? (args.scope as string[]) : undefined,
-          description: str(args.description),
+          handle: required(args.handle, 'handle'),
+          scope: texts(args.scope, 'scope'),
+          description: text(args.description, 'description') ?? '',
           meta: object(args.meta, 'meta'),
         });
         if (created) record(store, 'register', { door: 'mcp', projectId: project._id });
@@ -1221,13 +1246,13 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
       case 'upsert_item': {
         const result = await upsertItem(store, project, {
           slug: required(args.slug, 'slug'),
-          title: args.title === undefined ? undefined : str(args.title),
-          body: args.body === undefined ? undefined : str(args.body),
+          title: text(args.title, 'title'),
+          body: text(args.body, 'body'),
           status: args.status as ItemStatus | undefined,
-          owner: args.owner === undefined ? undefined : str(args.owner),
-          priority: typeof args.priority === 'number' ? args.priority : undefined,
-          labels: Array.isArray(args.labels) ? (args.labels as string[]) : undefined,
-          source: args.source === undefined ? undefined : str(args.source),
+          owner: text(args.owner, 'owner'),
+          priority: num(args.priority, 'priority'),
+          labels: texts(args.labels, 'labels'),
+          source: text(args.source, 'source'),
           // A board column can filter on these, so an agent that cannot write
           // them cannot reach such a column. `history` stays off this door: it
           // is the one-time import path, admin only, and what carries it is a
@@ -1236,7 +1261,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
             args.fields && typeof args.fields === 'object' && !Array.isArray(args.fields)
               ? (args.fields as Record<string, unknown>)
               : undefined,
-          note: args.note === undefined ? undefined : str(args.note),
+          note: text(args.note, 'note'),
           // Both doors, same behaviour: a guarded write was reachable from the
           // browser's edit form and from nowhere an agent could call. Passed
           // as it arrived, and rebuilt from its two known fields in the
@@ -1244,7 +1269,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           expect: args.expect as { title?: string; body?: string } | undefined,
           then: args.then as UpsertItemInput['then'],
           blockedBy: texts(args.blocked_by, 'blocked_by'),
-          mustExist: args.must_exist === true,
+          mustExist: flag(args.must_exist, 'must_exist') === true,
           actor,
         });
         if (result.created) recordFirstWrite(store, project._id, 'mcp');
@@ -1270,7 +1295,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           project,
           required(args.slug, 'slug'),
           text(args.agent, 'agent') || actor,
-          typeof args.ttl_minutes === 'number' ? args.ttl_minutes : undefined,
+          num(args.ttl_minutes, 'ttl_minutes'),
         );
         return result.ok
           ? { ok: true, item: itemJson(result.item!), expires_at: result.expiresAt }
@@ -1286,7 +1311,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           project,
           required(args.slug, 'slug'),
           text(args.agent, 'agent') || actor,
-          typeof args.ttl_minutes === 'number' ? args.ttl_minutes : undefined,
+          num(args.ttl_minutes, 'ttl_minutes'),
         );
         return { ok: true, item: itemJson(item), expires_at: item.claim?.expiresAt ?? null };
       }
@@ -1315,12 +1340,12 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         void maybeSweep(store, project).catch(() => undefined);
         const asked = text(args.agent, 'agent') ?? '';
         const result =
-          args.claim === true
+          flag(args.claim, 'claim') === true
             ? await nextItemHeld(
                 store,
                 project,
                 asked,
-                typeof args.ttl_minutes === 'number' ? args.ttl_minutes : undefined,
+                num(args.ttl_minutes, 'ttl_minutes'),
               )
             : await nextItem(store, project, asked);
         const warnings = asked ? await writeWarnings(store, project, asked) : [];
@@ -1357,10 +1382,10 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           label: text(args.label, 'label'),
           source: text(args.source, 'source'),
           prefix: text(args.prefix, 'prefix'),
-          stale: typeof args.stale === 'boolean' ? args.stale : undefined,
-          claimed: typeof args.claimed === 'boolean' ? args.claimed : undefined,
+          stale: flag(args.stale, 'stale'),
+          claimed: flag(args.claimed, 'claimed'),
           q: text(args.q, 'q'),
-          limit: typeof args.limit === 'number' ? args.limit : undefined,
+          limit: num(args.limit, 'limit'),
           order: text(args.order, 'order'),
           cursor: text(args.cursor, 'cursor'),
           since: text(args.since, 'since'),
@@ -1383,10 +1408,10 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
           project,
           {
             agent: actor,
-            question: str(args.question),
-            context: str(args.context),
+            question: required(args.question, 'question'),
+            context: text(args.context, 'context') ?? '',
             priority: args.priority as EscalationPriority | undefined,
-            itemSlug: args.item_slug === undefined ? null : str(args.item_slug),
+            itemSlug: text(args.item_slug, 'item_slug') ?? null,
           },
           'mcp',
         );
@@ -1417,9 +1442,9 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
             'Acknowledging is somebody saying they acted, so "agent" is required here and has to be your handle.',
           );
         }
-        const doc = await acknowledgeEscalation(store, project, str(args.id), {
+        const doc = await acknowledgeEscalation(store, project, required(args.id, 'id'), {
           agent: who,
-          ...(text(args.note, 'note') ? { note: str(args.note) } : {}),
+          ...(text(args.note, 'note') ? { note: text(args.note, 'note')! } : {}),
         });
         return { escalation: escalationJson(doc) };
       }
@@ -1438,8 +1463,8 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         const doc = await withdrawEscalation(
           store,
           project,
-          str(args.id),
-          { agent: who, reason: str(args.reason) },
+          required(args.id, 'id'),
+          { agent: who, reason: required(args.reason, 'reason') },
           'mcp',
         );
         return { escalation: escalationJson(doc) };
@@ -1447,14 +1472,14 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
       case 'board': {
         void maybeExpireClaims(store, project).catch(() => undefined);
         const view = await loadBoard(store, project, {
-          ...(typeof args.include_closed === 'boolean'
-            ? { includeClosed: args.include_closed }
-            : {}),
+          ...(flag(args.include_closed, 'include_closed') === undefined
+            ? {}
+            : { includeClosed: flag(args.include_closed, 'include_closed')! }),
           // Both narrowings end up in the board's own filter.
           ...(text(args.owner, 'owner') ? { owner: text(args.owner, 'owner')! } : {}),
           ...(text(args.agent, 'agent') ? { agent: text(args.agent, 'agent')! } : {}),
         });
-        return boardJson(view, args.items !== false);
+        return boardJson(view, flag(args.items, 'items') !== false);
       }
       case 'board_facets': {
         const facets = await boardFacets(store, project);
@@ -1470,9 +1495,9 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
       case 'move': {
         const result = await moveItem(store, project, {
           slug: required(args.slug, 'slug'),
-          column: str(args.column),
+          column: required(args.column, 'column'),
           actor,
-          ...(args.note === undefined ? {} : { note: str(args.note) }),
+          ...(args.note === undefined ? {} : { note: text(args.note, 'note')! }),
         });
         return {
           ok: true,
@@ -1485,7 +1510,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         };
       }
       case 'share_project': {
-        const email = str(args.email);
+        const email = required(args.email, 'email');
         // The bucket that protects the person being written to rather than the
         // board being offered. The HTTP door caps offers per project; this one
         // had nothing, and a project token costs nothing to obtain, so a fleet
@@ -1505,7 +1530,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         }
         const { alreadyOwned } = await shareProject(store, project, {
           email,
-          note: str(args.note),
+          note: text(args.note, 'note') ?? '',
           offeredBy: actor,
         });
         if (alreadyOwned) return { ok: true, already_owned: true };
@@ -1513,7 +1538,7 @@ export function registerMcp(app: FastifyInstance, deps: McpDeps): void {
         // this person may never have opened.
         await notifier.boardOffered(project, {
           email,
-          note: str(args.note),
+          note: text(args.note, 'note') ?? '',
           offeredBy: actor,
         });
 

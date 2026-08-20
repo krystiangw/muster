@@ -2039,3 +2039,32 @@ fails the test, because that is the shape of every miss above. Replacing a whole
 object with a crafted one and being told what that object needs is not a miss,
 which is why the check only looks inside containers, and a count of places
 visited keeps the whole thing from quietly shrinking to nothing.
+
+## Answering ok with the words thrown away, 2026-08-20
+
+The crafted-shape walk was extended to the MCP door, which the published
+document counts as one route with a JSON-RPC envelope and which is really
+nineteen tools with their own schemas. Nothing broke there, and the first
+version of the check said so and stopped.
+
+Asking a harder question found something. A tool argument that arrives as the
+wrong shape was not refused: `upsert_item` with a crafted `title` created a card
+whose title is the empty string and answered ok. So did `owner`, `body`,
+`labels` and `priority`, each silently defaulted, and eleven more arguments
+across other tools. The file already says what is wrong with that, in the
+comment above the helper that refuses an object: turning a bad argument into
+`undefined` and answering 200 tells the caller its notes were kept when nothing
+was, which is the one thing this door does not do anywhere else. It did it in
+sixteen places.
+
+Two readers were missing beside the three that existed, `num` and `flag`, and
+every argument the schema declares as a string, a number, an array or a flag now
+goes through one of them. What stays lenient is what the schema declares an
+object: `fields` and `meta` take whatever the caller stores in them, and an
+object is exactly what they take.
+
+**The check has to fill every argument, not the required ones.** Three arguments
+are only read inside a branch the call has to ask for: `ttl_minutes` when the
+claim is wanted, `owner_note` and `agent` when the board is being offered. A
+body carrying only the crafted argument never reaches them, and the walk then
+reports an argument nobody looked at as an argument nobody refused.

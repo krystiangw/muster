@@ -1562,74 +1562,6 @@ describe('a shape where a name belongs, at every door the document names', () =>
         >;
       };
 
-      const crafted = { $ne: null };
-
-      /**
-       * A value this schema would accept, so the request is refused for the
-       * field being tested and not for a companion that was never sent.
-       */
-      type Schema = {
-        type?: string | string[];
-        enum?: unknown[];
-        properties?: Record<string, Schema>;
-        required?: string[];
-        items?: Schema;
-        minimum?: number;
-        minLength?: number;
-        maxLength?: number;
-        format?: string;
-      };
-      /**
-       * A companion the schema would accept, so the request is refused for the
-       * field being tested rather than for the one beside it. The lengths
-       * matter: a code is six characters and a report's title is three, and
-       * `x` fails both, which leaves the crafted field never reached.
-       */
-      const plausible = (schema: Schema, name = ''): unknown => {
-        if (schema.enum?.length) return schema.enum[0];
-        const type = Array.isArray(schema.type) ? schema.type[0] : schema.type;
-        if (type === 'integer' || type === 'number') return schema.minimum ?? 1;
-        if (type === 'boolean') return true;
-        if (type === 'array') return schema.items ? [plausible(schema.items)] : [];
-        if (type === 'object') {
-          return Object.fromEntries(
-            (schema.required ?? []).map((child) => [child, plausible(schema.properties?.[child] ?? {}, child)]),
-          );
-        }
-        if (schema.format === 'email' || /email/i.test(name)) return 'somebody@example.com';
-        if (schema.format === 'date-time' || /(^|_)at$/.test(name)) return '2026-01-01T00:00:00.000Z';
-        return 'x'.repeat(Math.max(1, Math.min(schema.minLength ?? 1, schema.maxLength ?? 64)));
-      };
-
-      /** Every place a value sits, including the ones inside other values. */
-      const places = (schema: Schema, trail: string[] = []): string[][] =>
-        Object.entries(schema.properties ?? {}).flatMap(([name, child]) => {
-          const here = [...trail, name];
-          const type = Array.isArray(child.type) ? child.type[0] : child.type;
-          if (type === 'object' && child.properties) return [here, ...places(child, here)];
-          if (type === 'array' && child.items?.properties) return [here, ...places(child.items, [...here, '0'])];
-          return [here];
-        });
-
-      /**
-       * The body for one place, built down the schema rather than into an
-       * empty object. A container opened on the way has its own required
-       * fields filled: `then` needs a slug, an entry in `history` needs three
-       * things, and an empty one is refused for the companion rather than for
-       * the value under test.
-       */
-      const valueAt = (schema: Schema, trail: string[]): unknown => {
-        if (trail.length === 0) return crafted;
-        const type = Array.isArray(schema.type) ? schema.type[0] : schema.type;
-        if (type === 'array') {
-          return [valueAt(schema.items ?? {}, trail.slice(1))];
-        }
-        const [head, ...rest] = trail as [string, ...string[]];
-        const filled = plausible(schema) as Record<string, unknown>;
-        filled[head] = valueAt(schema.properties?.[head] ?? {}, rest);
-        return filled;
-      };
-
       const broke: string[] = [];
       let walked = 0;
       const refusedForACompanion: string[] = [];
@@ -1641,14 +1573,14 @@ describe('a shape where a name belongs, at every door the document names', () =>
             .replace('{slug}', 'a-card')
             .replace('{id}', 'nothing-by-that-name')
             .replace('{handle}', 'nobody');
-          const schema = (operation.requestBody?.content?.['application/json']?.schema ?? {}) as Schema;
-          const trails = places(schema);
+          const schema = (operation.requestBody?.content?.['application/json']?.schema ?? {}) as CraftedSchema;
+          const trails = placesIn(schema);
           // A door the document gives no fields is either one that reads no
           // body at all or one whose body it does not describe, and the second
           // is exactly where this went wrong. Both get a body anyway.
           const bodies: Record<string, unknown>[] =
             trails.length > 0
-              ? trails.map((trail) => valueAt(schema, trail) as Record<string, unknown>)
+              ? trails.map((trail) => craftedAt(schema, trail) as Record<string, unknown>)
               : [
                   { client_id: registered.client_id, client_secret: crafted, grant_type: 'client_credentials' },
                   { client_id: crafted, client_secret: 'whatever', grant_type: 'client_credentials' },
@@ -1683,6 +1615,175 @@ describe('a shape where a name belongs, at every door the document names', () =>
       // above it true. Sixty is well under what it visits today.
       assert.ok(walked >= 60, `it visited the doors rather than counting them: ${walked}`);
       assert.deepEqual(refusedForACompanion.sort(), [], 'each crafted value was the reason its request was refused');
+    } finally {
+      await harness.stop();
+    }
+  });
+});
+
+const crafted = { $ne: null };
+
+/**
+ * A value this schema would accept, so the request is refused for the
+ * field being tested and not for a companion that was never sent.
+ */
+type CraftedSchema = {
+  type?: string | string[];
+  enum?: unknown[];
+  properties?: Record<string, CraftedSchema>;
+  required?: string[];
+  items?: CraftedSchema;
+  minimum?: number;
+  minLength?: number;
+  maxLength?: number;
+  format?: string;
+};
+/**
+ * A companion the schema would accept, so the request is refused for the
+ * field being tested rather than for the one beside it. The lengths
+ * matter: a code is six characters and a report's title is three, and
+ * `x` fails both, which leaves the crafted field never reached.
+ */
+const plausible = (schema: CraftedSchema, name = ''): unknown => {
+  if (schema.enum?.length) return schema.enum[0];
+  const type = Array.isArray(schema.type) ? schema.type[0] : schema.type;
+  if (type === 'integer' || type === 'number') return schema.minimum ?? 1;
+  if (type === 'boolean') return true;
+  if (type === 'array') return schema.items ? [plausible(schema.items)] : [];
+  if (type === 'object') {
+    return Object.fromEntries(
+      (schema.required ?? []).map((child) => [child, plausible(schema.properties?.[child] ?? {}, child)]),
+    );
+  }
+  if (schema.format === 'email' || /email/i.test(name)) return 'somebody@example.com';
+  if (schema.format === 'date-time' || /(^|_)at$/.test(name)) return '2026-01-01T00:00:00.000Z';
+  return 'x'.repeat(Math.max(1, Math.min(schema.minLength ?? 1, schema.maxLength ?? 64)));
+};
+
+/** What the schema says sits in one place, so a free-form one can be left alone. */
+const typeAt = (schema: CraftedSchema, trail: string[]): string | undefined => {
+  let at: CraftedSchema | undefined = schema;
+  for (const step of trail) {
+    if (!at) return undefined;
+    at = /^\d+$/.test(step) ? at.items : at.properties?.[step];
+  }
+  const type = Array.isArray(at?.type) ? at?.type[0] : at?.type;
+  return type;
+};
+
+/** Every place a value sits, including the ones inside other values. */
+const placesIn = (schema: CraftedSchema, trail: string[] = []): string[][] =>
+  Object.entries(schema.properties ?? {}).flatMap(([name, child]) => {
+    const here = [...trail, name];
+    const type = Array.isArray(child.type) ? child.type[0] : child.type;
+    if (type === 'object' && child.properties) return [here, ...placesIn(child, here)];
+    if (type === 'array' && child.items?.properties) return [here, ...placesIn(child.items, [...here, '0'])];
+    return [here];
+  });
+
+/**
+ * The body for one place, built down the schema rather than into an
+ * empty object. A container opened on the way has its own required
+ * fields filled: `then` needs a slug, an entry in `history` needs three
+ * things, and an empty one is refused for the companion rather than for
+ * the value under test.
+ */
+const craftedAt = (schema: CraftedSchema, trail: string[]): unknown => {
+  if (trail.length === 0) return crafted;
+  const type = Array.isArray(schema.type) ? schema.type[0] : schema.type;
+  if (type === 'array') {
+    return [craftedAt(schema.items ?? {}, trail.slice(1))];
+  }
+  const [head, ...rest] = trail as [string, ...string[]];
+  const filled = plausible(schema) as Record<string, unknown>;
+  filled[head] = craftedAt(schema.properties?.[head] ?? {}, rest);
+  return filled;
+};
+
+describe('the same shape at the door the document counts as one', () => {
+  /**
+   * The walk above reads the published document, and the document has one
+   * entry for `/mcp`: a JSON-RPC envelope. Behind it are nineteen tools with
+   * their own schemas, and none of their arguments is visited by it.
+   *
+   * That is the shape that let the token endpoint through: a door the general
+   * check does not see, covered once by hand and then left behind when
+   * something was added. So the tool list is read the same way the document is,
+   * and a tool added tomorrow is walked without anybody remembering it.
+   */
+  it('never breaks on a crafted argument to any tool it lists', async () => {
+    const harness = await startHarness({
+      LIMIT_WRITES_PER_MINUTE: '100000',
+      LIMIT_READS_PER_MINUTE: '100000',
+      LIMIT_CREATE_PROJECTS_PER_HOUR: '10000',
+    });
+    try {
+      const project = await createProject(harness, 'crafted-mcp');
+      const headers = { ...authed(project), 'content-type': 'application/json' };
+      const call = async (id: number, body: Record<string, unknown>) =>
+        harness.server.inject({ method: 'POST', url: '/mcp', headers, payload: { jsonrpc: '2.0', id, ...body } });
+
+      await call(1, {
+        method: 'tools/call',
+        params: { name: 'upsert_item', arguments: { slug: 'a-card', title: 'a card', actor: 'somebody' } },
+      });
+
+      const listed = (await call(2, { method: 'tools/list', params: {} })).json() as {
+        result: { tools: { name: string; inputSchema?: CraftedSchema }[] };
+      };
+      assert.ok(listed.result.tools.length > 0, 'it lists tools at all');
+
+      const broke: string[] = [];
+      const swallowed: string[] = [];
+      let walked = 0;
+      for (const tool of listed.result.tools) {
+        const schema = tool.inputSchema ?? {};
+        const trails = placesIn(schema);
+        for (const trail of trails) {
+          const answer = await call(100 + walked, {
+            method: 'tools/call',
+            params: {
+              name: tool.name,
+              // Every argument filled, not only the required ones. Three of
+              // these are read inside a branch the call has to be asked for:
+              // `ttl_minutes` only when the claim is wanted, `owner_note` only
+              // when the board is being offered to somebody. A body carrying
+              // just the crafted one never reaches them, and the walk then
+              // reports an argument nobody looked at as an argument nobody
+              // refused.
+              arguments: {
+                ...(plausible(schema) as Record<string, unknown>),
+                ...Object.fromEntries(
+                  Object.entries(schema.properties ?? {}).map(([name, child]) => [name, plausible(child, name)]),
+                ),
+                ...(craftedAt(schema, trail) as Record<string, unknown>),
+              },
+            },
+          });
+          walked += 1;
+          const body = answer.json() as { error?: { code?: number }; result?: { isError?: boolean } };
+          // A tool refusing is the ordinary answer here and says so with
+          // isError; a JSON-RPC internal error, or an HTTP 5xx, is the door
+          // breaking rather than answering.
+          if (answer.statusCode >= 500 || body.error?.code === -32603) {
+            broke.push(`${tool.name} on ${trail.join('.')}: ${answer.statusCode} ${JSON.stringify(body.error ?? {})}`);
+          }
+          // Refused, and not quietly given a default. Reading a crafted title
+          // as the empty string answers ok with a card that has no title,
+          // which tells the caller its words were kept when nothing was. A
+          // place the schema declares an object is exempt by its own contract:
+          // `fields` and `meta` take an object, and one is what they got.
+          const declared = typeAt(schema, trail);
+          const refused = body.error !== undefined || body.result?.isError === true;
+          if (!refused && declared !== undefined && declared !== 'object') {
+            swallowed.push(`${tool.name} on ${trail.join('.')} (${declared})`);
+          }
+        }
+      }
+
+      assert.deepEqual(broke.sort(), [], 'a crafted argument is refused, never answered by breaking');
+      assert.deepEqual(swallowed.sort(), [], 'and refused rather than read as an empty one');
+      assert.ok(walked >= 40, `it visited the arguments rather than counting the tools: ${walked}`);
     } finally {
       await harness.stop();
     }
