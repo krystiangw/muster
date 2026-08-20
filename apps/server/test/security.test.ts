@@ -404,7 +404,7 @@ describe('what the link says about itself', () => {
     for (const route of onTheLink) {
       assert.ok(route in named, `${route} writes through the link and the sentence has never heard of it`);
       const power = named[route];
-      if (power) assert.match(docs.body, power, `${route}: ${String(power)}`);
+      if (power) assert.match(docs.body.replace(/\s+/g, ' '), power, `${route}: ${String(power)}`);
     }
 
     for (const [url, what] of [
@@ -413,8 +413,14 @@ describe('what the link says about itself', () => {
       ['/.well-known/agent-access.json', 'the card an agent discovers this by'],
     ] as const) {
       const published = await harness.server.inject({ method: 'GET', url });
-      assert.match(published.body, /files work of their own/, what);
-      assert.match(published.body, /consolidates two spellings/, what);
+      // Whitespace flattened first. skill.md is hard wrapped at 78 columns, so
+      // where a line ends depends on every word before it: adding a clause
+      // three sentences earlier moved the break into the middle of the phrase
+      // this looks for, and the guard failed for a reason that had nothing to
+      // do with what it guards. A promise about prose is about the words.
+      const said = published.body.replace(/\s+/g, ' ');
+      assert.match(said, /files work of their own/, what);
+      assert.match(said, /consolidates two spellings/, what);
     }
     // And it is true only while the board is open by link, which is the state
     // the sentence is about.
