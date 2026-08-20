@@ -1563,7 +1563,58 @@ describe('a shape where a name belongs, at every door the document names', () =>
       };
 
       const crafted = { $ne: null };
+
+      /**
+       * A value this schema would accept, so the request is refused for the
+       * field being tested and not for a companion that was never sent.
+       */
+      type Schema = {
+        type?: string | string[];
+        enum?: unknown[];
+        properties?: Record<string, Schema>;
+        required?: string[];
+        items?: Schema;
+        minimum?: number;
+        maxLength?: number;
+      };
+      const plausible = (schema: Schema): unknown => {
+        if (schema.enum?.length) return schema.enum[0];
+        const type = Array.isArray(schema.type) ? schema.type[0] : schema.type;
+        if (type === 'integer' || type === 'number') return schema.minimum ?? 1;
+        if (type === 'boolean') return true;
+        if (type === 'array') return schema.items ? [plausible(schema.items)] : [];
+        if (type === 'object') return Object.fromEntries(
+          (schema.required ?? []).map((name) => [name, plausible(schema.properties?.[name] ?? {})]),
+        );
+        return 'x';
+      };
+
+      /** Every place a value sits, including the ones inside other values. */
+      const places = (schema: Schema, trail: string[] = []): string[][] =>
+        Object.entries(schema.properties ?? {}).flatMap(([name, child]) => {
+          const here = [...trail, name];
+          const type = Array.isArray(child.type) ? child.type[0] : child.type;
+          if (type === 'object' && child.properties) return [here, ...places(child, here)];
+          if (type === 'array' && child.items?.properties) return [here, ...places(child.items, [...here, '0'])];
+          return [here];
+        });
+
+      const put = (into: Record<string, unknown>, trail: string[], value: unknown): void => {
+        let at: Record<string, unknown> | unknown[] = into;
+        for (let i = 0; i < trail.length - 1; i += 1) {
+          const key = trail[i]!;
+          const next = trail[i + 1]!;
+          const holder = at as Record<string, unknown>;
+          if (holder[key] === undefined || typeof holder[key] !== 'object') {
+            holder[key] = /^\d+$/.test(next) ? [] : {};
+          }
+          at = holder[key] as Record<string, unknown>;
+        }
+        (at as Record<string, unknown>)[trail[trail.length - 1]!] = value;
+      };
+
       const broke: string[] = [];
+      let walked = 0;
       for (const [path, operations] of Object.entries(doc.paths)) {
         for (const [method, operation] of Object.entries(operations)) {
           if (!['post', 'put', 'patch', 'delete'].includes(method)) continue;
@@ -1572,34 +1623,42 @@ describe('a shape where a name belongs, at every door the document names', () =>
             .replace('{slug}', 'a-card')
             .replace('{id}', 'nothing-by-that-name')
             .replace('{handle}', 'nobody');
-          const fields = Object.keys(
-            operation.requestBody?.content?.['application/json']?.schema?.properties ?? {},
-          );
+          const schema = (operation.requestBody?.content?.['application/json']?.schema ?? {}) as Schema;
+          const trails = places(schema);
           // A door the document gives no fields is either one that reads no
           // body at all or one whose body it does not describe, and the second
           // is exactly where this went wrong. Both get a body anyway.
-          const bodies =
-            fields.length > 0
-              ? fields.map((field) => ({ [field]: crafted }))
+          const bodies: Record<string, unknown>[] =
+            trails.length > 0
+              ? trails.map((trail) => {
+                  const body = plausible(schema) as Record<string, unknown>;
+                  put(body, trail, crafted);
+                  return body;
+                })
               : [
                   { client_id: registered.client_id, client_secret: crafted, grant_type: 'client_credentials' },
                   { client_id: crafted, client_secret: 'whatever', grant_type: 'client_credentials' },
                 ];
-          for (const payload of bodies) {
+          for (const [n, payload] of bodies.entries()) {
             const answer = await harness.server.inject({
               method: method.toUpperCase() as 'POST',
               url,
               headers: { ...authed(project), 'content-type': 'application/json' },
               payload,
             });
+            walked += 1;
             if (answer.statusCode >= 500) {
-              broke.push(`${method.toUpperCase()} ${path} on ${Object.keys(payload)[0]}: ${answer.statusCode}`);
+              broke.push(`${method.toUpperCase()} ${path} on ${(trails[n] ?? ['body']).join('.')}: ${answer.statusCode}`);
             }
           }
         }
       }
 
       assert.deepEqual(broke.sort(), [], 'a crafted value is refused or ignored, never answered with a 5xx');
+      // A floor, because the failure this guards against is the walk quietly
+      // shrinking: a schema read that returns nothing leaves every assertion
+      // above it true. Sixty is well under what it visits today.
+      assert.ok(walked >= 60, `it visited the doors rather than counting them: ${walked}`);
     } finally {
       await harness.stop();
     }
