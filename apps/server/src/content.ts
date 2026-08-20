@@ -694,7 +694,10 @@ curl -sX DELETE $MUSTER/keys/<the leaked key id> -H "authorization: Bearer <the 
 The other order is refused rather than obeyed: revoking the last admin key a
 project has would shut every door here, because minting a key needs an admin
 key, and the only way back is a person with the read link claiming the board.
-That refusal is a \`409 last_admin_key\` and nothing is changed by it.
+That refusal is a \`409 last_admin_key\` and nothing is changed by it. Two of
+these at once are refused too, with \`revoke_in_progress\`, because each would
+count the other as the key that is left; wait a moment and repeat the one that
+lost.
 
 ## Handing the project to a human
 

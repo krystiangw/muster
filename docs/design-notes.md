@@ -1716,27 +1716,31 @@ count as the one that is left, because an expired admin key is not a door.
 Worker keys are never refused: they cannot mint anything, so nothing depends on
 the last one.
 
-**Every failure here has to leave the key alive**, and both obvious shapes fail
-the other way. Counting first and writing after loses to two loops of one fleet
-reacting to the same leak: each sees the other key still alive, both proceed,
-and the project ends with none. Writing first and putting the key back when the
-count comes up empty was the version that shipped for twenty minutes, and review
-found what it cost: a store that goes away between the two writes never puts the
-key back, and the retry then answers 404 because the key is already revoked. The
-same lockout, reached through the door that was meant to close it.
+**Every failure here has to leave the key alive**, and three shapes were tried
+before one did. Counting first and writing after lets two revocations each count
+the other as the key that is left. Writing first and putting the key back when
+the count comes up empty shipped for twenty minutes, and review found what it
+costs: a store that goes away between the two writes never puts the key back,
+and the retry then answers 404 because the key is already revoked. The same
+lockout, through the door built to close it. A version number bumped between the
+count and the write looked like the fix and is not, which review also caught:
+bumping a number is not holding it, so the loser re-reads, passes, and revokes
+while the winner is still on its way to the key.
 
-So the count competes for a version on the project. A revocation may act only on
-a count it took while holding the epoch it read; the loser re-reads instead of
-proceeding, and a crash anywhere in the sequence leaves at worst a bumped number
-and a key that still works. The epoch is not a count of anything, and deliberately
-not a cached number of admin keys: a denormalised count drifts the moment a key
-expires rather than being revoked, and a drifted count is a lockout waiting for
-the next call.
+This is the only call in the service whose answer depends on documents other
+than the one it writes, so it is the only one that cannot read and write
+separately. The count and the write happen under a hold on the project, taken in
+one conditional update and given back in one more. A second revocation arriving
+meanwhile is refused with `revoke_in_progress` rather than guessing, which is
+the same answer this product gives everywhere else it cannot know. The hold is a
+moment it lapses rather than a flag, so a process that dies mid-revocation locks
+nothing for longer than ten seconds. No count is cached anywhere on purpose: a
+denormalised number of admin keys drifts the first time one expires instead of
+being revoked, and a drifted count is a lockout waiting for the next call.
 
-Both failure modes are pinned by tests, and neither could be written casually.
-The race forces its own interleaving by holding each call at its count until the
-other has reached its own; run as two ordinary concurrent requests it proves
-nothing, because the pair serialises and passes under the broken order, measured
-eight times out of eight. The outage test takes the store away between the write
-and the write that would undo it, which is the review's scenario made
-mechanical.
+Four tests, one per part, each failing when its part is removed: the hold
+unchecked, the hold that never lapses, the hold never given back, and the store
+disappearing mid-call. None of them could be written casually. The race forces
+its own interleaving by holding the first call inside its count until the second
+has been answered; run as two ordinary concurrent requests the pair serialises
+and passes under every broken order, measured eight times out of eight.
