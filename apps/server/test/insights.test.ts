@@ -423,12 +423,24 @@ describe('who owns what', () => {
 });
 
 describe('counting the people, not the agents', () => {
+  /**
+   * What a browser sends on a top level navigation, which is how this service
+   * tells one from a script: the user agent string is a claim anybody can
+   * make, and these headers are the ones a browser cannot help sending.
+   */
+  const browser = {
+    'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1.15',
+    accept: 'text/html,application/xhtml+xml,application/xml;q=0.9',
+    'sec-fetch-mode': 'navigate',
+    'sec-fetch-dest': 'document',
+  };
+
   it('records a page view per page, and never the token in the URL', async () => {
     const project = await createProject(harness, 'watched');
     const readToken = project.readUrl.split('/r/')[1]!;
 
     for (const url of ['/', '/docs', '/pricing', '/', `/r/${readToken}`, `/r/${readToken}/board`]) {
-      await harness.server.inject({ method: 'GET', url });
+      await harness.server.inject({ method: 'GET', url, headers: browser });
     }
     await flushEvents();
 
@@ -471,7 +483,7 @@ describe('counting the people, not the agents', () => {
     assert.equal(quiet.pages.board ?? 0, before.pages.board ?? 0);
     assert.equal(quiet.pages.landing ?? 0, before.pages.landing ?? 0, 'and neither is a HEAD');
 
-    await harness.server.inject({ method: 'GET', url: `/r/${readToken}` });
+    await harness.server.inject({ method: 'GET', url: `/r/${readToken}`, headers: browser });
     await flushEvents();
     assert.equal((await insights(harness.store)).pages.project ?? 0, (before.pages.project ?? 0) + 1);
   });
@@ -512,13 +524,31 @@ describe('counting the people, not the agents', () => {
     await flushEvents();
     assert.equal((await insights(harness.store)).pages.signup ?? 0, before, 'still nobody');
 
-    await harness.server.inject({
-      method: 'GET',
-      url: '/signup',
-      headers: { 'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1.15' },
-    });
+    await harness.server.inject({ method: 'GET', url: '/signup', headers: browser });
     await flushEvents();
     assert.equal((await insights(harness.store)).pages.signup ?? 0, before + 1);
+  });
+
+  it('counts a page an agent read beside the ones people read, not inside them', async () => {
+    // The filter that was supposed to tell them apart named curl and wget and
+    // nothing else, so a script written with the HTTP client agents actually
+    // use arrived as somebody reading. The rule is about the class now: a
+    // browser cannot help sending these headers and a script does not send
+    // them, whatever it puts in its user agent string.
+    await flushEvents();
+    const before = await insights(harness.store);
+    for (const headers of [
+      { 'user-agent': 'python-requests/2.32.3' },
+      { 'user-agent': 'node-fetch/3.3.2', accept: '*/*' },
+      { 'user-agent': 'Mozilla/5.0 (compatible) ChatGPT-User/1.0', accept: 'text/html', 'sec-fetch-mode': 'navigate' },
+    ]) {
+      await harness.server.inject({ method: 'GET', url: '/pricing', headers });
+    }
+    await flushEvents();
+
+    const after = await insights(harness.store);
+    assert.equal(after.pages.pricing ?? 0, before.pages.pricing ?? 0, 'none of those was a person');
+    assert.equal(after.pagesByAgents, before.pagesByAgents + 3, 'and all three were read all the same');
   });
 
   it('measures how long a human takes, not how long an agent takes', async () => {

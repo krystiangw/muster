@@ -138,7 +138,35 @@ const INDEXER = /bot\b|bot\/|crawler|spider|slurp|feedfetcher|scrapy/i;
  * the "how often are we crawled" bucket and left "reads per signup" dividing
  * by the wrong number. On a page view it is still not a person.
  */
-const FETCHER = /curl\/|wget/i;
+const FETCHER = /curl\/|wget|python-requests|node-fetch|okhttp|go-http-client|axios|httpx/i;
+
+/**
+ * The ones that fetch a page because a person asked a model to.
+ *
+ * Named rather than caught by the rule below, because they are the tools most
+ * likely to send exactly what a browser sends. They are not indexers: nothing
+ * is being put in an index, somebody typed a question somewhere else and this
+ * page is part of the answer. They are not people either, by the definition
+ * this file already uses: `pages` says "people only" and means the half of the
+ * funnel agents cannot show.
+ */
+const ON_SOMEBODY_S_BEHALF = /chatgpt-user|claude-user|perplexity-user|oai-searchbot|duckassist/i;
+
+/**
+ * Did a browser ask for this page?
+ *
+ * A rule about the class rather than a longer list of clients, because the
+ * list is what ages: `curl` and `wget` were on it and `python-requests` was
+ * not, so a script written in the language most agents are written in counted
+ * as somebody reading. Every current browser sends `Sec-Fetch-*` on a top
+ * level navigation, and one old enough not to still asks for `text/html`;
+ * curl and its cousins ask for `*` and send neither header.
+ */
+function fromABrowser(headers: Record<string, string | string[] | undefined>): boolean {
+  if (Object.keys(headers).some((name) => name.startsWith('sec-fetch-'))) return true;
+  const accept = headers.accept;
+  return typeof accept === 'string' && accept.includes('text/html');
+}
 
 /**
  * Us, checking on ourselves.
@@ -391,7 +419,13 @@ export function record(
  */
 export interface ViewedRequest {
   method: string;
-  headers: { 'user-agent'?: string | undefined; referer?: string | undefined };
+  headers: {
+    'user-agent'?: string | undefined;
+    referer?: string | undefined;
+    accept?: string | undefined;
+    /** Whatever `Sec-Fetch-*` the client sent, which is how a browser says it is one. */
+    [header: string]: string | string[] | undefined;
+  };
 }
 
 /**
@@ -454,9 +488,28 @@ export function recordView(
   // Fastify answers HEAD from the same handler as GET, so a probe that never
   // received a body would otherwise read as somebody looking at the page.
   if (request.method !== 'GET') return;
-  if (isCrawler(request.headers['user-agent'])) return;
+  // An indexer is dropped and a tool is not. Putting a page in an index is not
+  // reading it, and there is no second question about it: nobody wants to know
+  // how many times Googlebot opened the pricing page. A tool somebody is
+  // driving did read the page, and how often that happens is half of what
+  // these pages exist to tell us, so it is counted under a door of its own
+  // rather than thrown away at the door.
+  if (isIndexer(request.headers['user-agent'])) return;
   const from = arrivedFrom(request.headers.referer, self);
-  record(store, 'view', { door: 'browser', detail: page, ...(from ? { from } : {}) });
+  // Recorded either way, counted apart. `browser` is a claim about a person,
+  // and the report that reads these says so in as many words, so a page an
+  // agent read has to arrive under a different door rather than be dropped:
+  // how much of this is read by agents is the other half of the same question
+  // and the half this product exists for.
+  //
+  // Both halves, because neither is enough on its own. The header rule catches
+  // the tools nobody has heard of, which is what the named list could never
+  // do; the named list catches the ones that ask for `text/html` anyway, and
+  // curl asking for HTML is not a hypothetical, it is the shape of every
+  // example in our own protocol.
+  const agent = request.headers['user-agent'] ?? '';
+  const person = fromABrowser(request.headers) && !FETCHER.test(agent) && !ON_SOMEBODY_S_BEHALF.test(agent);
+  record(store, 'view', { door: person ? 'browser' : 'http', detail: page, ...(from ? { from } : {}) });
 }
 
 /**
@@ -578,6 +631,15 @@ export interface Insights {
   pages: Record<string, number>;
   /** Views in the last seven days, so a trend is visible without a chart. */
   pagesLastWeek: number;
+  /**
+   * The same pages, opened by something that was not a browser.
+   *
+   * Beside `pages` rather than inside it, and printed even when it is zero.
+   * Every page here is written for two readers and only one of them has a
+   * browser, so the number that says how often the other one read it is not a
+   * footnote: it went missing entirely while both were counted as one.
+   */
+  pagesByAgents: number;
   /** What is on the boards right now, across every project. */
   live: {
     projects: number;
@@ -759,6 +821,7 @@ export async function insights(store: Store, now = new Date()): Promise<Insights
     doorRows,
     pageRows,
     viewsLastWeek,
+    viewsByAgents,
     projects,
     claimedProjects,
     openItems,
@@ -798,15 +861,20 @@ export async function insights(store: Store, now = new Date()): Promise<Insights
       .toArray(),
     store.events
       .aggregate<{ _id: string; count: number }>([
-        { $match: { kind: 'view' } },
+        // `browser` only, because this row is published as what people
+        // opened. Everything an agent read is counted beside it rather than
+        // in it.
+        { $match: { kind: 'view', door: 'browser' } },
         { $group: { _id: '$detail', count: { $sum: 1 } } },
         { $sort: { count: -1 } },
       ])
       .toArray(),
     store.events.countDocuments({
       kind: 'view',
+      door: 'browser',
       at: { $gte: new Date(now.getTime() - 7 * 86_400_000) },
     }),
+    store.events.countDocuments({ kind: 'view', door: { $ne: 'browser' } }),
     store.projects.countDocuments({}),
     store.projects.countDocuments({ claimedBy: { $ne: null } }),
     store.items.countDocuments({ status: { $nin: ['done', 'dropped'] } }),
@@ -914,6 +982,7 @@ export async function insights(store: Store, now = new Date()): Promise<Insights
     answerDoors: Object.fromEntries(answerDoorRows.map((row) => [row._id, row.count])),
     pages: Object.fromEntries(pageRows.map((row) => [row._id, row.count])),
     pagesLastWeek: viewsLastWeek,
+    pagesByAgents: viewsByAgents,
     live: {
       projects,
       claimedProjects,

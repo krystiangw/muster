@@ -233,6 +233,12 @@ if (fileRows.length > 0) {
 const pageRows = Object.entries(report.pages).sort((a, b) => b[1] - a[1]);
 if (pageRows.length > 0) {
   console.log('\nPages people opened');
+  // Said first, because the row below it is the one that gets quoted. Every
+  // page here is written for two readers and only one of them has a browser;
+  // for most of this service's life both were counted as one number called
+  // people, and the client written in the language agents are written in was
+  // on neither side of the filter that was supposed to tell them apart.
+  console.log(`  ${'(and'} ${report.pagesByAgents} opened by something that was not a browser)`);
   for (const [page, n] of pageRows) {
     // The board is the one row here that was not people for most of its life,
     // and this is the line somebody reads first, so it says so where it is read

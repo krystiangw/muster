@@ -106,7 +106,17 @@ describe('the scripts that check production, run against a harness', () => {
     // lives under that table.
     const watched = await createProject(harness, 'watched');
     const readToken = (await harness.store.projects.findOne({ _id: watched.id }))!.readToken;
-    await harness.server.inject({ method: 'GET', url: `/r/${readToken}/board` });
+    // With the headers a browser sends, because that is what the report's
+    // "pages people opened" now means and this seeds exactly that table.
+    await harness.server.inject({
+      method: 'GET',
+      url: `/r/${readToken}/board`,
+      headers: {
+        'user-agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/605.1.15',
+        accept: 'text/html,application/xhtml+xml',
+        'sec-fetch-mode': 'navigate',
+      },
+    });
     await flushEvents();
     const out = (
       await run(process.execPath, ['--import', 'tsx', 'tools/insights.mts'], {
