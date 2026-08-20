@@ -1650,3 +1650,42 @@ The surprise worth writing down is `unique`: a plain index and a unique one on
 the same key coexist, so a definition tightening from one to the other is not
 resolved by the key at all. It is resolved because the declared name is already
 taken, which is the other half of the rule.
+
+## The header a client attaches for you, 2026-08-20
+
+Four routes on this server read no body: rotating the read link, revoking a key,
+running the hygiene pass, deleting an item. All four answered `400 bad_json`,
+"The body was empty", to a request that carried `content-type: application/json`
+and nothing else. That is not an exotic client. It is any client that builds its
+headers once and reuses them, which is what a shell wrapper around `fetch` is,
+and what mine was.
+
+Two of those four are the pair you use after a credential leaks. The sequence is
+mint a replacement, rotate the link, revoke the old key, and the middle step
+answering "the body was empty" reads, in that moment, as the rotation being
+refused. It was found that way and not by reading the code: the rotation failed
+in the middle of taking back a token that had been exposed.
+
+**The first fix inferred it and was wrong.** The obvious rule is "if the route
+declares no body schema, an empty body is fine". Measured, that rule is false
+here in both directions. `/mcp`, `/signup` and both OAuth endpoints declare no
+body schema and read a body all the same, so under that rule an empty signup
+form stopped being a sentence about the missing body and became the signup page
+answered 200, `/mcp` answered a garbled error object, and `/oauth/token`
+complained about a grant type nobody had sent. A missing schema means the route
+did not describe its body, not that it has none.
+
+**So the routes say it themselves**, `config: { bodyless: true }`, listed on the
+route where somebody editing it will see it, the same choice as the readiness
+list further up: an entry missing here leaves a route as it was, which is the
+harmless direction, while inferring it wrongly changed four answers nobody
+asked about.
+
+The second half of the condition is HTTP's own rather than ours. The header is
+dropped only when there is provably nothing to read: a content length of zero,
+or no length and no chunked encoding. Without that half the suite loses four
+tests, because a route that today ignores a body it was sent would start
+answering 415 instead.
+
+Both halves are pinned by a test that fails when either is removed, and the
+counter-test is the list of routes the first attempt broke.

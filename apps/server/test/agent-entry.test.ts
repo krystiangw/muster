@@ -211,6 +211,56 @@ describe('A. discovery', () => {
     }
   });
 
+  it('does not argue about a header when the route asked for nothing', async () => {
+    // Measured, not assumed: every route here takes no body at all, and each
+    // one answered 400 "The body was empty" to a client that sets the header
+    // once for every call. Two of them are how a leaked credential is taken
+    // back, and that is not the moment to be told to send `{}`.
+    const project = await createProject(harness);
+    const key = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/keys`,
+      headers: authed(project),
+      payload: { name: 'spare', role: 'write' },
+    });
+    const item = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/items`,
+      headers: authed(project),
+      payload: { slug: 'a-thing-to-remove', title: 'a thing to remove', actor: 'someone' },
+    });
+    const json = { ...authed(project), 'content-type': 'application/json' };
+
+    for (const [method, url] of [
+      ['POST', `${project.api}/read-link/rotate`],
+      ['POST', `${project.api}/sweep`],
+      ['DELETE', `${project.api}/keys/${key.json().key.id}`],
+      ['DELETE', `${project.api}/items/a-thing-to-remove`],
+    ] as Array<['POST' | 'DELETE', string]>) {
+      const answer = await harness.server.inject({ method, url, headers: json });
+      assert.equal(answer.statusCode, 200, `${method} ${url}: ${answer.body.slice(0, 120)}`);
+    }
+  });
+
+  it('still says so when a route that wants a body is sent none', async () => {
+    // The other half of the rule above, and the list that made the first
+    // attempt at it wrong. Reading "no body schema" as "no body" looks right
+    // and is not: every route here declares none and reads one anyway, so an
+    // empty body stopped being a sentence about the empty body and became, in
+    // turn, a garbled error, an OAuth complaint about a grant type nobody
+    // sent, and a signup page answered 200 to a form with nothing in it.
+    for (const url of ['/p', '/mcp', '/signup', '/oauth/register', '/oauth/token']) {
+      const answer = await harness.server.inject({
+        method: 'POST',
+        url,
+        headers: { 'content-type': 'application/json' },
+        payload: '',
+      });
+      assert.equal(answer.statusCode, 400, url);
+      assert.equal(answer.json().error, 'bad_json', url);
+    }
+  });
+
   it('answers the handshake with a version it speaks, not with the one it was sent', async () => {
     // It used to echo, so a client asking for 1999-01-01 was told yes: we
     // claimed every revision that exists and several that do not, and a client

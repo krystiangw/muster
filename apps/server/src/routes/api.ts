@@ -942,6 +942,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
     scoped.delete(
       '/v1/:project/items/:slug',
       {
+        config: { bodyless: true },
         schema: {
           tags: ['items'],
           summary: 'Delete an item outright',
@@ -1627,6 +1628,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
     scoped.post(
       '/v1/:project/sweep',
       {
+        config: { bodyless: true },
         schema: {
           tags: ['hygiene'],
           summary: 'Run the hygiene rules now',
@@ -1770,7 +1772,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
 
     scoped.delete(
       '/v1/:project/keys/:id',
-      { schema: { tags: ['keys'], summary: 'Revoke a key' } },
+      { config: { bodyless: true }, schema: { tags: ['keys'], summary: 'Revoke a key' } },
       async (request) => {
         const { project } = requireAdmin(request);
         const { id } = request.params as { id: string };
@@ -1818,6 +1820,7 @@ export function registerApi(app: FastifyInstance, deps: ApiDeps): void {
     scoped.post(
       '/v1/:project/read-link/rotate',
       {
+        config: { bodyless: true },
         schema: {
           tags: ['projects'],
           summary: 'Replace the read link',

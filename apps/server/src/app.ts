@@ -43,6 +43,16 @@ declare module 'fastify' {
   interface FastifyReply {
     compressible?: boolean;
   }
+  interface FastifyContextConfig {
+    /**
+     * This route reads no body at all, so a client that attached
+     * `content-type: application/json` and sent nothing is not making a
+     * mistake. Set it on the route rather than inferred here, because a
+     * missing body schema does not mean the handler ignores the body: `/mcp`,
+     * `/signup` and the OAuth endpoints all declare none and all read one.
+     */
+    bodyless?: boolean;
+  }
 }
 
 /** One packet. Below it, the encoding header costs more than the saving. */
@@ -467,6 +477,41 @@ export async function buildApp(
    */
   server.addHook('onRequest', (request, _reply, done) => {
     asReader(request.headers['user-agent'], done);
+  });
+
+  /**
+   * A call with nothing to say, on a route that asks for nothing.
+   *
+   * Rotating a leaked read link takes no body, and neither does revoking a
+   * key. A client that sets `content-type: application/json` once, in the
+   * header object it reuses for every call, then sends nothing, and the parser
+   * refuses the request before the route is ever reached. Measured here rather
+   * than read off the framework: all four body-less routes answered 400 "The
+   * body was empty", and two of them are the pair you reach for in a hurry,
+   * after a token has leaked. There "the body was empty" reads as "the
+   * revocation was refused", which is the opposite of what happened.
+   *
+   * Which routes those are is declared on the routes, not inferred from a
+   * missing body schema. Inferring it was tried and measured wrong: `/mcp`,
+   * `/signup` and both OAuth endpoints declare no schema and read a body all
+   * the same, and treating them as body-less turned a sentence saying the body
+   * was empty into an empty signup page answered 200.
+   *
+   * The second half of the condition is HTTP's own: a length of zero, or no
+   * length and no chunking. A route that ignores a body it was sent keeps
+   * ignoring it rather than starting to answer 415.
+   */
+  server.addHook('onRequest', (request, _reply, done) => {
+    if (
+      request.routeOptions?.config?.bodyless === true &&
+      String(request.headers['content-type'] ?? '').toLowerCase().startsWith('application/json')
+    ) {
+      const length = request.headers['content-length'];
+      const silent =
+        length === undefined ? request.headers['transfer-encoding'] === undefined : length === '0';
+      if (silent) delete request.headers['content-type'];
+    }
+    done();
   });
 
   const NEEDS_THE_STORE = ['/p', '/v1', '/mcp', '/r', '/operator', '/oauth', '/signup'];
