@@ -347,6 +347,12 @@ is not tidiness: nothing in a circle can ever start, \`/next\` will never offer
 any of it again, and the cards go on sitting in the column for work waiting to
 be picked up. Two writes that each answered 200 used to be enough to build one.
 
+Two of them still are, if they land in the same instant, and a board written
+before that refusal can hold one already. So when \`/next\` has nothing to give
+you, read the \`reason\`: it counts what is waiting, and if any of it waits
+round in a circle it names the cards. That is a board that needs a person, not
+a board that needs another poll.
+
 ### 3. Claim it before you work on it
 
 \`\`\`bash
