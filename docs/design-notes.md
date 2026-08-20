@@ -1811,6 +1811,23 @@ silently, so it now also requires a row for every 409 and every 404 on the map.
 Removing the map fails the first half; adding a sentence to a door that never
 conflicts fails the second.
 
-What neither half can see is a door that starts conflicting and says nothing,
-because the reverse check can only ask whether what is written down happens.
-Both of the omissions review found were exactly that shape.
+What neither half could see is a door that starts refusing and says nothing,
+because both directions read from the map. Both omissions review found were
+exactly that shape, so the third check does not read the map at all: the harness
+records every 404 and 409 any test provokes, by the route pattern that answered
+it, and asserts on teardown that the document names each one. It runs in every
+file without a file having to ask, and it costs nothing measurable, the suite
+stays at 54 seconds.
+
+Two details make it work rather than nag. Routes hidden from the document are
+skipped, which is what keeps the browser doors out without anybody maintaining a
+list of exceptions. And the check runs *after* the harness is put away: the first
+version asserted first, so a failure left the server, the client and the mongod
+behind, the file reported one failure, and the process then hung forever rather
+than printing it.
+
+It found three more doors within a minute of existing, in files that were not
+about refusals at all: moving a card into a column that wants it claimed while
+somebody else holds it, verifying a claim nobody started, and withdrawing a
+question that is not there. The first of those is a 409 on the busiest verb the
+board has.

@@ -1982,6 +1982,9 @@ describe('the map every refusal points at', () => {
       // Not a name that matches nothing but a deployment that never opted in,
       // which is this harness: the door exists and declines to be one.
       { method: 'POST', url: '/feedback', path: '/feedback', payload: { title: 'nobody is listening' }, headers: { 'content-type': 'application/json' }, code: 404 },
+      // Nor a name: a conversation nobody started. Also found by the recorder,
+      // in another file, which is the point of it running everywhere.
+      { method: 'POST', url: `${project.api}/claim/verify`, path: '/v1/{project}/claim/verify', payload: { email: 'nobody@example.com', code: '000000' }, headers: admin, code: 404 },
       { method: 'DELETE', url: `${project.api}/keys/k_not_here`, path: '/v1/{project}/keys/{id}', headers: reading, code: 404 },
       { method: 'PATCH', url: `${project.api}/escalations/e_not_here`, path: '/v1/{project}/escalations/{id}', payload: { status: 'answered' }, headers: admin, code: 404 },
       { method: 'POST', url: `${project.api}/agents/not-here/rename`, path: '/v1/{project}/agents/{handle}/rename', payload: { to: 'other' }, headers: admin, code: 404 },
@@ -2091,6 +2094,17 @@ describe('the map every refusal points at', () => {
         code: 409,
       },
       { method: 'POST', url: `${project.api}/escalations/e_not_here/ack`, path: '/v1/{project}/escalations/{id}/ack', payload: { agent: 'nobody' }, headers: admin, code: 404 },
+      { method: 'POST', url: `${project.api}/escalations/e_not_here/withdraw`, path: '/v1/{project}/escalations/{id}/withdraw', payload: { agent: 'nobody', reason: 'no such question' }, headers: admin, code: 404 },
+      // Found by the recorder rather than by reading: a column that wants the
+      // card claimed, and a card somebody else is holding.
+      {
+        method: 'POST',
+        url: `${project.api}/items/held/move`,
+        path: '/v1/{project}/items/{slug}/move',
+        payload: { column: 'doing', actor: 'not-the-holder' },
+        headers: admin,
+        code: 409,
+      },
       // Reopening a question onto a queue with no room, and offering a board
       // that is somebody else's to offer. Both were answered by the deployment
       // and named nowhere, which is what the reverse check cannot see: it can

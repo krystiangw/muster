@@ -241,8 +241,24 @@ const NOT_FOUND = new Set([
   'post /v1/{project}/agents/{handle}/rename',
   'patch /v1/{project}/escalations/{id}',
   'post /v1/{project}/escalations/{id}/ack',
+  'post /v1/{project}/escalations/{id}/withdraw',
+  'post /v1/{project}/claim/verify',
   'post /feedback',
 ]);
+
+/**
+ * Where "no such thing under that name" would be a lie.
+ *
+ * Two of these doors answer 404 about something other than a name: one about a
+ * conversation nobody started, the other about a deployment that never opted in
+ * to having this door at all.
+ */
+const NOT_FOUND_SAYS: Record<string, string> = {
+  'post /v1/{project}/claim/verify':
+    'No claim is waiting for that address here, or the code it was started with has expired. Ask for a new one.',
+  'post /feedback':
+    'This deployment does not take reports from strangers. The door exists and declines to be one; nothing about the name you sent is wrong.',
+};
 
 // One. A lease is the only thing here two callers can want at the same instant
 // and only one can have; everything else that could collide was made a single
@@ -281,6 +297,8 @@ const CONFLICT_SAYS: Record<string, string> = {
     'There is no answer to act on: nobody has written one, or the question was taken back before anybody did. Or this agent acknowledged it already, and a second one would say nothing the first did not.',
   'post /v1/{project}/escalations/{id}/withdraw':
     'Already withdrawn, or already answered: taking back a question somebody has answered throws away the attention they spent on it, and acknowledging is the verb for that.',
+  'post /v1/{project}/items/{slug}/move':
+    'The column wants the card claimed and somebody else is holding it; or moving it there would reopen it onto a board with no room, which finishing work frees.',
   'patch /v1/{project}/escalations/{id}':
     'Reopening a question the project has no room for: the cap counts what is unanswered, and answering frees it.',
   'post /v1/{project}/share':
@@ -721,7 +739,15 @@ export async function buildApp(
             ...(path.startsWith('/v1/') ? TOKEN_DOOR : path === '/p' || path === '/feedback' ? OPEN_DOOR : []),
             ...(NOT_FOUND.has(key) ? ['404'] : []),
           ];
-          for (const code of codes) responses[code] ??= refusal(code);
+          for (const code of codes) {
+            responses[code] ??=
+              code === '404' && NOT_FOUND_SAYS[key]
+                ? {
+                    description: NOT_FOUND_SAYS[key],
+                    content: { 'application/json': { schema: { $ref: '#/components/schemas/Refusal' } } },
+                  }
+                : refusal(code);
+          }
           if (CONFLICT_SAYS[key]) {
             responses['409'] ??= {
               description: CONFLICT_SAYS[key],

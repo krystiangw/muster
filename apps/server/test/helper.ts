@@ -1,3 +1,4 @@
+import assert from 'node:assert/strict';
 import { MongoMemoryReplSet, MongoMemoryServer } from 'mongodb-memory-server';
 import type { FastifyInstance } from 'fastify';
 import { buildApp, type BuildOverrides } from '../src/app.js';
@@ -75,7 +76,40 @@ export async function startHarness(
   });
   const store = await createStore(config.mongoUri, config.mongoDb);
   const { server, limiter, notifier } = await buildApp(config, store, build);
+
+  /**
+   * Every refusal this harness answers, by the route that answered it.
+   *
+   * The map of codes in the published document is written by hand, and twice in
+   * one night it was found naming a code on one door while another door
+   * answered it in silence. The test that guards it can only ask whether what
+   * is written down happens, so a door that starts refusing says nothing.
+   *
+   * This asks the other question, and asks it of the whole suite rather than of
+   * a list somebody keeps: whatever any test here provokes, on any route the
+   * document describes, the document has to name. Routes hidden from the
+   * document are hidden from this too, which is what keeps the browser doors
+   * out without a list of exceptions.
+   */
+  const answered = new Map<string, Set<number>>();
+  server.addHook('onSend', (request, reply, payload, done) => {
+    const status = reply.statusCode;
+    const pattern = request.routeOptions?.url;
+    if (pattern && (status === 404 || status === 409)) {
+      const path = pattern.replace(/:([A-Za-z_]+)/g, '{$1}');
+      const key = `${request.method.toLowerCase()} ${path}`;
+      const seen = answered.get(key) ?? new Set<number>();
+      seen.add(status);
+      answered.set(key, seen);
+    }
+    done(null, payload);
+  });
+
   await server.ready();
+  // Read once, while this server is healthy, because the last thing several
+  // test files do is take the database away.
+  const documented = (await server.inject({ method: 'GET', url: '/openapi.json' })).json()
+    .paths as Record<string, Record<string, { responses?: Record<string, unknown> }>>;
 
   return {
     server,
@@ -84,10 +118,15 @@ export async function startHarness(
     limiter,
     notifier,
     stop: async () => {
+      // Everything is put away first and the reading is judged after. The
+      // first version asserted before this, and a failure then left the server,
+      // the client and the mongod behind: the file reported one failure and the
+      // process never exited.
       limiter.stop();
       await server.close();
       await store.close();
       await releaseMongo();
+      refusalsAreOnTheMap(documented, answered);
     },
   };
 }
@@ -169,4 +208,27 @@ export async function signIn(harness: Harness, email: string): Promise<OperatorS
     form: (fields) =>
       new URLSearchParams({ csrf, ...fields }).toString(),
   };
+}
+
+/**
+ * Checked as the harness comes down, so no test file has to remember to ask.
+ *
+ * Only what this harness actually answered, and only for operations the
+ * document describes: a route hidden from the document is a browser door, and
+ * those are not the contract this guards.
+ */
+function refusalsAreOnTheMap(
+  documented: Record<string, Record<string, { responses?: Record<string, unknown> }>>,
+  answered: Map<string, Set<number>>,
+): void {
+  const missing: string[] = [];
+  for (const [key, codes] of answered) {
+    const [method, path] = key.split(' ') as [string, string];
+    const operation = documented?.[path]?.[method];
+    if (!operation) continue;
+    for (const code of codes) {
+      if (!operation.responses?.[String(code)]) missing.push(`${method.toUpperCase()} ${path} answered ${code}`);
+    }
+  }
+  assert.deepEqual(missing.sort(), [], 'every refusal these tests provoked is named in the document');
 }
