@@ -594,10 +594,10 @@ pass it back as \`cursor=\`.
 A value of the wrong shape gets the same treatment as a name this service does
 not know: a 400 that names the field, and nothing written. A title that arrives
 as an object is not a card with no title, and \`then.priority\` that arrives as
-text is not a card filed without a priority. Read the field out of the message rather
-than the code: the code says which check caught it, several of them can, and
-which one depends on the door you came through and how deep the field sits.
-The exceptions are the two fields that take whatever you put in them,
+text is not a card filed without a priority. Read the field out of the message
+rather than the code: the code says which check caught it, several of them
+can, and which one depends on the door you came through and how deep the field
+sits. The exceptions are the two fields that take whatever you put in them,
 \`fields\` and \`meta\`, where an object is the point.
 
 ## Watching for what changed
