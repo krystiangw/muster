@@ -477,6 +477,53 @@ const run = async () => {
     JSON.stringify(health),
   );
 
+  /**
+   * The two doors you use in a hurry, and the one refusal that keeps a board
+   * openable.
+   *
+   * Both were broken here on 2026-08-20 and both were found by using them
+   * rather than by reading them: a body-less call refused the `content-type`
+   * header every HTTP client attaches by default, and revoking the only admin
+   * key answered `{"ok":true}` and shut every door on the project. Neither is
+   * something an agent does daily, which is exactly why the daily walk should
+   * be the thing that notices when they stop working.
+   */
+  const swept = await json(`${api}/sweep`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+  });
+  check(
+    'a call that takes no body accepts the header anyway',
+    swept.status === 200,
+    `${swept.status} ${JSON.stringify(swept.body).slice(0, 120)}`,
+  );
+
+  const keys = await json(`${api}/keys`, { headers: { authorization: `Bearer ${token}` } });
+  const live = (keys.body?.keys ?? []).filter((one) => !one.revoked_at && one.role === 'admin');
+  const onlyOne = live.length === 1 ? live[0] : null;
+  if (onlyOne) {
+    const refused = await json(`${api}/keys/${onlyOne.id}`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    check(
+      'and the last admin key cannot revoke itself',
+      refused.status === 409 && refused.body?.error === 'last_admin_key',
+      `${refused.status} ${JSON.stringify(refused.body).slice(0, 120)}`,
+    );
+    const still = await json(api, { headers: { authorization: `Bearer ${token}` } });
+    check('the refusal left the key working', still.status === 200, still.status);
+  } else {
+    // Not a failure: this project has been given a second admin key by hand,
+    // and the refusal is only about the last one. Said out loud rather than
+    // skipped silently, because a step that quietly stops running is the
+    // failure this whole script exists to catch.
+    check(
+      `and the last admin key cannot revoke itself (skipped: ${live.length} admin keys here)`,
+      true,
+    );
+  }
+
   console.log('\nthe same board over MCP');
   const tools = await mcp(token, 'tools/list', {});
   check('the tools are listed', (tools.result?.tools ?? []).length > 0);
