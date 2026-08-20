@@ -194,9 +194,8 @@ function noSuchProject(request: FastifyRequest): string {
     `<h1>No such project</h1>
      <p>That link is wrong, or the project expired and was deleted, or it is private. All three
      read the same from here, on purpose.</p>
-     <p>If you believe it is yours, <a href="/operator">sign in</a>: a board is private from the
-     moment somebody claims it, and then the link alone opens it for nobody but its owner and the
-     addresses they named.</p>`,
+     <p>If you believe it is yours, <a href="/operator">sign in</a>: a private board opens for its
+     owner and for the addresses they named, and for nobody else holding the link.</p>`,
   );
 }
 
