@@ -2391,3 +2391,13 @@ whole production database.
 Which then needed two shapes of the sentence, because "and some of them" wants
 a them. With nothing in the count to refer back to, a clause bolted onto an
 empty string says "some of them" about nothing at all.
+
+**And the door a fleet is pointed at was the quieter one.** There are two
+offers: one looks, one takes the lease in the same call, and skill.md tells a
+fleet to use the second because it is one write instead of two. The second
+answered "nothing open in this project" and stopped, while the first counted
+what was being withheld and named any circle in it. Found twice within a
+minute, once by a probe comparing the two doors and once by review, which is
+about as clear a signal as this repository gets that a sentence living in one
+function is a sentence the door beside it does not have. It lives in one
+function now, and a test asserts both doors return the same string.

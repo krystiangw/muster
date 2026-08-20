@@ -3856,6 +3856,19 @@ describe('cards waiting on each other', () => {
     assert.doesNotMatch(parkedReason, /items are waiting/, 'none of them was on offer to withhold');
     assert.doesNotMatch(parkedReason, /some of them/, 'there is no count for "them" to mean');
 
+    // Both doors, because skill.md points a fleet at the one that takes the
+    // lease in the same call, and that one used to stop at "nothing open in
+    // this project" while the door beside it counted and named. The door the
+    // fleets are pointed at was the quieter of the two.
+    const taking = await harness.server.inject({
+      method: 'POST',
+      url: `${project.api}/next`,
+      headers: { ...authed(project), 'content-type': 'application/json' },
+      payload: { agent: 'somebody' },
+    });
+    assert.equal(taking.json().item, null);
+    assert.equal(taking.json().reason, reason, 'both offers say the same thing');
+
     // And a board with no circle keeps the plain sentence, so the new half
     // does not turn every quiet board into a warning.
     const plain = await createProject(harness);

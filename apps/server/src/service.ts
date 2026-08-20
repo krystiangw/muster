@@ -2167,6 +2167,41 @@ export function circlesAmong(waiting: Map<string, string[]>): string[][] {
   return found;
 }
 
+/**
+ * Why there is nothing to hand over, in the words both offers use.
+ *
+ * There are two doors: one looks, one takes the lease in the same call, and
+ * skill.md tells a fleet to use the second. The second said "nothing open in
+ * this project" and stopped, while the first counted what was being withheld
+ * and, later, named any circle in it. The door the fleets are pointed at was
+ * the quieter of the two, which is the wrong way round.
+ *
+ * `waiting` is the open cards being withheld, which is the count; the circle
+ * is looked for across every card that is not finished, because a card parked
+ * on a person is not withheld work but is as stuck as any other.
+ */
+export async function whyNothing(
+  store: Store,
+  projectId: string,
+  waiting: string[],
+): Promise<string> {
+  const said =
+    waiting.length === 0
+      ? ''
+      : `; ${waiting.length} ${waiting.length === 1 ? 'item is' : 'items are'} waiting on other cards`;
+  const circles = circlesAmong(await waitingBlockers(store, projectId));
+  if (circles.length === 0) return said;
+  const naming = circles.map((circle) => circle.join(' waits on ')).join('; ');
+  const tail = `${circles.length === 1 ? 'a circle' : `${circles.length} circles`}, which nothing will free: ${naming}. Take one card out of one of those lists.`;
+  // Two shapes, because "some of them" needs a them. When nothing open is
+  // waiting, the count above is not there to refer back to, and a sentence
+  // built by adding a clause to an empty one says "and some of them" about
+  // nothing at all.
+  return said === ''
+    ? `; some cards here wait round in ${tail}`
+    : `${said}, and some of them wait round in ${tail}`;
+}
+
 export async function waitingSlugs(store: Store, projectId: string): Promise<string[]> {
   return [...(await waitingBlockers(store, projectId, ['open'])).keys()];
 }
@@ -2984,8 +3019,8 @@ export async function nextItemHeld(
       claimed: false,
       reason:
         otherCount > 0
-          ? `nothing open in your scope; ${otherCount} open ${otherCount === 1 ? 'item belongs' : 'items belong'} to other scopes. Widen your scope on purpose, or leave them alone.`
-          : 'nothing open in this project',
+          ? `nothing open in your scope; ${otherCount} open ${otherCount === 1 ? 'item belongs' : 'items belong'} to other scopes. Widen your scope on purpose, or leave them alone.${await whyNothing(store, project._id, waiting)}`
+          : `nothing open in this project${await whyNothing(store, project._id, waiting)}`,
     };
   }
 
@@ -2994,7 +3029,11 @@ export async function nextItemHeld(
     void touchAgent(store, project._id, handle);
     return { item: any as ItemDoc, reason: 'oldest untouched open item', claimed: true };
   }
-  return { item: null, claimed: false, reason: 'nothing open in this project' };
+  return {
+    item: null,
+    claimed: false,
+    reason: `nothing open in this project${await whyNothing(store, project._id, waiting)}`,
+  };
 }
 
 /**
@@ -3045,45 +3084,7 @@ export async function nextItem(
   const blocked = await waitingBlockers(store, project._id, ['open']);
   const waiting = [...blocked.keys()];
   if (waiting.length > 0) base.slug = { $nin: waiting };
-  /**
-   * What is waiting, and whether any of it waits round in a circle.
-   *
-   * Said only when there is nothing to hand over, which is the moment somebody
-   * is asking why. The count on its own reads as "somebody else will finish
-   * those", and in a circle nobody will: those cards sit in the column for
-   * work waiting to be picked up and nothing ever offers them again. The write
-   * door refuses a list that closes a circle, so what turns up here is a board
-   * written before that refusal, or two requests that closed one in the same
-   * instant.
-   *
-   * The circle is looked for across every card that is not finished, while the
-   * count above stays open cards alone. A card somebody parked as `blocked` is
-   * as stuck in a circle as any other, and leaving it out made the walk treat
-   * it as the end of the chain and see nothing; counting it as withheld work
-   * would report something that was never on offer. Two questions, two sets.
-   */
-  const sayWaiting = async (): Promise<string> => {
-    const said =
-      waiting.length === 0
-        ? ''
-        : `; ${waiting.length} ${waiting.length === 1 ? 'item is' : 'items are'} waiting on other cards`;
-    // Looked for whether or not anything open is waiting, which is the third
-    // time this has been drawn too narrow. A circle every one of whose cards
-    // is parked on a person contributes nothing to the count above, and is
-    // exactly the deadlock worth naming: when those people answer, the cards
-    // go back to open and still cannot start.
-    const circles = circlesAmong(await waitingBlockers(store, project._id));
-    if (circles.length === 0) return said;
-    const naming = circles.map((circle) => circle.join(' waits on ')).join('; ');
-    const tail = `${circles.length === 1 ? 'a circle' : `${circles.length} circles`}, which nothing will free: ${naming}. Take one card out of one of those lists.`;
-    // Two shapes, because "some of them" needs a them. When nothing open is
-    // waiting, the count above is not there to refer back to, and a sentence
-    // built by adding a clause to an empty one says "and some of them" about
-    // nothing at all.
-    return said === ''
-      ? `; some cards here wait round in ${tail}`
-      : `${said}, and some of them wait round in ${tail}`;
-  };
+  const sayWaiting = (): Promise<string> => whyNothing(store, project._id, waiting);
   const sort = { priority: -1 as const, touchedAt: 1 as const };
 
   const scope = agent?.scope ?? [];
