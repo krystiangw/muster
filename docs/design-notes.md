@@ -2401,3 +2401,12 @@ minute, once by a probe comparing the two doors and once by review, which is
 about as clear a signal as this repository gets that a sentence living in one
 function is a sentence the door beside it does not have. It lives in one
 function now, and a test asserts both doors return the same string.
+
+Measured rather than waved at, because this repository has published three
+performance sentences that turned out to be untrue in a way nobody checked: an
+empty offer costs four queries on a board that uses `blocked_by` nowhere and
+five on one that does. The extra one is the price of not reporting a deadlock
+as an ordinary quiet queue, and it is paid on the one call that has nothing
+else to do. If it ever matters, the saving is to project `status` alongside
+`blockedBy` and derive both sets from one read, rather than asking twice with
+two different status filters.
