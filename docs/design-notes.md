@@ -1626,12 +1626,22 @@ assumed, creating a second index on the same key:
 | `expireAfterSeconds: 3600` **and partial** | `expireAfterSeconds: 0` | coexist |
 | `expireAfterSeconds: 3600` **and unique** | `expireAfterSeconds: 0` | coexist |
 | `expireAfterSeconds: 3600` **and sparse** | `expireAfterSeconds: 0` | coexist |
+| `hidden`, otherwise identical | visible | refused, 85 |
+| `hidden` with a different ttl | visible | refused, 85 |
 
-The last three are what turn this from a list into a rule. Two lifetimes on one
-key are fine as long as anything else about the two indexes differs. The only
-pair MongoDB refuses is **two that are the same index apart from how long they
-keep a row**, which is one comparison: the shape with the lifetime left out of
-it. So the recovery drops the name being asked for, whatever is under it, and
+Those middle three are what turn this from a list into a rule. Two lifetimes on
+one key are fine as long as anything else about the two indexes differs. And
+hiding an index is not a difference at all: every hidden-against-visible pair is
+refused, down to a plain index against a plain index, which is the one row here
+that reads backwards, since `hidden` is precisely the flag that makes an index
+stop doing its job.
+
+So MongoDB refuses two kinds of second index on a key: **one that is the same
+apart from how long it keeps a row, and one that is the same apart from being
+hidden**. That is one comparison, the shape with those two left out of it, and
+it wants its own name rather than a flag on the other one: asking the wrong
+question is silent both ways, too wide and the boot deletes somebody's index on
+the way past, too narrow and it leaves a blocker and never starts. So the recovery drops the name being asked for, whatever is under it, and
 that one index. Everything else on the key belongs to whoever built it, which on
 a production database is somebody who found a slow query, and dropping it while
 passing would be the boot helping itself.

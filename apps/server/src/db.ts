@@ -432,13 +432,11 @@ const INDEX_CONFLICT = new Set([85, 86]);
  * deployment, and two answers to "is this the same index" is how a checker ends
  * up certifying a database the boot cannot start against.
  */
-export function indexShape(index: Record<string, unknown>, ignoreLifetime = false): string {
+export function indexShape(index: Record<string, unknown>): string {
   return [
     JSON.stringify(index.key),
     index.unique ? 'unique' : '',
-    ignoreLifetime || index.expireAfterSeconds === undefined
-      ? ''
-      : `ttl=${String(index.expireAfterSeconds)}`,
+    index.expireAfterSeconds === undefined ? '' : `ttl=${String(index.expireAfterSeconds)}`,
     index.partialFilterExpression ? `partial=${JSON.stringify(index.partialFilterExpression)}` : '',
     index.sparse ? 'sparse' : '',
     index.hidden ? 'hidden' : '',
@@ -452,6 +450,25 @@ interface IndexedCollection {
   createIndexes: (specs: IndexDescription[]) => Promise<unknown>;
   dropIndex: (name: string) => Promise<unknown>;
   indexes: () => Promise<Array<Record<string, unknown>>>;
+}
+
+/**
+ * What MongoDB will not hold twice on one key.
+ *
+ * A different question from {@link indexShape}, and worth its own name rather
+ * than a flag, because asking the wrong one is silent both ways: too wide and
+ * the boot deletes somebody's index on the way past, too narrow and it leaves
+ * a blocker in place and never starts.
+ *
+ * Measured, not reasoned. On one key the database holds a plain index beside a
+ * unique one, a sparse one and a partial one, and holds two different lifetimes
+ * as well, so long as anything else about them differs. It refuses exactly two
+ * kinds of second index: one that is the same apart from how long it keeps a
+ * row, and one that is the same apart from being hidden. So neither of those
+ * two belongs in the signature that decides what is in the way.
+ */
+function indexBlocker(index: Record<string, unknown>): string {
+  return indexShape({ ...index, expireAfterSeconds: undefined, hidden: undefined });
 }
 
 async function ensure(collection: IndexedCollection, specs: IndexDescription[]): Promise<void> {
@@ -497,14 +514,14 @@ async function ensure(collection: IndexedCollection, specs: IndexDescription[]):
       // from how long they keep a row. So this one comparison is the whole
       // rule, and everything else on that key belongs to whoever built it,
       // which on a production database is somebody who found a slow query.
-      const wanted = indexShape(spec as unknown as Record<string, unknown>, true);
+      const wanted = indexBlocker(spec as unknown as Record<string, unknown>);
       const blocking = new Set<string>();
       for (const one of live) {
         const name = typeof one.name === 'string' ? one.name : '';
         if (!name || name === '_id_') continue;
         // The name being asked for, whatever is under it, and the one index
         // this cannot be created beside.
-        if (name === spec.name || indexShape(one, true) === wanted) blocking.add(name);
+        if (name === spec.name || indexBlocker(one) === wanted) blocking.add(name);
       }
       for (const name of blocking) await collection.dropIndex(name).catch(() => undefined);
       await collection.createIndexes([spec]);

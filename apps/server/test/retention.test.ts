@@ -350,6 +350,36 @@ describe('starting against a database that has run another version', () => {
     assert.equal((lifetimes[0] as { expireAfterSeconds?: number }).expireAfterSeconds, 0, 'the declared one');
   });
 
+  it('starts when the blocker is hidden, which the database does not count as a difference', async () => {
+    // Hidden looks like a difference and is not one: measured, every
+    // hidden-against-visible pair on one key is refused, down to a plain index
+    // against a plain index. So a stale expiry that somebody hid rather than
+    // dropped is still in the way, and a signature that treated hiding as
+    // distinguishing would leave it there and never start.
+    const { createStore } = await import('../src/db.js');
+    const items = harness.store.items;
+    const ttl = (await items.indexes()).find(
+      (one) => (one as { expireAfterSeconds?: number }).expireAfterSeconds !== undefined,
+    ) as { name: string };
+
+    await items.dropIndex(ttl.name);
+    await items.createIndex(
+      { expiresAt: 1 },
+      { name: 'hidden_by_somebody', expireAfterSeconds: 3600, hidden: true },
+    );
+
+    const second = await createStore(harness.config.mongoUri, harness.config.mongoDb);
+    assert.ok(second, 'it starts');
+    await second.client.close();
+
+    const after = await items.indexes();
+    const lifetimes = after.filter(
+      (one) => (one as { expireAfterSeconds?: number }).expireAfterSeconds !== undefined,
+    );
+    assert.equal(lifetimes.length, 1, 'one lifetime, and the hidden one is gone');
+    assert.equal((lifetimes[0] as { name?: string }).name, ttl.name);
+  });
+
   it('starts when the name and the key are blocked by different indexes at once', async () => {
     // The harder half. Something else holds the name being asked for, and the
     // key being asked for sits under another name. Resolving only one of them
