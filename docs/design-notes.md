@@ -2402,11 +2402,23 @@ about as clear a signal as this repository gets that a sentence living in one
 function is a sentence the door beside it does not have. It lives in one
 function now, and a test asserts both doors return the same string.
 
-Measured rather than waved at, because this repository has published three
-performance sentences that turned out to be untrue in a way nobody checked: an
-empty offer costs four queries on a board that uses `blocked_by` nowhere and
-five on one that does. The extra one is the price of not reporting a deadlock
-as an ordinary quiet queue, and it is paid on the one call that has nothing
-else to do. If it ever matters, the saving is to project `status` alongside
-`blockedBy` and derive both sets from one read, rather than asking twice with
-two different status filters.
+Measured rather than waved at, and then measured again because the first
+measurement was published without saying what it counted. "Four queries" came
+from a counter wrapped around `find` and `countDocuments` alone, which is not
+what a reader hears. Counting every call the offer makes on the items
+collection, an empty one lands between six and ten, and most of that spread is
+not this change at all: it is whether the hygiene sweep fires on that request,
+which adds five writes of its own on a project nobody has touched.
+
+What this change costs is the second `waitingBlockers`: one read when no card
+that is still open or blocked uses `blocked_by`, and two when some do, because
+the second only runs if the first found rows. That is the price of not
+reporting a deadlock as an ordinary quiet queue, and it is paid on the call
+that has nothing else to do. If it ever matters, the saving is to project
+`status` alongside `blockedBy` and derive both sets from one read, rather than
+asking twice with two different status filters.
+
+The lesson is older than the number: a published cost needs its units. This
+repository has now put out four performance sentences that were untrue in a way
+nobody checked, and this one was untrue by measuring a subset and naming it
+"queries".
