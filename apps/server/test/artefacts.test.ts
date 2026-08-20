@@ -125,10 +125,16 @@ describe('the two doors this service answers on', () => {
       const fields = (answer: unknown): string => Object.keys((answer ?? {}) as object).sort().join(',');
 
       await http('POST', '/agents', { handle: 'w', description: 'does things' });
-      for (const slug of ['one', 'two', 'three']) {
+      // Enough free work for both sides of every pair. Three was one short:
+      // the lease pair took two of them and the offer pair then compared a
+      // door that got a card with a door that was told there was nothing
+      // left, which is two branches rather than two doors.
+      for (const slug of ['one', 'two', 'three', 'four', 'five', 'six']) {
         await http('POST', '/items', { slug, title: slug, actor: 'w' });
       }
 
+      /** Pairs where both sides have to come back holding something. */
+      const mustCarry = new Set(['be offered work', 'be offered work and hold it']);
       const pairs: Array<[string, () => Promise<unknown>, () => Promise<unknown>]> = [
         ['read one', async () => (await http('GET', '/items/one')).json(), () => mcp('read_item', { slug: 'one' })],
         ['read a page', async () => (await http('GET', '/items?limit=2')).json(), () => mcp('list_items', { limit: 2 })],
@@ -152,8 +158,25 @@ describe('the two doors this service answers on', () => {
 
       const apart: string[] = [];
       for (const [what, overHttp, overMcp] of pairs) {
-        const one = fields(await overHttp());
-        const other = fields(await overMcp());
+        const overOne = await overHttp();
+        const overOther = await overMcp();
+        if (mustCarry.has(what)) {
+          // Otherwise this passes by comparing two doors that both said no,
+          // or one that said yes with one that had nothing left to say it
+          // about. A branch nobody reached is a branch nobody compared.
+          for (const [door, answer] of [
+            ['http', overOne],
+            ['mcp', overOther],
+          ] as Array<[string, Record<string, unknown>]>) {
+            assert.notEqual(
+              answer.item ?? null,
+              null,
+              `${what}: the ${door} door was offered nothing, so the pair compares nothing`,
+            );
+          }
+        }
+        const one = fields(overOne);
+        const other = fields(overOther);
         if (one !== other) apart.push(`${what}: http has ${one}, mcp has ${other}`);
       }
       assert.deepEqual(apart, [], 'both doors answer with the same fields');

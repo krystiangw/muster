@@ -2532,3 +2532,13 @@ The mutation that proved it took two goes. The first landed in a tool
 description rather than in the answer, passed, and proved nothing, which is the
 same trap as the door whose path was guessed: a mutation has to be checked for
 having reached the thing it claims to test.
+
+**And the parity test compared two branches rather than two doors.** Review
+found it the run after it shipped: three cards on the board, the lease pair
+took two, and the offer pair then compared a door that got a card with a door
+that was told there was nothing left. Both answers were correct and the
+comparison was worthless, which is the same shape as a fixture that does not
+match the question. There is enough work for both sides now, and the pairs that
+have to come back holding something say so and fail when they do not. Starving
+one side again fails by name rather than passing quietly.
+
