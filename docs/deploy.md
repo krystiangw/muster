@@ -118,6 +118,22 @@ would change the thing it was rehearsing. Use it instead of pointing a scratch
 `MUSTER_HOME` at production, which on 2026-08-19 put three urgent questions on
 the operator's board and mailed one of them at eleven at night.
 
+**The other thing only an index keeps.** Every promise about forgetting rests on
+a TTL index and every promise about one name meaning one thing on a unique one,
+and both are built at boot, so a start that failed halfway leaves a running
+service with a promise it no longer keeps and nothing red anywhere. The suite
+proves the code creates them; it cannot prove this deployment has them.
+
+```bash
+MONGODB_URI=... npx tsx apps/server/tools/index-drift.mts
+```
+
+It builds a database from the same code, reads both, prints the difference and
+exits 1 on any. Run it after a schema change and before saying a release landed.
+Measured 2026-08-20: 51 indexes across 14 collections, none missing and none
+present that the code does not declare. Deliberately not part of the watchdog,
+which shares nothing with the database on purpose.
+
 And the half that was missing until tonight: **nothing noticed when the archives
 stopped.** The cron runs on this machine, not on the dyno, so every check the
 service makes stays green through a laptop asleep at the wrong hour or a moved

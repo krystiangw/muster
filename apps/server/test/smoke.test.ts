@@ -115,6 +115,49 @@ describe('the scripts that check production, run against a harness', () => {
     assert.match(out, /created a project/);
   });
 
+  it('compares a deployment\u2019s indexes against the ones the code declares', async () => {
+    // A tool that reports no difference because it is broken is worse than no
+    // tool, and this one exists to be believed: the promises about forgetting
+    // and about one name meaning one thing are kept by indexes and by nothing
+    // else. So it runs here against a database this suite built, where the
+    // answer has to be none, and then again against one index dropped by hand,
+    // where it has to say which.
+    const clean = await run(process.execPath, ['--import', 'tsx', 'tools/index-drift.mts'], {
+      cwd: join(HERE, 'apps/server'),
+      encoding: 'utf8',
+      env: { ...process.env, MONGODB_URI: harness.config.mongoUri, MONGODB_DB: harness.config.mongoDb },
+    });
+    assert.match(clean.stdout, /0 differences/);
+    assert.match(clean.stdout, /\d+ indexes declared across \d+ collections/);
+
+    // The failure it is for. `items` carries the TTL that makes an unclaimed
+    // board go away, so dropping it is a promise quietly stopping.
+    const ttl = (await harness.store.items.indexes()).find(
+      (one) => (one as { expireAfterSeconds?: number }).expireAfterSeconds !== undefined,
+    ) as { name: string } | undefined;
+    assert.ok(ttl, 'the fixture: items carries a TTL index');
+    await harness.store.items.dropIndex(ttl.name);
+    try {
+      const dropped = await run(process.execPath, ['--import', 'tsx', 'tools/index-drift.mts'], {
+        cwd: join(HERE, 'apps/server'),
+        encoding: 'utf8',
+        env: { ...process.env, MONGODB_URI: harness.config.mongoUri, MONGODB_DB: harness.config.mongoDb },
+      }).catch((error: { stdout?: string; code?: number }) => error);
+      const said = (dropped as { stdout?: string }).stdout ?? '';
+      assert.match(said, /missing\s+items/);
+      assert.match(said, /ttl=/);
+      assert.equal((dropped as { code?: number }).code, 1, 'and it fails, so a release script can use it');
+    } finally {
+      // Put it back through the connection this suite already holds. Building a
+      // second store here would open a client nothing closes, and the test
+      // runner waits on the handle rather than finishing.
+      await harness.store.items.createIndex(
+        { expiresAt: 1 },
+        { name: ttl.name, expireAfterSeconds: 0 },
+      );
+    }
+  });
+
   it('says nothing has been marked rather than claiming a date it does not have', async () => {
     // The branch nobody had run: a deployment where no check has identified
     // itself yet has no date to print, and printing one would be a claim. It
