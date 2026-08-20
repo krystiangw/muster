@@ -288,6 +288,39 @@ describe('starting against a database that has run another version', () => {
     await items.dropIndex('by_hand_for_a_slow_query');
   });
 
+  it('leaves a hand-built index alone even when its lifetime differs', async () => {
+    // The narrower half of the same measurement: two lifetimes on one key are
+    // fine as long as anything else about the two indexes differs. Only the
+    // pair that is the same index apart from how long it keeps a row is
+    // refused, so this one is nobody's obstacle either.
+    const { createStore } = await import('../src/db.js');
+    const items = harness.store.items;
+    const ttl = (await items.indexes()).find(
+      (one) => (one as { expireAfterSeconds?: number }).expireAfterSeconds !== undefined,
+    ) as { name: string };
+
+    await items.createIndex(
+      { expiresAt: 1 },
+      { name: 'held_longer_for_open_work', expireAfterSeconds: 3600, partialFilterExpression: { status: 'open' } },
+    );
+    await items.dropIndex(ttl.name);
+    await items.createIndex({ expiresAt: 1 }, { name: 'renamed_expiry', expireAfterSeconds: 0 });
+
+    const second = await createStore(harness.config.mongoUri, harness.config.mongoDb);
+    await second.client.close();
+
+    const after = await items.indexes();
+    assert.ok(
+      after.some((one) => one.name === 'held_longer_for_open_work'),
+      'the hand-built lifetime is still there',
+    );
+    assert.ok(
+      after.some((one) => one.name === ttl.name && (one as { expireAfterSeconds?: number }).expireAfterSeconds === 0),
+      'and the declared one is back under its own name',
+    );
+    await items.dropIndex('held_longer_for_open_work');
+  });
+
   it('starts when a stale lifetime sits on the key it needs', async () => {
     // Measured of MongoDB rather than assumed: on one key it holds a plain
     // index beside a unique one, a sparse one and a partial one, and refuses

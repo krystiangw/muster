@@ -54,7 +54,11 @@ async function indexesOf(connection: string, database: string): Promise<Map<stri
       .indexes()) as Array<Record<string, unknown>>;
     found.set(
       collection.name,
-      new Set(indexes.filter((one) => one.name !== '_id_').map(shape)),
+      // Wrapped, not passed by reference: `map` hands the callback the element
+      // index as its second argument, which this function reads as "ignore the
+      // lifetime", so the first index in every collection would have been
+      // compared one way and the rest another.
+      new Set(indexes.filter((one) => one.name !== '_id_').map((one) => shape(one))),
     );
   }
   await client.close();
